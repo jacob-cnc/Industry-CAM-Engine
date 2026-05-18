@@ -1,23 +1,26 @@
+# LinuxCNC runtime files
+*.var
+*.var.bak
+autosave.halscope
+halshow.preferences
+*.desktop
+
 # Python
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
-*.egg-info/
-dist/
-build/
-*.egg
+*.pyc
+*.pyo
 
 # Virtual environments
 .venv/
 venv/
-env/
 
 # Testing
 .hypothesis/
 .pytest_cache/
 
+# Local backups
+backups/
+
 # OS
-Thumbs.db
-Desktop.ini
 .DS_Store
+Thumbs.db
