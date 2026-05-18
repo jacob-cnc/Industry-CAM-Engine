@@ -1,0 +1,16 @@
+{
+  "enabled": true,
+  "name": "Update Linux Package",
+  "description": "Re-packages the Ship to LinuxPC folder whenever a Python source file is edited, ensuring the Linux deployment stays in sync with development.",
+  "version": "1",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      "*.py"
+    ]
+  },
+  "then": {
+    "type": "runCommand",
+    "command": "python \"Ship to LinuxPC/package_for_linux.py\""
+  }
+}

@@ -1,0 +1,29 @@
+# ignore objects, anywhere in the tree.
+*.o
+*.so
+*.a
+
+
+#ignore the stuff cmake creates
+CMakeFiles/
+CMakeCache.txt
+*Makefile
+install_manifest.txt
+
+#ignore the Doxygen generated files
+doc/
+
+build/
+.DS_Store
+.vscode
+node_modules
+src/npmpackage/browser.js
+src/npmpackage/lib
+src/npmpackage/build
+
+_skbuild/
+dist/
+*.egg-info
+_build/
+boost*
+env/

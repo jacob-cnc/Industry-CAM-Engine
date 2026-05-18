@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <g>
+    <circle cx="32" cy="32" r="28" fill="#f6fafd" stroke="#2d7fc1" stroke-width="2"/>
+    <line x1="32" y1="32" x2="54" y2="32" stroke="#e53c2e" stroke-width="3"/>
+    <line x1="32" y1="32" x2="32" y2="10" stroke="#47a447" stroke-width="3"/>
+    <line x1="32" y1="32" x2="12" y2="52" stroke="#2372b6" stroke-width="3"/>
+    <text x="36" y="20" font-family="Verdana" font-size="11" fill="#2d7fc1" font-weight="bold">G54</text>
+  </g>
+</svg>

@@ -1,0 +1,7 @@
+{
+    "recommendations": [
+        "gruntfuggly.todo-tree",
+        "ms-python.flake8",
+        "ms-python.autopep8"
+    ]
+}

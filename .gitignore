@@ -16,35 +16,8 @@ env/
 # Testing
 .hypothesis/
 .pytest_cache/
-htmlcov/
-.coverage
-coverage.xml
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Kiro
-.kiro/
 
 # OS
 Thumbs.db
 Desktop.ini
 .DS_Store
-
-# Project-specific
-backups/
-Ship to LinuxPC/
-
-# Third-party reference repos (large, have their own git history)
-reference/linuxcnc-source/
-reference/liblathe/
-reference/opencamlib/
-reference/bapt-cam/
-reference/freecad-machines/
-reference/freecad-turning-addon/
-
-# Debug/scratch scripts (prefix with _)
-_*.py

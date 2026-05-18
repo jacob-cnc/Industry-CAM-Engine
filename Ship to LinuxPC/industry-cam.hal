@@ -1,0 +1,252 @@
+# ============================================================================
+# industry-cam.hal — Main HAL configuration
+# Mesa 7i96s + 7i85s, closed-loop steppers, linear encoders,
+# spindle encoder, 2x MPG, jog buttons
+#
+# Pin assignments (physical wiring map):
+#   7i96s TB1: Step/Dir 0 = Z stepper, Step/Dir 1 = X stepper
+#   7i96s TB2: Spindle encoder (onboard encoder)
+#   7i96s TB3: P1=HomeZ, P2=(commented out), P3=(commented out), P4=HomeX,
+#              P5=EStop, P6=JogZ-, P7=JogZ+, P8=JogX-, P9=JogX+,
+#              P10=CycleStart, P11=CycleStop, P12=24v-
+#   7i85s TB1: X/Z linear encoders (Sino KA300/KA500)
+#   7i85s TB2: X MPG encoder
+#   7i85s TB3: Z MPG encoder
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# 1. Load realtime components
+# ----------------------------------------------------------------------------
+
+loadrt hostmot2 use_board_name=1
+loadrt hm2_eth board_ip="192.168.1.121" config="num_encoders=5 num_stepgens=2 sserial_port_0=00000000"
+
+# PID controllers for closed-loop stepper correction (X and Z)
+loadrt pid names=pid.x,pid.z
+
+# Spindle near/at-speed detection
+loadrt near names=near-spindle
+
+# Mux for MPG jog scale selection (GUI-controlled until rotary switch is wired)
+loadrt mux4 names=mux4.jogscale-x,mux4.jogscale-z
+
+# Logic for cycle start/resume
+loadrt or2 names=or2.cycle-start-resume
+
+# Debounce for switches and buttons
+loadrt debounce cfg=12
+setp debounce.0.delay 5
+
+# ----------------------------------------------------------------------------
+# 2. Add functions to servo thread
+# ----------------------------------------------------------------------------
+addf hm2_7i96s.0.read          servo-thread
+addf debounce.0                     servo-thread
+addf pid.x.do-pid-calcs            servo-thread
+addf pid.z.do-pid-calcs            servo-thread
+addf near-spindle                   servo-thread
+addf mux4.jogscale-x               servo-thread
+addf mux4.jogscale-z               servo-thread
+addf or2.cycle-start-resume        servo-thread
+addf hm2_7i96s.0.write         servo-thread
+
+# ============================================================================
+# 3. Step Generator Configuration
+#    CRITICAL: stepgen.00 = Z axis (Joint 1), stepgen.01 = X axis (Joint 0)
+#    This is REVERSED from joint numbering due to physical TB1 wiring order.
+# ============================================================================
+
+# --- Z Axis Stepgen — stepgen.00 (TB1 Step/Dir 0) ---
+setp hm2_7i96s.0.stepgen.00.dirsetup        [JOINT_1]DIRSETUP
+setp hm2_7i96s.0.stepgen.00.dirhold          [JOINT_1]DIRHOLD
+setp hm2_7i96s.0.stepgen.00.steplen          [JOINT_1]STEPLEN
+setp hm2_7i96s.0.stepgen.00.stepspace        [JOINT_1]STEPSPACE
+setp hm2_7i96s.0.stepgen.00.position-scale   [JOINT_1]STEP_SCALE
+setp hm2_7i96s.0.stepgen.00.maxvel           [JOINT_1]STEPGEN_MAXVEL
+setp hm2_7i96s.0.stepgen.00.maxaccel         [JOINT_1]STEPGEN_MAXACCEL
+setp hm2_7i96s.0.stepgen.00.step_type        0
+setp hm2_7i96s.0.stepgen.00.control-type     1
+
+# --- X Axis Stepgen — stepgen.01 (TB1 Step/Dir 1) ---
+setp hm2_7i96s.0.stepgen.01.dirsetup        [JOINT_0]DIRSETUP
+setp hm2_7i96s.0.stepgen.01.dirhold          [JOINT_0]DIRHOLD
+setp hm2_7i96s.0.stepgen.01.steplen          [JOINT_0]STEPLEN
+setp hm2_7i96s.0.stepgen.01.stepspace        [JOINT_0]STEPSPACE
+setp hm2_7i96s.0.stepgen.01.position-scale   [JOINT_0]STEP_SCALE
+setp hm2_7i96s.0.stepgen.01.maxvel           [JOINT_0]STEPGEN_MAXVEL
+setp hm2_7i96s.0.stepgen.01.maxaccel         [JOINT_0]STEPGEN_MAXACCEL
+setp hm2_7i96s.0.stepgen.01.step_type        0
+setp hm2_7i96s.0.stepgen.01.control-type     1
+
+# ============================================================================
+# 4. Linear Encoder Configuration (7i85s TB1)
+#    encoder.00 = X axis, encoder.01 = Z axis
+# ============================================================================
+
+setp hm2_7i96s.0.encoder.00.scale  [JOINT_0]ENCODER_SCALE
+setp hm2_7i96s.0.encoder.00.filter  1
+
+setp hm2_7i96s.0.encoder.01.scale  [JOINT_1]ENCODER_SCALE
+setp hm2_7i96s.0.encoder.01.filter  1
+
+# ============================================================================
+# 5. PID — Closed-loop stepper correction
+#    Encoder provides position feedback, PID outputs velocity command to stepgen.
+#    FF1=1.0 is critical — it means "trust the velocity command, correct errors"
+# ============================================================================
+
+# --- X Axis PID (Joint 0, encoder.00 → pid.x → stepgen.01) ---
+setp pid.x.Pgain     [JOINT_0]P
+setp pid.x.Igain     [JOINT_0]I
+setp pid.x.Dgain     [JOINT_0]D
+setp pid.x.FF0       [JOINT_0]FF0
+setp pid.x.FF1       [JOINT_0]FF1
+setp pid.x.FF2       [JOINT_0]FF2
+setp pid.x.bias      [JOINT_0]BIAS
+setp pid.x.deadband  [JOINT_0]DEADBAND
+setp pid.x.maxoutput [JOINT_0]MAX_OUTPUT
+setp pid.x.maxerror  [JOINT_0]MAX_ERROR
+
+net x-pos-cmd    joint.0.motor-pos-cmd  => pid.x.command
+net x-pos-fb     hm2_7i96s.0.encoder.00.position => pid.x.feedback joint.0.motor-pos-fb
+net x-pid-out    pid.x.output           => hm2_7i96s.0.stepgen.01.velocity-cmd
+net x-enable     joint.0.amp-enable-out => pid.x.enable hm2_7i96s.0.stepgen.01.enable
+
+# --- Z Axis PID (Joint 1, encoder.01 → pid.z → stepgen.00) ---
+setp pid.z.Pgain     [JOINT_1]P
+setp pid.z.Igain     [JOINT_1]I
+setp pid.z.Dgain     [JOINT_1]D
+setp pid.z.FF0       [JOINT_1]FF0
+setp pid.z.FF1       [JOINT_1]FF1
+setp pid.z.FF2       [JOINT_1]FF2
+setp pid.z.bias      [JOINT_1]BIAS
+setp pid.z.deadband  [JOINT_1]DEADBAND
+setp pid.z.maxoutput [JOINT_1]MAX_OUTPUT
+setp pid.z.maxerror  [JOINT_1]MAX_ERROR
+
+net z-pos-cmd    joint.1.motor-pos-cmd  => pid.z.command
+net z-pos-fb     hm2_7i96s.0.encoder.01.position => pid.z.feedback joint.1.motor-pos-fb
+net z-pid-out    pid.z.output           => hm2_7i96s.0.stepgen.00.velocity-cmd
+net z-enable     joint.1.amp-enable-out => pid.z.enable hm2_7i96s.0.stepgen.00.enable
+
+# ============================================================================
+# 6. Spindle Encoder (7i96s TB2)
+# ============================================================================
+setp hm2_7i96s.0.encoder.02.scale  [SPINDLE_0]ENCODER_SCALE
+setp hm2_7i96s.0.encoder.02.filter 1
+
+net spindle-pos      hm2_7i96s.0.encoder.02.position    => spindle.0.revs
+net spindle-vel      hm2_7i96s.0.encoder.02.velocity     => spindle.0.speed-in near-spindle.in1
+net spindle-index    hm2_7i96s.0.encoder.02.index-enable <=> spindle.0.index-enable
+
+setp near-spindle.scale 1.1
+setp near-spindle.difference 0
+net spindle-cmd      spindle.0.speed-out-abs => near-spindle.in2
+net spindle-at-speed near-spindle.out        => spindle.0.at-speed
+
+# ============================================================================
+# 7. Home Switches (7i96s TB3)
+#    P1 (gpio.000) = Z home, P4 (gpio.003) = X home
+# ============================================================================
+
+net z-home-raw   hm2_7i96s.0.gpio.000.in_not => debounce.0.0.in
+net x-home-raw   hm2_7i96s.0.gpio.003.in_not => debounce.0.3.in
+
+net z-home-sw    debounce.0.0.out => joint.1.home-sw-in
+net x-home-sw    debounce.0.3.out => joint.0.home-sw-in
+
+# --- TB3 P2 (gpio.001) and P3 (gpio.002) ---
+# These pins have NC limit switches physically wired but are NOT used
+# as limit inputs. Software limits handle travel boundaries.
+# Commented out to prevent any unintended interaction.
+# If you want to use them as additional home switches or hard limits
+# in the future, uncomment and wire appropriately.
+#
+# net z-plus-limit-raw  hm2_7i96s.0.gpio.001.in_not => debounce.0.1.in
+# net x-minus-limit-raw hm2_7i96s.0.gpio.002.in_not => debounce.0.2.in
+
+# ============================================================================
+# 8. E-Stop (7i96s TB3 P5 → gpio.004)
+# ============================================================================
+net estop-ext    hm2_7i96s.0.gpio.004.in_not => iocontrol.0.emc-enable-in
+
+# ============================================================================
+# 9. Jog Buttons — velocity mode (7i96s TB3 P6–P9)
+# ============================================================================
+
+net jog-z-minus-raw  hm2_7i96s.0.gpio.005.in_not => debounce.0.4.in
+net jog-z-plus-raw   hm2_7i96s.0.gpio.006.in_not => debounce.0.5.in
+net jog-x-minus-raw  hm2_7i96s.0.gpio.007.in_not => debounce.0.6.in
+net jog-x-plus-raw   hm2_7i96s.0.gpio.008.in_not => debounce.0.7.in
+
+net jog-z-minus  debounce.0.4.out => halui.joint.1.minus halui.axis.z.minus
+net jog-z-plus   debounce.0.5.out => halui.joint.1.plus  halui.axis.z.plus
+net jog-x-minus  debounce.0.6.out => halui.joint.0.minus halui.axis.x.minus
+net jog-x-plus   debounce.0.7.out => halui.joint.0.plus  halui.axis.x.plus
+
+# Default jog speed for button jogging (1.0 in/sec = 60 IPM)
+# This will be overridden by the GUI or panel knob when available
+setp halui.axis.x.jog-speed 1.0
+setp halui.axis.z.jog-speed 1.0
+setp halui.joint.0.jog-speed 1.0
+setp halui.joint.1.jog-speed 1.0
+
+# ============================================================================
+# 10. Cycle Start/Resume and Stop (7i96s TB3 P10–P11)
+# ============================================================================
+
+net cycle-go-raw     hm2_7i96s.0.gpio.009.in_not => debounce.0.8.in
+net cycle-stop-raw   hm2_7i96s.0.gpio.010.in_not => debounce.0.9.in
+
+net cycle-go-btn     debounce.0.8.out => or2.cycle-start-resume.in0
+net cycle-go-btn                      => or2.cycle-start-resume.in1
+net cycle-start      or2.cycle-start-resume.out => halui.program.run halui.program.resume
+
+net cycle-stop       debounce.0.9.out => halui.program.stop
+
+# ============================================================================
+# 11. MPG Handwheels (7i85s TB2=X, TB3=Z)
+# ============================================================================
+
+setp hm2_7i96s.0.encoder.03.scale 100
+setp hm2_7i96s.0.encoder.03.filter 1
+
+setp hm2_7i96s.0.encoder.04.scale 100
+setp hm2_7i96s.0.encoder.04.filter 1
+
+# Jog scale — GUI-controlled until panel rotary switch is wired
+# Default: 0.001" per MPG click
+setp mux4.jogscale-x.in0 0.0001
+setp mux4.jogscale-x.in1 0.001
+setp mux4.jogscale-x.in2 0.01
+setp mux4.jogscale-x.in3 0.1
+
+setp mux4.jogscale-z.in0 0.0001
+setp mux4.jogscale-z.in1 0.001
+setp mux4.jogscale-z.in2 0.01
+setp mux4.jogscale-z.in3 0.1
+
+# Default to 0.001" (position 1)
+setp mux4.jogscale-x.sel0 1
+setp mux4.jogscale-x.sel1 0
+setp mux4.jogscale-z.sel0 1
+setp mux4.jogscale-z.sel1 0
+
+# MPG connections
+net mpg-x-counts   hm2_7i96s.0.encoder.03.count  => joint.0.jog-counts axis.x.jog-counts
+net mpg-x-scale    mux4.jogscale-x.out               => joint.0.jog-scale axis.x.jog-scale
+net mpg-x-enable   joint.0.jog-enable                 <= axis.x.jog-enable
+setp joint.0.jog-vel-mode 0
+setp axis.x.jog-vel-mode 0
+
+net mpg-z-counts   hm2_7i96s.0.encoder.04.count  => joint.1.jog-counts axis.z.jog-counts
+net mpg-z-scale    mux4.jogscale-z.out               => joint.1.jog-scale axis.z.jog-scale
+net mpg-z-enable   joint.1.jog-enable                 <= axis.z.jog-enable
+setp joint.1.jog-vel-mode 0
+setp axis.z.jog-vel-mode 0
+
+# ============================================================================
+# 12. Manual Tool Change
+# ============================================================================
+net tool-change   iocontrol.0.tool-change  => iocontrol.0.tool-changed
+net tool-prepare  iocontrol.0.tool-prepare => iocontrol.0.tool-prepared

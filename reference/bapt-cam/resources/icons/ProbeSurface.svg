@@ -1,0 +1,13 @@
+<svg width="64" height="64" viewBox="0 0 64 64"
+     xmlns="http://www.w3.org/2000/svg">
+  <!-- Surface -->
+  <rect x="8" y="44" width="48" height="8" rx="2" fill="#b8b8b8" stroke="#666" stroke-width="2"/>
+  <!-- Probe body (vertical shaft) -->
+  <rect x="29" y="12" width="6" height="28" rx="3" fill="#3a7bd5" stroke="#1c3556" stroke-width="1.5"/>
+  <!-- Probe tip (circle) -->
+  <circle cx="32" cy="44" r="5" fill="#fff" stroke="#3a7bd5" stroke-width="2"/>
+  <!-- Contact effect (small yellow highlight) -->
+  <circle cx="32" cy="48" r="2" fill="#ffe066" stroke="gold" stroke-width="1"/>
+  <!-- Down arrow -->
+  <polygon points="32,36 28,40 36,40" fill="#3a7bd5"/>
+</svg>

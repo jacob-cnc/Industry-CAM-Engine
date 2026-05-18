@@ -1,0 +1,27 @@
+{
+    // "git.autofetch": true,
+    // "editor.multiCursorModifier": "ctrlCmd",
+    "python.pythonPath": "/usr/bin/python3",
+    
+    //"python.envFile": "${workspaceFolder}/.env",
+    "python.autoComplete.extraPaths": [
+        "D:/Program Files/FreeCAD 1.0/bin",
+        "D:/Program Files/FreeCAD 1.0/lib",
+        "D:/Program Files/FreeCAD 1.0/Ext",
+        "D:/Program Files/FreeCAD 1.0/Gui",
+        "D:/Program Files/FreeCAD 1.0/Mod",
+
+    ],
+    "[python]": {
+        "diffEditor.ignoreTrimWhitespace": false,
+        "editor.defaultColorDecorators": "never",
+        "gitlens.codeLens.symbolScopes": [
+            "!Module"
+        ],
+        "editor.formatOnType": true,
+        "editor.wordBasedSuggestions": "off",
+        "editor.defaultFormatter": "ms-python.autopep8",
+        "editor.formatOnSave": true
+    }
+    // "python.languageServer": "Pylance"
+}

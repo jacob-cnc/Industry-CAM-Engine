@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   xmlns:dc="http://purl.org/dc/elements/1.1/"
+   xmlns:cc="http://creativecommons.org/ns#"
+   xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+   xmlns:svg="http://www.w3.org/2000/svg"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:xlink="http://www.w3.org/1999/xlink"
+   width="64px"
+   height="64px"
+   viewBox="0 0 64 64"
+   version="1.1"
+   id="svg8">
+  <defs
+     id="defs2">
+    <linearGradient
+       id="linearGradient3046">
+      <stop
+         style="stop-color:#0000ff;stop-opacity:1;"
+         offset="0"
+         id="stop3042" />
+      <stop
+         style="stop-color:#0000ff;stop-opacity:0;"
+         offset="1"
+         id="stop3044" />
+    </linearGradient>
+    <linearGradient
+       xlink:href="#linearGradient3046"
+       id="linearGradient3048"
+       x1="10"
+       y1="32"
+       x2="54"
+       y2="32"
+       gradientUnits="userSpaceOnUse" />
+  </defs>
+  <g id="contour">
+    <!-- Contour rouge -->
+    <path
+       style="fill:none;stroke:#ff0000;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;stroke-opacity:1"
+       d="M 12,12 L 52,12 L 52,52 L 12,52 Z"
+       id="contour-path" />
+    
+    <!-- Outil de fraisage (cercle bleu) -->
+    <circle
+       style="fill:#0000ff;stroke:#000000;stroke-width:1"
+       id="tool"
+       cx="32"
+       cy="12"
+       r="4" />
+    
+    <!-- Chemin d'usinage (ligne pointillée bleue) -->
+    <path
+       style="fill:none;stroke:#0000ff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:2, 2;stroke-opacity:1"
+       d="M 8,8 L 56,8 L 56,56 L 8,56 Z"
+       id="machining-path" />
+    
+    <!-- Flèches indiquant la direction -->
+    <path
+       style="fill:#0000ff;stroke:none"
+       d="M 40,8 L 44,6 L 40,4 Z"
+       id="arrow1" />
+    
+    <path
+       style="fill:#0000ff;stroke:none"
+       d="M 56,40 L 58,44 L 60,40 Z"
+       id="arrow2" />
+    
+    <path
+       style="fill:#0000ff;stroke:none"
+       d="M 24,56 L 20,58 L 24,60 Z"
+       id="arrow3" />
+    
+    <path
+       style="fill:#0000ff;stroke:none"
+       d="M 8,24 L 6,20 L 4,24 Z"
+       id="arrow4" />
+  </g>
+</svg>

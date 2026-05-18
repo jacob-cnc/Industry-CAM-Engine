@@ -1,0 +1,41 @@
+{
+  "name": "@opencamlib/opencamlib",
+  "version": "2022.12.18",
+  "description": "opencamlib for the web compiled with emscripten",
+  "main": "./lib/napi/index.js",
+  "browser": "./browser.js",
+  "scripts": {
+    "start": "tsc -w",
+    "build-node": "tsc",
+    "build-emscripten": "tsc && browserify -p browserify-derequire --standalone ocl lib/emscripten/index.js > browser.js",
+    "build": "npm run build-emscripten"
+  },
+  "keywords": [
+    "opencamlib",
+    "cam",
+    "cnc",
+    "waterline",
+    "push cutter",
+    "drop cutter"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aewallin/opencamlib.git"
+  },
+  "bugs": {
+    "url": "https://github.com/aewallin/opencamlib/issues"
+  },
+  "homepage": "https://github.com/aewallin/opencamlib#readme",
+  "author": "Koen Schmeets",
+  "license": "LGPL-3.0",
+  "devDependencies": {
+    "@types/node": "^18.11.11",
+    "browserify": "^17.0.0",
+    "browserify-derequire": "^1.1.1",
+    "isomorphic-fetch": "^3.0.0",
+    "typescript": "^4.9.3"
+  },
+  "dependencies": {
+    "stl": "^1.1.1"
+  }
+}

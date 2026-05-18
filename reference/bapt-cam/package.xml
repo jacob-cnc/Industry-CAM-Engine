@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<package format="1" xmlns="https://wiki.freecad.org/Package_Metadata">
+
+  <name>Bapt CAM</name>
+
+  <description>Bapt workbench provide functionality to prepare job and generate Gcode for 4 or 5 axis (2 axis in first time will be nice :)) cnc .</description>
+
+  <version>0.1.2</version>
+
+  <date>2026-01-21</date>
+
+  <maintainer email="Baptou_88@gmail.com"> Baptou88</maintainer>
+
+  <license file="LICENSE">LGPL-2.1-or-later</license>
+
+  <url type="website">https://github.com/Baptou88/Bapt_Cam/blob/main/CHANGELOG.md</url>
+
+  <url branch="main" type="repository">https://github.com/Baptou88/Bapt_Cam</url>
+
+  <url type="readme">https://github.com/Baptou88/Bapt_Cam/blob/main/README.md</url>
+
+  <author>Baptou_88 (https://github.com/Baptou88)</author>
+
+  <icon>Resources/icons/BaptWorkbench.svg</icon>
+
+  <content>
+    <macro>
+      <name>HighlightCollisions</name>
+      <subdirectory>./</subdirectory>
+      <file>macros/HighlightCollisions.FCMacro</file>
+    </macro>
+    <workbench>
+      <classname>BaptWorkbench</classname>
+      <subdirectory>./</subdirectory>
+    </workbench>
+  </content>
+
+</package>

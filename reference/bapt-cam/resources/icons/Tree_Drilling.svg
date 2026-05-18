@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+    <!-- Corps de la perceuse -->
+    <path d="M 32,8 L 28,12 L 28,44 L 36,44 L 36,12 L 32,8 Z" 
+          style="fill:#729fcf;stroke:#000000;stroke-width:2"/>
+    
+    <!-- Pointe de la perceuse -->
+    <path d="M 28,44 L 32,52 L 36,44 L 28,44 Z"
+          style="fill:#ef2929;stroke:#000000;stroke-width:2"/>
+    
+    <!-- Cercles concentriques représentant la rotation -->
+    <circle cx="32" cy="28" r="12" 
+            style="fill:none;stroke:#729fcf;stroke-width:2;stroke-dasharray:4,4"/>
+    <circle cx="32" cy="28" r="8" 
+            style="fill:none;stroke:#729fcf;stroke-width:2;stroke-dasharray:3,3"/>
+    
+    <!-- Flèches de rotation -->
+    <path d="M 44,28 A 12,12 0 0 1 32,40 L 34,36"
+          style="fill:none;stroke:#204a87;stroke-width:2"/>
+    <path d="M 20,28 A 12,12 0 0 0 32,16 L 30,20"
+          style="fill:none;stroke:#204a87;stroke-width:2"/>
+</svg>

@@ -1,0 +1,59 @@
+autosave.halscope
+build-stamp
+*.pyc
+*.o
+*.ko
+*.so
+*.so.*
+*.a
+*.pdf
+*.tex
+*.mod.c
+*.cmd
+.tmp*
+src/*.mod
+# Ignore generated html files, 
+/docs/src/*/*.html
+# docs/html/.gitignore is for the html directory
+debian/*.debhelper.log
+rtlib/Module.symvers
+share/*/*.desktop
+share/menus/CNC.menu
+share/desktop-directories/linuxcnc-cnc.directory
+share/desktop-directories/linuxcnc-ref.directory
+share/desktop-directories/linuxcnc-doc.directory
+share/linuxcnc/mesa_modbus.c.tmpl
+src/modules.order
+/configs/*/emc.nml
+!/configs/common/emc.nml
+/docs/src/source-highlight/local
+docs/src/*/gui/gmoccapy_release_notes.txt
+lib/python/gremlin.py
+lib/python/qt5_graphics.py
+lib/python/touchy
+configs/sim/gmoccapy/*.pref
+configs/sim/gmoccapy/gmoccapy_plasma/*.pref
+configs/sim/gmoccapy/gmoccapy-JA/*.pref
+configs/**/*.tbl.bak
+configs/**/halshow.preferences
+# Miscellaneous generated files (Rob)
+cscope
+cscope.*
+*.kdev*
+oprofile*
+*.log
+position.txt
+# *.9
+*.glade.h
+# Ignore test results
+*.result
+# Ignore temp files
+*.swp
+*~
+# Ignore po4a temp files
+*.failed.po
+*-new_??.po
+# Ignore stamp files
+*.*-stamp
+# Ignore VSCode settings
+.vscode/settings.json

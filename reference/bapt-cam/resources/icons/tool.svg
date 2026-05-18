@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" aria-label="Tool icon">
+  <defs>
+    <linearGradient id="shaftGrad" x1="0" x2="1">
+      <stop offset="0" stop-color="#d0d0d0"/>
+      <stop offset="1" stop-color="#9a9a9a"/>
+    </linearGradient>
+    <linearGradient id="fluteGrad" x1="0" x2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.6"/>
+      <stop offset="1" stop-color="#cccccc" stop-opacity="0.2"/>
+    </linearGradient>
+    <filter id="shadow" x="-40%" y="-40%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+
+  <!-- handle / shank -->
+  <rect x="8" y="42" width="56" height="18" rx="3" fill="#2f2f2f" filter="url(#shadow)"/>
+  <rect x="8" y="42" width="56" height="18" rx="3" fill="url(#shaftGrad)" opacity="0.95"/>
+
+  <!-- transition collar -->
+  <rect x="62" y="38" width="8" height="26" rx="2" fill="#555" />
+
+  <!-- main shaft -->
+  <g transform="translate(70, 32)">
+    <rect x="0" y="8" width="10" height="8" rx="1.5" fill="url(#shaftGrad)"/>
+    <rect x="0" y="16" width="54" height="8" rx="1.5" fill="url(#shaftGrad)"/>
+  </g>
+
+  <!-- flutes: two mirrored paths -->
+  <g transform="translate(84,36)">
+    <path d="M0 8 C10 8, 18 20, 28 20 C38 20, 46 8, 54 8" stroke="#bfbfbf" stroke-width="6" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.95"/>
+    <path d="M4 18 C14 18, 22 30, 32 30 C42 30, 50 18, 58 18" stroke="url(#fluteGrad)" stroke-width="6" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>
+  </g>
+
+  <!-- tip -->
+  <g transform="translate(138,36)">
+    <path d="M-84 28 L-64 44 L-44 28 L-64 12 Z" fill="#e6e6e6" stroke="#9a9a9a" stroke-width="1.2" />
+    <path d="M-64 44 L-60 46 L-56 44" stroke="#7a7a7a" stroke-width="1.2" stroke-linecap="round" />
+  </g>
+
+  <!-- small details -->
+  <circle cx="36" cy="51" r="2.2" fill="#000" opacity="0.15"/>
+  <circle cx="44" cy="51" r="1.8" fill="#fff" opacity="0.06"/>
+
+  <!-- outline -->
+  <path d="M8 42 h56 v18 h-56 z M62 38 h8 v26 h-8 z M70 40 h64 v32 H76" fill="none" stroke="#6a6a6a" stroke-width="0.8" opacity="0.6"/>
+
+</svg>

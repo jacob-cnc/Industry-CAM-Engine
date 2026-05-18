@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Industry CAM Engine
+Comment=CNC Lathe Control — LinuxCNC + Industry CAM GUI
+Exec=/home/jacob/linuxcnc/configs/industry-cam/launch_gui.sh
+Path=/home/jacob/linuxcnc/configs/industry-cam
+Icon=linuxcnc
+Terminal=false
+Categories=Manufacturing;Engineering;
+StartupNotify=true

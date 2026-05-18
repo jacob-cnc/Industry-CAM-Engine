@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: CC-BY-SA-4.0
+# SPDX-FileNotice: Part of the Machines addon..
+# SPDX-FileNotice: https://git-scm.com/docs/gitignore
+
+__pycache__
+.venv

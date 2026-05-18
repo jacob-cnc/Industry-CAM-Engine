@@ -1,0 +1,231 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>PocketOp</class>
+ <widget class="QWidget" name="PocketOp">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>335</width>
+    <height>583</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>PocketOp</string>
+  </property>
+  <layout class="QFormLayout" name="formLayout">
+   <item row="0" column="0" colspan="2">
+    <widget class="QToolBox" name="toolBox">
+     <property name="currentIndex">
+      <number>0</number>
+     </property>
+     <widget class="QWidget" name="page">
+      <property name="geometry">
+       <rect>
+        <x>0</x>
+        <y>0</y>
+        <width>317</width>
+        <height>505</height>
+       </rect>
+      </property>
+      <attribute name="label">
+       <string>Page 1</string>
+      </attribute>
+      <layout class="QFormLayout" name="formLayout_2">
+       <item row="0" column="0">
+        <widget class="QLabel" name="label">
+         <property name="text">
+          <string>Overlap</string>
+         </property>
+        </widget>
+       </item>
+       <item row="0" column="1">
+        <widget class="Gui::QuantitySpinBox" name="overlapSpin" native="true">
+         <property name="toolTip">
+          <string>pourcentage du diametre de la friase</string>
+         </property>
+         <property name="minimum" stdset="0">
+          <double>-999999999.000000000000000</double>
+         </property>
+         <property name="maximum" stdset="0">
+          <double>999999999.000000000000000</double>
+         </property>
+        </widget>
+       </item>
+       <item row="1" column="0">
+        <widget class="QLabel" name="label_7">
+         <property name="text">
+          <string>Surep Radiale</string>
+         </property>
+        </widget>
+       </item>
+       <item row="1" column="1">
+        <widget class="Gui::QuantitySpinBox" name="surepRadialeSpin" native="true">
+         <property name="statusTip">
+          <string>Diamètre</string>
+         </property>
+         <property name="minimum" stdset="0">
+          <double>-999999999.000000000000000</double>
+         </property>
+         <property name="maximum" stdset="0">
+          <double>999999999.000000000000000</double>
+         </property>
+        </widget>
+       </item>
+       <item row="2" column="0">
+        <widget class="QLabel" name="label_2">
+         <property name="text">
+          <string>tool Diam</string>
+         </property>
+        </widget>
+       </item>
+       <item row="2" column="1">
+        <widget class="Gui::QuantitySpinBox" name="toolSpin" native="true">
+         <property name="statusTip">
+          <string>Diamètre</string>
+         </property>
+         <property name="minimum" stdset="0">
+          <double>-999999999.000000000000000</double>
+         </property>
+         <property name="maximum" stdset="0">
+          <double>999999999.000000000000000</double>
+         </property>
+        </widget>
+       </item>
+       <item row="3" column="0">
+        <widget class="QLabel" name="label_4">
+         <property name="text">
+          <string>Mode</string>
+         </property>
+        </widget>
+       </item>
+       <item row="3" column="1">
+        <widget class="QComboBox" name="modeCombo"/>
+       </item>
+       <item row="4" column="0">
+        <widget class="QLabel" name="label_6">
+         <property name="text">
+          <string>Direction</string>
+         </property>
+        </widget>
+       </item>
+       <item row="4" column="1">
+        <widget class="QComboBox" name="directionCombo"/>
+       </item>
+       <item row="5" column="0">
+        <widget class="QLabel" name="label_5">
+         <property name="text">
+          <string>Surep Radiale</string>
+         </property>
+        </widget>
+       </item>
+       <item row="5" column="1">
+        <widget class="Gui::QuantitySpinBox" name="surepAxialeSpin" native="true">
+         <property name="minimum" stdset="0">
+          <double>-999999999.000000000000000</double>
+         </property>
+         <property name="maximum" stdset="0">
+          <double>999999999.000000000000000</double>
+         </property>
+        </widget>
+       </item>
+       <item row="6" column="0">
+        <widget class="QLabel" name="label_8">
+         <property name="text">
+          <string>Step Down</string>
+         </property>
+        </widget>
+       </item>
+       <item row="6" column="1">
+        <widget class="Gui::QuantitySpinBox" name="stepDownSpin" native="true">
+         <property name="statusTip">
+          <string>Diamètre</string>
+         </property>
+         <property name="minimum" stdset="0">
+          <double>-999999999.000000000000000</double>
+         </property>
+         <property name="maximum" stdset="0">
+          <double>999999999.000000000000000</double>
+         </property>
+        </widget>
+       </item>
+       <item row="7" column="0">
+        <widget class="QLabel" name="label_9">
+         <property name="text">
+          <string>Plongee</string>
+         </property>
+        </widget>
+       </item>
+       <item row="7" column="1">
+        <widget class="QComboBox" name="plongeeCombo"/>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="page_2">
+      <property name="enabled">
+       <bool>true</bool>
+      </property>
+      <property name="geometry">
+       <rect>
+        <x>0</x>
+        <y>0</y>
+        <width>174</width>
+        <height>62</height>
+       </rect>
+      </property>
+      <attribute name="label">
+       <string>Page 2</string>
+      </attribute>
+      <layout class="QFormLayout" name="formLayout_3">
+       <item row="0" column="0" colspan="2">
+        <widget class="QCheckBox" name="useMiddleofFirstEdge">
+         <property name="enabled">
+          <bool>true</bool>
+         </property>
+         <property name="text">
+          <string>Use middle of firste Edge</string>
+         </property>
+        </widget>
+       </item>
+       <item row="1" column="0">
+        <widget class="QLabel" name="label_3">
+         <property name="text">
+          <string>nbGen</string>
+         </property>
+        </widget>
+       </item>
+       <item row="1" column="1">
+        <widget class="Gui::QuantitySpinBox" name="nbGenSpin" native="true">
+         <property name="statusTip">
+          <string>Nombre de boucle</string>
+         </property>
+         <property name="minimum" stdset="0">
+          <double>-999999999.000000000000000</double>
+         </property>
+         <property name="maximum" stdset="0">
+          <double>999999999.000000000000000</double>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>Gui::QuantitySpinBox</class>
+   <extends>QWidget</extends>
+   <header location="global">Gui/QuantitySpinBox.h</header>
+  </customwidget>
+ </customwidgets>
+ <tabstops>
+  <tabstop>modeCombo</tabstop>
+  <tabstop>directionCombo</tabstop>
+  <tabstop>plongeeCombo</tabstop>
+  <tabstop>useMiddleofFirstEdge</tabstop>
+ </tabstops>
+ <resources/>
+ <connections/>
+</ui>

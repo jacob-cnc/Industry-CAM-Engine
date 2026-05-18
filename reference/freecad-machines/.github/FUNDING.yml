@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: CC-BY-SA-4.0
+# SPDX-FileNotice: Part of the Machines addon..
+
+open_collective : freecad
+github : FreeCAD
+
+custom : [ 
+    'https://wiki.freecad.org/Donate'
+]

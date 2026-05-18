@@ -1,0 +1,131 @@
+name: Test
+
+on:
+  pull_request:
+    branches:
+      - master
+      - develop
+  push:
+    branches:
+      - master
+      - develop
+    tags:
+      - v*
+
+jobs:
+  cxx:
+    name: ${{ matrix.os_short }} c++
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["windows-2022", "macos-15", "ubuntu-22.04"]
+        include:
+          - os: "windows-2022"
+            os_short: "windows"
+          - os: "macos-15"
+            os_short: "macos"
+          - os: "ubuntu-22.04"
+            os_short: "linux"
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - name: Install
+        shell: bash
+        run: |
+          if [ "${{ matrix.os_short }}" == "linux" ]; then
+            export OCL_SUDO_INSTALL="1"
+          fi
+          ./install.sh \
+            --install-ci-deps \
+            --build-library cxx \
+            --build-type release \
+            --install-boost \
+            --boost-prefix $(pwd) \
+            --install \
+            --test
+  nodejs:
+    name: ${{ matrix.os_short }} node.js
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["windows-2022", "macos-15", "ubuntu-22.04"]
+        include:
+          - os: "windows-2022"
+            os_short: "windows"
+            libdir: windows-nodejs-x64
+          - os: "macos-15"
+            os_short: "macos"
+            libdir: macos-nodejs-x64
+          - os: "ubuntu-22.04"
+            os_short: "linux"
+            libdir: linux-nodejs-x64
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - name: Install
+        shell: bash
+        run: |
+          if [ "${{ matrix.os_short }}" == "linux" ]; then
+            export OCL_SUDO_INSTALL="1"
+          fi
+          ./install.sh \
+            --install-ci-deps \
+            --build-library nodejs \
+            --build-type release \
+            --node-architecture x64 \
+            --install-boost \
+            --boost-prefix $(pwd) \
+            --install \
+            --install-prefix $(pwd)/src/npmpackage/build/Release/${{ matrix.libdir }} \
+            --test
+  python:
+    name: ${{ matrix.os_short }} python
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["windows-2022", "macos-15", "ubuntu-22.04"]
+        include:
+          - os: "windows-2022"
+            os_short: "windows"
+            python_version: "3.10"
+          - os: "macos-15"
+            os_short: "macos"
+            python_version: "3.11"
+          - os: "ubuntu-22.04"
+            os_short: "linux"
+            python_version: "3.10"
+            cmake_generator: "Unix Makefiles"
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python_version }}
+      - name: Install
+        shell: bash
+        run: |
+          if [ "${{ matrix.os_short }}" == "linux" ]; then
+            export OCL_INSTALL_BOOST="1"
+            export OCL_BOOST_WITH_PYTHON="1"
+            export OCL_BOOST_PREFIX="$(pwd)"
+          else
+            export OCL_INSTALL_BOOST_FROM_REPO="1"
+          fi
+          ./install.sh \
+            --build-library python \
+            --build-type release \
+            --install-system-deps \
+            --python-executable python \
+            --python-pip-install \
+            --test
+        env:
+          CMAKE_GENERATOR: ${{ matrix.cmake_generator }}
