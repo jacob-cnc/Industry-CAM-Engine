@@ -36,9 +36,15 @@ Desktop.ini
 
 # Project-specific
 backups/
-outputs/
-reference/
 Ship to LinuxPC/
+
+# Third-party reference repos (large, have their own git history)
+reference/linuxcnc-source/
+reference/liblathe/
+reference/opencamlib/
+reference/bapt-cam/
+reference/freecad-machines/
+reference/freecad-turning-addon/
 
 # Debug/scratch scripts (prefix with _)
 _*.py

@@ -1,0 +1,30 @@
+# ============================================================================
+# postgui.hal — HAL connections that require the GUI to be loaded
+#
+# Compound Slide routing:
+#   The compound-slide userspace component handles muxing internally:
+#   - When disabled: passes through raw MPG counts unchanged
+#   - When enabled: outputs trigonometrically decomposed jog counts
+#
+# The GUI process creates the "compound-slide" HAL component with pins:
+#   compound-slide.compound-enable  (bit IN)
+#   compound-slide.compound-angle   (float IN)
+#   compound-slide.mpg-x-in         (s32 IN)
+#   compound-slide.mpg-z-in         (s32 IN)
+#   compound-slide.jog-scale        (float IN)
+#   compound-slide.x-jog-counts     (s32 OUT)
+#   compound-slide.z-jog-counts     (s32 OUT)
+# ============================================================================
+
+# --- Feed MPG encoder counts to compound-slide GUI component ---
+net mpg-x-counts => compound-slide.mpg-x-in
+net mpg-z-counts => compound-slide.mpg-z-in
+
+# --- Feed jog scale to compound-slide ---
+net mpg-x-scale => compound-slide.jog-scale
+
+# --- Route compound-slide outputs to jog-counts ---
+# The component outputs either passthrough counts (when disabled) or
+# decomposed counts (when enabled), so we connect directly.
+net x-jog-final  compound-slide.x-jog-counts => joint.0.jog-counts axis.x.jog-counts
+net z-jog-final  compound-slide.z-jog-counts => joint.1.jog-counts axis.z.jog-counts

@@ -1,0 +1,13 @@
+; Tool Table for Lathe
+; T — tool number, P — pocket, X/Z — offsets, D — diameter, I — front angle, J — back angle, Q — orientation
+;
+; Orientation (Q):
+;   1=front-right  2=front-left  3=rear-left  4=rear-right
+;   5=right        6=top         7=left        8=bottom       9=center
+;
+T1  P1  X+0.0000 Z+0.0000 D0.0000 I0 J0 Q1 ;Turning tool
+T2  P2  X+0.0000 Z+0.0000 D0.0000 I0 J0 Q2 ;Boring bar
+T3  P3  X+0.0000 Z+0.0000 D0.0000 I0 J0 Q1 ;Facing tool
+T4  P4  X+0.0000 Z+0.0000 D0.0000 I0 J0 Q1 ;Threading tool
+T5  P5  X+0.0000 Z+0.0000 D0.0000 I0 J0 Q9 ;Parting tool
+T6  P6  X+0.0000 Z+0.0000 D0.0000 I0 J0 Q9 ;Center drill

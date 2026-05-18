@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "block_type": "OD Profile",
+  "stock": {
+    "diameter": 2.0,
+    "x_start": 0.0,
+    "z_start": 0.1,
+    "z_end": -1.0,
+    "pilot_hole_dia": 0.0,
+    "mode": "od"
+  },
+  "roughing": {
+    "doc_dia": 0.05,
+    "feed": 0.008,
+    "strategy": "staircase",
+    "fin_allowance": 0.005,
+    "peck_enabled": false,
+    "peck_length": null,
+    "spindle_rpm": 1200.0
+  },
+  "finishing": {
+    "passes": 1,
+    "doc_dia": 0.002,
+    "feed": 0.003
+  },
+  "segments": [
+    {
+      "type": "line",
+      "x": 0.0,
+      "z": 0.0,
+      "radius": 0.0
+    },
+    {
+      "type": "line",
+      "x": 0.5,
+      "z": 0.0,
+      "radius": 0.0
+    },
+    {
+      "type": "line",
+      "x": 0.5,
+      "z": -0.5,
+      "radius": 0.0
+    },
+    {
+      "type": "line",
+      "x": 1.0,
+      "z": -0.5,
+      "radius": 0.0
+    },
+    {
+      "type": "arc",
+      "x": 1.25,
+      "z": -1.0,
+      "radius": -1.0
+    }
+  ]
+}

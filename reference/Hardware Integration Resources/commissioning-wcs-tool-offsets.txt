@@ -1,0 +1,136 @@
+Initial Commissioning: WCS & Tool Offsets
+==========================================
+
+Guide for establishing the Work Coordinate System (WCS) and tool offsets
+on the My-Lathe after homing. This procedure uses a center finder mounted
+in the chuck to establish the X centerline, then touches off each tool.
+
+
+Prerequisites
+-------------
+- Machine is homed on both X and Z (home sequence completes without error)
+- Linear encoders are reading correctly (DRO tracks movement accurately)
+- A precision center finder (e.g., edge finder or Haimer-style) is mounted in the chuck
+- A piece of known-diameter stock or gauge pin is available for verification
+- Tool table (tool.tbl) has all tool positions defined with zero offsets
+
+
+Concepts
+--------
+  G54          Primary work coordinate system — your part zero
+  X0           Spindle centerline (diameter = 0)
+  Z0           Face of the workpiece (or chuck face, your choice)
+  Tool offset  The difference between each tool tip and the reference position
+  Touch-off    The act of recording a known position to calculate an offset
+
+LinuxCNC stores tool offsets in tool.tbl. The X offset is in DIAMETER in
+the tool table file. The G54 work offset is stored in my-lathe.var.
+
+
+================================================================================
+STEP 1: Home the Machine
+================================================================================
+
+1. Power on and clear any E-stop
+2. Home both axes — X homes first (sequence 0), then Z (sequence 1)
+3. Verify the DRO shows machine coordinates:
+   - X = 4.250 (home position, full retract)
+   - Z = 0.000 (home position)
+
+
+================================================================================
+STEP 2: Establish X Centerline with Center Finder
+================================================================================
+
+1. Mount the center finder in the chuck — ensure it runs true
+2. Load a reference tool — typically T1 (your turning tool):
+       T1 M6
+       G43
+3. Jog X toward the center finder using decreasing increments
+4. Lightly touch the tool tip to the center finder
+5. At the point of contact, note the MACHINE X POSITION on the DRO
+6. Calculate:
+       X_centerline = current_machine_X - center_finder_radius
+7. Set G54 X offset:
+       G10 L20 P1 X0.200
+   (example: center finder diameter = 0.200")
+
+
+================================================================================
+STEP 3: Establish Z Zero (Part Face)
+================================================================================
+
+Option A: Touch off the chuck face (repeatable reference)
+  1. Jog Z until the tool tip just touches the chuck face
+  2. Set G54 Z:  G10 L20 P1 Z0.0
+
+Option B: Touch off the workpiece face (per-part)
+  1. Mount workpiece and face it
+  2. Without moving Z:  G10 L20 P1 Z0.0
+
+
+================================================================================
+STEP 4: Set Tool Offsets (Touch-Off Method)
+================================================================================
+
+For each tool (T2, T3, T4, etc.):
+1. Load the tool:  Tn M6 / G43
+2. X offset — Touch to known diameter:  G10 L10 Pn X[dia]
+3. Z offset — Touch to reference face:  G10 L10 Pn Z0.0
+
+
+G10 Commands Reference:
+  G10 L10 Pn X_ Z_   Set tool offset (touch-off, uses G5x)
+  G10 L11 Pn X_ Z_   Same as L10 but uses G59.3
+  G10 L1  Pn X_ Z_   Set tool offset directly (absolute)
+  G10 L2  Pn X_ Z_   Set work coordinate origin
+  G10 L20 Pn X_ Z_   Set work coordinate so current position = value
+
+
+================================================================================
+STEP 5: Verify Offsets
+================================================================================
+
+1. Load T1 and move to a known position
+2. Measure actual distance — should match programmed diameter
+3. Load each subsequent tool and rapid to same position — tips should align
+4. Skim cut test for final verification
+
+
+================================================================================
+STEP 6: Save and Back Up
+================================================================================
+
+1. Verify tool.tbl has been updated
+2. The .var file stores G54 offsets — saved automatically
+3. Back up both files
+
+
+================================================================================
+QUICK REFERENCE: Typical Workflow After Commissioning
+================================================================================
+
+For each new part:
+  1. Home the machine
+  2. Load T1, touch off Z on the part face:  G10 L20 P1 Z0.0
+  3. X offset rarely changes — skip unless disturbed
+  4. Run your program
+
+For a new tool added to the post:
+  1. Load the new tool:  Tn M6 / G43
+  2. Touch X on known diameter:  G10 L10 Pn X[dia]
+  3. Touch Z on reference face:  G10 L10 Pn Z0.0
+
+
+================================================================================
+NOTES SPECIFIC TO THIS MACHINE
+================================================================================
+
+- X travel: 0 to 4.250" (radius), so max swing is 8.5" diameter
+- Z travel: 0 to 23.5"
+- X home position: 4.250" (full retract)
+- Z home position: 0.000" (near headstock)
+- Encoder resolution: 5 micron (0.000197")
+- Following error limit: 0.005"
+- No tool changer: Quick-change tool post, manual swap
+- Offsets stay valid as long as tools go back in the same pocket position

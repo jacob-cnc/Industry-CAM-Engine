@@ -1,0 +1,13 @@
+# ============================================================================
+# custom.hal — User customizations
+# Add your custom HAL connections here
+# This file is loaded after my-lathe.hal
+# ============================================================================
+
+# Example: Coolant control
+# setp hm2_10.10.10.10.gpio.015.is_output 1
+# net coolant-flood iocontrol.0.coolant-flood => hm2_10.10.10.10.gpio.015.out
+
+# Example: Spindle brake
+# setp hm2_10.10.10.10.gpio.016.is_output 1
+# net spindle-brake spindle.0.brake => hm2_10.10.10.10.gpio.016.out
