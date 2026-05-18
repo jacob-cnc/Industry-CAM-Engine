@@ -6,22 +6,28 @@
 #   compound-slide.mpg-x-in         (s32 IN)  — raw X MPG encoder count
 #   compound-slide.mpg-z-in         (s32 IN)  — raw Z MPG encoder count
 #   compound-slide.jog-scale        (float IN) — current jog increment
-#   compound-slide.compound-enable  (bit IN)  — activation state from GUI
-#   compound-slide.compound-angle   (float IN) — angle in degrees from GUI
+#   compound-slide.compound-enable  (bit OUT) — activation state from GUI
+#   compound-slide.compound-angle   (float OUT) — angle in degrees from GUI
 #   compound-slide.x-jog-counts     (s32 OUT) — decomposed X jog counts
 #   compound-slide.z-jog-counts     (s32 OUT) — decomposed Z jog counts
 #
 # Routing strategy:
 #   The GUI reads mpg-x-in and mpg-z-in each poll cycle. When compound
-#   mode is disabled, the mux2 components pass raw MPG counts through
-#   to the joints. When enabled, the GUI writes decomposed counts to
-#   x-jog-counts and z-jog-counts, and the mux2 routes those instead.
+#   mode is disabled, the mux_generic components pass raw MPG counts
+#   through to the joints. When enabled, the GUI writes decomposed
+#   counts to x-jog-counts and z-jog-counts, and the mux routes those.
+#
+# Component choice:
+#   mux_generic with config "ss2" provides s32-in → s32-out with 2 inputs.
+#   Standard mux2 only handles float types and cannot connect to s32 pins
+#   like encoder.N.count or joint.N.jog-counts.
 # ============================================================================
 
-# --- Load mux2 components for jog-counts switching ---
-loadrt mux2 names=mux2.jog-x,mux2.jog-z
-addf mux2.jog-x servo-thread
-addf mux2.jog-z servo-thread
+# --- Load mux_generic for s32 jog-counts switching ---
+# Two instances: one for X, one for Z. "ss2" = s32 input, s32 output, 2 entries.
+loadrt mux_generic config="ss2,ss2"
+addf mux-gen.00 servo-thread
+addf mux-gen.01 servo-thread
 
 # --- Feed MPG encoder counts to compound-slide GUI component ---
 net mpg-x-counts => compound-slide.mpg-x-in
@@ -30,15 +36,16 @@ net mpg-z-counts => compound-slide.mpg-z-in
 # --- Feed jog scale to compound-slide ---
 net mpg-x-scale => compound-slide.jog-scale
 
-# --- Mux2 for X axis jog-counts ---
-# in0 = normal MPG pass-through, in1 = compound-slide decomposed output
-net mpg-x-counts       => mux2.jog-x.in0
-net compound-x-out     compound-slide.x-jog-counts => mux2.jog-x.in1
-net compound-enable    compound-slide.compound-enable => mux2.jog-x.sel
-net x-jog-final        mux2.jog-x.out => joint.0.jog-counts axis.x.jog-counts
+# --- Mux_generic 00: X axis jog-counts ---
+# in-s32-00 = normal MPG pass-through (sel=0)
+# in-s32-01 = compound-slide decomposed output (sel=1)
+net mpg-x-counts       => mux-gen.00.in-s32-00
+net compound-x-out     compound-slide.x-jog-counts => mux-gen.00.in-s32-01
+net compound-enable    compound-slide.compound-enable => mux-gen.00.sel-bit-00
+net x-jog-final        mux-gen.00.out-s32 => joint.0.jog-counts axis.x.jog-counts
 
-# --- Mux2 for Z axis jog-counts ---
-net mpg-z-counts       => mux2.jog-z.in0
-net compound-z-out     compound-slide.z-jog-counts => mux2.jog-z.in1
-net compound-enable    => mux2.jog-z.sel
-net z-jog-final        mux2.jog-z.out => joint.1.jog-counts axis.z.jog-counts
+# --- Mux_generic 01: Z axis jog-counts ---
+net mpg-z-counts       => mux-gen.01.in-s32-00
+net compound-z-out     compound-slide.z-jog-counts => mux-gen.01.in-s32-01
+net compound-enable    => mux-gen.01.sel-bit-00
+net z-jog-final        mux-gen.01.out-s32 => joint.1.jog-counts axis.z.jog-counts

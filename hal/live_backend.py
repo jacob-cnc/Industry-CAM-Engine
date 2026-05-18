@@ -73,9 +73,9 @@ class LiveBackend(HALBackend):
             self._hal_comp.newpin("mpg-x-in", hal_module.HAL_S32, hal_module.HAL_IN)
             self._hal_comp.newpin("mpg-z-in", hal_module.HAL_S32, hal_module.HAL_IN)
             self._hal_comp.newpin("jog-scale", hal_module.HAL_FLOAT, hal_module.HAL_IN)
-            # Control pins — set by GUI
-            self._hal_comp.newpin("compound-enable", hal_module.HAL_BIT, hal_module.HAL_IN)
-            self._hal_comp.newpin("compound-angle", hal_module.HAL_FLOAT, hal_module.HAL_IN)
+            # Control pins — written by GUI, read by HAL for mux selection
+            self._hal_comp.newpin("compound-enable", hal_module.HAL_BIT, hal_module.HAL_OUT)
+            self._hal_comp.newpin("compound-angle", hal_module.HAL_FLOAT, hal_module.HAL_OUT)
             # Output pins — decomposed jog counts written by GUI
             self._hal_comp.newpin("x-jog-counts", hal_module.HAL_S32, hal_module.HAL_OUT)
             self._hal_comp.newpin("z-jog-counts", hal_module.HAL_S32, hal_module.HAL_OUT)
