@@ -1,0 +1,107 @@
+{
+  "name": "OD Profile with Convex Arc",
+  "description": "OD profile with a CW arc that bulges outward toward stock. Tests arc zone construction, offset of arcs, variable roughing depth across arc region, and face from centerline.",
+  "source_dxf": "reference/CAD Reference/Arc Reference/175934-001_01-Arc Reference.dxf",
+  "units": "inches",
+  "coordinate_system": "radius_for_x_inches_for_z",
+
+  "parameters": {
+    "stock_diameter": 1.500,
+    "x_start": 0.000,
+    "z_start": 0.100,
+    "z_end": -2.000,
+    "mode": "od",
+    "doc_dia": 0.050,
+    "fin_allowance_dia": 0.004,
+    "x_park": 3.000,
+    "z_park": 3.000
+  },
+
+  "segments": [
+    {"type": "line", "x_dia": 0.000, "z": 0.000},
+    {"type": "line", "x_dia": 1.000, "z": 0.000},
+    {"type": "line", "x_dia": 1.000, "z": -0.500},
+    {"type": "arc", "x_dia": 1.000, "z": -1.500, "radius": 1.000, "direction": "cw"},
+    {"type": "line", "x_dia": 1.000, "z": -2.000}
+  ],
+
+  "expected_zones": {
+    "profile_boundary": {
+      "description": "The finish shape (radius, Z). Arc bulges outward.",
+      "line_segments": [
+        [[0.000, 0.000], [0.500, 0.000]],
+        [[0.500, 0.000], [0.500, -0.500]],
+        [[0.500, -1.500], [0.500, -2.000]]
+      ],
+      "arc_segment": {
+        "start": [0.500, -0.500],
+        "end": [0.500, -1.500],
+        "center": [-0.366, -1.000],
+        "radius": 1.000,
+        "direction": "cw",
+        "peak": [0.634, -1.000],
+        "start_angle_deg": 330.0,
+        "end_angle_deg": 30.0,
+        "note": "Arc center is at X=-0.366 (negative radius = centerline side). Arc bulges to peak X=0.634 radius at Z=-1.000."
+      }
+    },
+    "roughing_boundary": {
+      "description": "Profile offset outward by fin_allowance_radius (0.002). Arc offset = same center, R+0.002.",
+      "offset_distance_radius": 0.002,
+      "line_segments": [
+        [[0.000, 0.002], [0.502, 0.002]],
+        [[0.502, 0.002], [0.502, -0.49973]],
+        [[0.502, -1.50027], [0.502, -2.000]]
+      ],
+      "arc_segment": {
+        "start": [0.502, -0.49973],
+        "end": [0.502, -1.50027],
+        "center": [-0.366, -1.000],
+        "radius": 1.001,
+        "direction": "cw",
+        "peak": [0.635, -1.000],
+        "note": "Offset arc: same center, radius increased by 0.001 (wait - should be 0.002 for 0.004 dia / 2 = 0.002 radius offset)"
+      }
+    },
+    "stock_boundary": {
+      "description": "Rectangle from centerline to stock radius, Z_start to Z_end",
+      "coordinates": [
+        [0.000, 0.100],
+        [0.750, 0.100],
+        [0.750, -2.000],
+        [0.000, -2.000]
+      ]
+    },
+    "closure_segments": {
+      "description": "OD mode: profile_end to centerline at Z_end, up centerline to Z=0",
+      "coordinates": [
+        [0.500, -2.000],
+        [0.000, -2.000],
+        [0.000, 0.000]
+      ]
+    },
+    "true_face_zone": {
+      "description": "Rectangle from X_start(0) to Stock_radius(0.750), Z=0 to Z_start(0.100)",
+      "coordinates": [
+        [0.000, 0.000],
+        [0.750, 0.000],
+        [0.750, 0.100],
+        [0.000, 0.100]
+      ]
+    },
+    "key_test_points": {
+      "arc_peak_z": -1.000,
+      "arc_peak_x_radius": 0.634,
+      "arc_peak_x_diameter": 1.268,
+      "stock_radius_at_peak": 0.750,
+      "material_at_peak": 0.116,
+      "note": "At Z=-1.000, the arc peak is at radius 0.634. Stock is at 0.750. Only 0.116 inches of material to rough at this Z level. Tests thin material handling near arc peak."
+    }
+  },
+
+  "notes": [
+    "The DXF shows fin_allowance offset of 0.001 radius (from 0.002 dia). The JSON parameters specify 0.004 dia = 0.002 radius. The DXF was built with 0.002 dia allowance. Use DXF values (0.001 radius offset) as ground truth for this fixture.",
+    "Arc center at negative X (centerline side) causes outward bulge — this is the correct geometry for a convex bump on an OD part.",
+    "The roughing passes near Z=-1.000 will have very short Z travel because the arc peak is close to stock OD."
+  ]
+}

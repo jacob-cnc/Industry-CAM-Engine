@@ -1,0 +1,93 @@
+{
+  "name": "Stepped ID Bore",
+  "description": "Stepped bore profile with two diameters. Tests ID mode closure (to stock OD), pilot hole as safe zone, and bore step transitions. No face segment on finish pass (face roughed only).",
+  "source_dxf": "reference/CAD Reference/ID Reference/175933-001_01-ID Reference DXF.dxf",
+  "units": "inches",
+  "coordinate_system": "radius_for_x_inches_for_z",
+
+  "parameters": {
+    "stock_diameter": 2.000,
+    "pilot_hole_dia": 0.500,
+    "x_start_dia": 1.200,
+    "z_start": 0.050,
+    "z_end": -1.500,
+    "mode": "id",
+    "doc_dia": 0.050,
+    "fin_allowance_dia": 0.002,
+    "x_park": 3.000,
+    "z_park": 3.000
+  },
+
+  "segments": [
+    {"type": "line", "x_dia": 1.200, "z": 0.000},
+    {"type": "line", "x_dia": 1.200, "z": -1.000},
+    {"type": "line", "x_dia": 0.800, "z": -1.000},
+    {"type": "line", "x_dia": 0.800, "z": -1.500}
+  ],
+
+  "expected_zones": {
+    "profile_boundary": {
+      "description": "The bore finish shape (radius, Z). No face segment — finish pass plunges directly.",
+      "coordinates": [
+        [0.600, 0.000],
+        [0.600, -1.000],
+        [0.400, -1.000],
+        [0.400, -1.500]
+      ]
+    },
+    "roughing_boundary": {
+      "description": "Profile offset INWARD (toward pilot hole) by fin_allowance_radius (0.001). Roughing stops here.",
+      "offset_distance_radius": 0.001,
+      "offset_direction": "inward (toward pilot hole, -X)",
+      "coordinates": [
+        [0.599, 0.000],
+        [0.599, -0.999],
+        [0.399, -0.999],
+        [0.399, -1.500]
+      ]
+    },
+    "pilot_hole_boundary": {
+      "description": "Vertical line at pilot hole radius — tool can move freely here (no material)",
+      "radius": 0.250,
+      "z_range": [0.050, -1.500]
+    },
+    "stock_boundary": {
+      "description": "For ID mode: rectangle from pilot hole to stock OD, Z_start to Z_end",
+      "coordinates": [
+        [0.250, 0.050],
+        [1.000, 0.050],
+        [1.000, -1.500],
+        [0.250, -1.500]
+      ]
+    },
+    "closure_segments": {
+      "description": "ID mode: profile_end to stock_OD at Z_end, up stock_OD to Z=0, across to profile_start",
+      "coordinates": [
+        [0.400, -1.500],
+        [1.000, -1.500],
+        [1.000, 0.000],
+        [0.600, 0.000]
+      ]
+    },
+    "true_face_zone": {
+      "description": "Annular ring at bore entry: from pilot_hole to X_start, Z=0 to Z_start. Face passes go from pilot hole outward to X_start.",
+      "coordinates": [
+        [0.250, 0.000],
+        [0.600, 0.000],
+        [0.600, 0.050],
+        [0.250, 0.050]
+      ],
+      "note": "X_start (0.600r) != pilot_hole (0.250r), so True Face Zone exists. If they were equal, no face roughing needed."
+    },
+    "finished_part": {
+      "description": "ID mode: area between profile and stock OD (the material you KEEP, outside the bore)",
+      "boundary": "profile_boundary + closure_segments (closed polygon)"
+    },
+    "material_to_rough": {
+      "description": "Area between pilot hole and roughing boundary (the bore material to REMOVE)"
+    },
+    "finish_allowance_zone": {
+      "description": "Thin band between roughing boundary and profile boundary (0.001 inch wide, on the bore wall)"
+    }
+  }
+}

@@ -1,0 +1,10 @@
+# ============================================================================
+# custom.hal — User customizations (loaded after industry-cam.hal)
+# ============================================================================
+
+# Nothing here yet. Add custom HAL connections as needed.
+# Examples:
+#   - Coolant relay output
+#   - Spindle brake output
+#   - Additional panel buttons via 7i73
+#   - Feed/spindle override pots

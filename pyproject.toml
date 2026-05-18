@@ -1,0 +1,14 @@
+[project]
+name = "industry-cam-engine"
+version = "0.1.0"
+description = "CNC lathe CAM engine with conversational programming and PyQtGraph visualization"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+[tool.hypothesis]
+max_examples = 100

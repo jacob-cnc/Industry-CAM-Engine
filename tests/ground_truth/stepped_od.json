@@ -1,0 +1,87 @@
+{
+  "name": "Stepped OD Profile",
+  "description": "Simple stepped OD profile with two diameters and face from centerline. Tests face zone, multi-level roughing, and step transitions.",
+  "source_dxf": "reference/CAD Reference/OD Reference/175932-001_01-Stepped OD.dxf",
+  "units": "inches",
+  "coordinate_system": "radius_for_x_inches_for_z",
+
+  "parameters": {
+    "stock_diameter": 1.250,
+    "x_start": 0.000,
+    "z_start": 0.100,
+    "z_end": -1.000,
+    "mode": "od",
+    "doc_dia": 0.050,
+    "fin_allowance_dia": 0.002,
+    "x_park": 3.000,
+    "z_park": 3.000
+  },
+
+  "segments": [
+    {"type": "line", "x_dia": 0.000, "z": 0.000},
+    {"type": "line", "x_dia": 0.500, "z": 0.000},
+    {"type": "line", "x_dia": 0.500, "z": -0.500},
+    {"type": "line", "x_dia": 1.000, "z": -0.500},
+    {"type": "line", "x_dia": 1.000, "z": -1.000}
+  ],
+
+  "expected_zones": {
+    "profile_boundary": {
+      "description": "The finish shape (radius, Z)",
+      "coordinates": [
+        [0.000, 0.000],
+        [0.250, 0.000],
+        [0.250, -0.500],
+        [0.500, -0.500],
+        [0.500, -1.000]
+      ]
+    },
+    "roughing_boundary": {
+      "description": "Profile offset outward by fin_allowance_radius (0.001). Roughing stops here.",
+      "offset_distance_radius": 0.001,
+      "coordinates": [
+        [0.000, 0.001],
+        [0.251, 0.001],
+        [0.251, -0.499],
+        [0.501, -0.499],
+        [0.501, -1.000]
+      ]
+    },
+    "stock_boundary": {
+      "description": "Rectangle from centerline to stock radius, Z_start to Z_end",
+      "coordinates": [
+        [0.000, 0.100],
+        [0.625, 0.100],
+        [0.625, -1.000],
+        [0.000, -1.000]
+      ]
+    },
+    "closure_segments": {
+      "description": "OD mode: profile_end to centerline at Z_end, up centerline to Z=0",
+      "coordinates": [
+        [0.500, -1.000],
+        [0.000, -1.000],
+        [0.000, 0.000]
+      ]
+    },
+    "true_face_zone": {
+      "description": "Rectangle from X_start to Stock_radius, Z=0 to Z_start",
+      "coordinates": [
+        [0.000, 0.000],
+        [0.625, 0.000],
+        [0.625, 0.100],
+        [0.000, 0.100]
+      ]
+    },
+    "finished_part": {
+      "description": "Area enclosed by profile + closure (between profile and centerline)",
+      "boundary": "profile_boundary + closure_segments (closed polygon)"
+    },
+    "material_to_rough": {
+      "description": "Area between stock boundary and roughing boundary"
+    },
+    "finish_allowance_zone": {
+      "description": "Thin band between roughing boundary and profile boundary (0.001 inch wide)"
+    }
+  }
+}
