@@ -1,18 +1,44 @@
 # ============================================================================
 # postgui.hal — HAL connections that require the GUI to be loaded
 #
-# CURRENTLY DISABLED: The compound-slide HAL component is not yet integrated
-# into the deployed GUI. These connections will fail if uncommented because
-# the "compound-slide" pins don't exist yet.
+# The compound-slide userspace HAL component is created by the GUI's
+# LiveBackend on startup. It provides:
+#   compound-slide.mpg-x-in         (s32 IN)  — raw X MPG encoder count
+#   compound-slide.mpg-z-in         (s32 IN)  — raw Z MPG encoder count
+#   compound-slide.jog-scale        (float IN) — current jog increment
+#   compound-slide.compound-enable  (bit IN)  — activation state from GUI
+#   compound-slide.compound-angle   (float IN) — angle in degrees from GUI
+#   compound-slide.x-jog-counts     (s32 OUT) — decomposed X jog counts
+#   compound-slide.z-jog-counts     (s32 OUT) — decomposed Z jog counts
 #
-# For now, MPG jog-counts are connected directly in the main HAL file.
-# When the compound-slide feature is integrated into the GUI, uncomment
-# these lines and remove the direct jog-counts connections from industry-cam.hal.
+# Routing strategy:
+#   The GUI reads mpg-x-in and mpg-z-in each poll cycle. When compound
+#   mode is disabled, the mux2 components pass raw MPG counts through
+#   to the joints. When enabled, the GUI writes decomposed counts to
+#   x-jog-counts and z-jog-counts, and the mux2 routes those instead.
 # ============================================================================
 
-# --- DISABLED until compound-slide component is integrated into GUI ---
-# net mpg-x-counts => compound-slide.mpg-x-in
-# net mpg-z-counts => compound-slide.mpg-z-in
-# net mpg-x-scale => compound-slide.jog-scale
-# net x-jog-final  compound-slide.x-jog-counts => joint.0.jog-counts axis.x.jog-counts
-# net z-jog-final  compound-slide.z-jog-counts => joint.1.jog-counts axis.z.jog-counts
+# --- Load mux2 components for jog-counts switching ---
+loadrt mux2 names=mux2.jog-x,mux2.jog-z
+addf mux2.jog-x servo-thread
+addf mux2.jog-z servo-thread
+
+# --- Feed MPG encoder counts to compound-slide GUI component ---
+net mpg-x-counts => compound-slide.mpg-x-in
+net mpg-z-counts => compound-slide.mpg-z-in
+
+# --- Feed jog scale to compound-slide ---
+net mpg-x-scale => compound-slide.jog-scale
+
+# --- Mux2 for X axis jog-counts ---
+# in0 = normal MPG pass-through, in1 = compound-slide decomposed output
+net mpg-x-counts       => mux2.jog-x.in0
+net compound-x-out     compound-slide.x-jog-counts => mux2.jog-x.in1
+net compound-enable    compound-slide.compound-enable => mux2.jog-x.sel
+net x-jog-final        mux2.jog-x.out => joint.0.jog-counts axis.x.jog-counts
+
+# --- Mux2 for Z axis jog-counts ---
+net mpg-z-counts       => mux2.jog-z.in0
+net compound-z-out     compound-slide.z-jog-counts => mux2.jog-z.in1
+net compound-enable    => mux2.jog-z.sel
+net z-jog-final        mux2.jog-z.out => joint.1.jog-counts axis.z.jog-counts

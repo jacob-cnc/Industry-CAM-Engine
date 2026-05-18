@@ -67,6 +67,8 @@ class ManualTab(QWidget):
         self._compound_first_cycle = True  # Snapshot encoder on first poll
         self._compound_x_accum = 0.0
         self._compound_z_accum = 0.0
+        self._compound_x_out_total = 0  # Cumulative HAL output counts
+        self._compound_z_out_total = 0
         self._linear_logic = CompoundLinearLogic()
         self._arc_logic = CompoundArcLogic()
 
@@ -406,6 +408,8 @@ class ManualTab(QWidget):
         self._compound_first_cycle = True  # Will snapshot on next poll
         self._compound_x_accum = 0.0
         self._compound_z_accum = 0.0
+        self._compound_x_out_total = 0  # Cumulative output counts for HAL
+        self._compound_z_out_total = 0
         self._linear_logic.reset()
         self._arc_logic.reset()
 
@@ -440,6 +444,11 @@ class ManualTab(QWidget):
         self._compound["btn_activate"].setText("ACTIVE")
         self._compound["btn_activate"].setChecked(True)
 
+        # Set HAL compound-enable pin (live backend only)
+        if hasattr(self._backend, 'set_compound_enable'):
+            self._backend.set_compound_enable(True)
+            self._backend.set_compound_angle(self._compound_angle)
+
     def _compound_deactivate(self):
         """Deactivate compound slide mode."""
         self._compound_active = False
@@ -447,6 +456,8 @@ class ManualTab(QWidget):
         self._arc_logic.reset()
         self._compound_x_accum = 0.0
         self._compound_z_accum = 0.0
+        self._compound_x_out_total = 0
+        self._compound_z_out_total = 0
         self._compound["lbl_distance"].setText("0.0000\"")
 
         # Unlock selectors
@@ -460,6 +471,11 @@ class ManualTab(QWidget):
         self._compound["btn_activate"].setChecked(False)
         self._compound["btn_activate"].blockSignals(False)
 
+        # Clear HAL compound-enable pin (live backend only)
+        if hasattr(self._backend, 'set_compound_enable'):
+            self._backend.set_compound_enable(False)
+            self._backend.set_compound_jog_counts(0, 0)
+
         # Clear graph overlay
         self._clear_compound_overlay()
 
@@ -468,7 +484,10 @@ class ManualTab(QWidget):
 
         Called from _on_poll() when compound mode is active.
         Reads MPG encoder counts, decomposes into X+Z motion,
-        and issues jog commands to the backend.
+        and writes cumulative jog counts to HAL output pins.
+
+        The mux2 components in postgui.hal route these output counts
+        to the joints when compound-enable is true.
 
         Also checks interlocks and force-deactivates if violated.
 
@@ -550,16 +569,27 @@ class ManualTab(QWidget):
         self._compound_x_accum -= x_counts_out
         self._compound_z_accum -= z_counts_out
 
-        # Issue jog commands for each axis (increment mode, one step per count)
-        if x_counts_out != 0:
-            direction = 1.0 if x_counts_out > 0 else -1.0
-            for _ in range(abs(x_counts_out)):
-                self._backend.jog_increment(0, direction, self._jog_velocity, jog_scale)
+        # Accumulate total output counts and write to HAL pins
+        self._compound_x_out_total += x_counts_out
+        self._compound_z_out_total += z_counts_out
 
-        if z_counts_out != 0:
-            direction = 1.0 if z_counts_out > 0 else -1.0
-            for _ in range(abs(z_counts_out)):
-                self._backend.jog_increment(1, direction, self._jog_velocity, jog_scale)
+        if hasattr(self._backend, 'set_compound_jog_counts'):
+            # HAL pin-based output (live mode with mux2 routing)
+            self._backend.set_compound_jog_counts(
+                self._compound_x_out_total,
+                self._compound_z_out_total
+            )
+        else:
+            # Fallback: jog_increment commands (mock mode / no HAL component)
+            if x_counts_out != 0:
+                direction = 1.0 if x_counts_out > 0 else -1.0
+                for _ in range(abs(x_counts_out)):
+                    self._backend.jog_increment(0, direction, self._jog_velocity, jog_scale)
+
+            if z_counts_out != 0:
+                direction = 1.0 if z_counts_out > 0 else -1.0
+                for _ in range(abs(z_counts_out)):
+                    self._backend.jog_increment(1, direction, self._jog_velocity, jog_scale)
 
     def _read_mpg_counts(self) -> tuple:
         """Read MPG encoder counts from the backend.
@@ -605,6 +635,9 @@ class ManualTab(QWidget):
             angle = float(text)
             if -90.0 <= angle <= 90.0 and angle != 0.0:
                 self._compound_angle = angle
+                # Sync HAL pin if live backend
+                if hasattr(self._backend, 'set_compound_angle'):
+                    self._backend.set_compound_angle(angle)
                 if self._compound_active:
                     self._draw_compound_overlay()
             else:

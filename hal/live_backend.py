@@ -5,9 +5,12 @@ The factory (hal/factory.py) handles the import guard.
 
 Wraps linuxcnc.stat, linuxcnc.command, and linuxcnc.error_channel
 into the HALBackend interface.
+
+Also creates a userspace HAL component for compound slide muxing.
 """
 
 import linuxcnc
+import hal as hal_module  # LinuxCNC HAL Python bindings
 
 from hal.interface import (
     HALBackend, MachineState, AxisState, SpindleState,
@@ -46,6 +49,9 @@ class LiveBackend(HALBackend):
 
     Connects to the running LinuxCNC instance via NML shared memory.
     Requires LinuxCNC to be running (launched via INI file).
+
+    Also creates a userspace HAL component 'compound-slide' with pins
+    for MPG count reading and compound jog output.
     """
 
     def __init__(self):
@@ -54,6 +60,29 @@ class LiveBackend(HALBackend):
         self._error = linuxcnc.error_channel()
         self._state = MachineState()
         self._connected = False
+
+        # MPG encoder counts (read from HAL pins each poll cycle)
+        self._mpg_x_counts = 0
+        self._mpg_z_counts = 0
+
+        # Create compound-slide HAL component
+        self._hal_comp = None
+        try:
+            self._hal_comp = hal_module.component("compound-slide")
+            # Input pins — MPG encoder counts fed from postgui.hal
+            self._hal_comp.newpin("mpg-x-in", hal_module.HAL_S32, hal_module.HAL_IN)
+            self._hal_comp.newpin("mpg-z-in", hal_module.HAL_S32, hal_module.HAL_IN)
+            self._hal_comp.newpin("jog-scale", hal_module.HAL_FLOAT, hal_module.HAL_IN)
+            # Control pins — set by GUI
+            self._hal_comp.newpin("compound-enable", hal_module.HAL_BIT, hal_module.HAL_IN)
+            self._hal_comp.newpin("compound-angle", hal_module.HAL_FLOAT, hal_module.HAL_IN)
+            # Output pins — decomposed jog counts written by GUI
+            self._hal_comp.newpin("x-jog-counts", hal_module.HAL_S32, hal_module.HAL_OUT)
+            self._hal_comp.newpin("z-jog-counts", hal_module.HAL_S32, hal_module.HAL_OUT)
+            self._hal_comp.ready()
+        except Exception:
+            # If component already exists or HAL not ready, continue without it
+            self._hal_comp = None
 
         try:
             self._stat.poll()
@@ -78,13 +107,25 @@ class LiveBackend(HALBackend):
     # ------------------------------------------------------------------
 
     def poll(self) -> None:
-        """Poll LinuxCNC stat channel and rebuild state snapshot."""
+        """Poll LinuxCNC stat channel and rebuild state snapshot.
+
+        Also reads MPG encoder counts from the compound-slide HAL component
+        pins for use by the compound slide feature.
+        """
         try:
             self._stat.poll()
             self._connected = True
         except linuxcnc.error:
             self._connected = False
             return
+
+        # Read MPG counts from HAL component pins
+        if self._hal_comp is not None:
+            try:
+                self._mpg_x_counts = self._hal_comp["mpg-x-in"]
+                self._mpg_z_counts = self._hal_comp["mpg-z-in"]
+            except Exception:
+                pass
 
         # Check error channel
         error_msg = ""
@@ -460,3 +501,51 @@ class LiveBackend(HALBackend):
             return True
         except linuxcnc.error:
             return False
+
+    # ------------------------------------------------------------------
+    # Compound Slide HAL Pins
+    # ------------------------------------------------------------------
+
+    def set_compound_enable(self, enabled: bool):
+        """Set the compound-enable HAL pin.
+
+        When enabled, postgui.hal routes the compound-slide component's
+        output jog-counts to the joints instead of raw MPG counts.
+
+        Args:
+            enabled: True to enable compound slide muxing.
+        """
+        if self._hal_comp is not None:
+            try:
+                self._hal_comp["compound-enable"] = enabled
+            except Exception:
+                pass
+
+    def set_compound_angle(self, angle: float):
+        """Set the compound-angle HAL pin (informational, for HAL scope).
+
+        Args:
+            angle: Current compound angle in degrees.
+        """
+        if self._hal_comp is not None:
+            try:
+                self._hal_comp["compound-angle"] = angle
+            except Exception:
+                pass
+
+    def set_compound_jog_counts(self, x_counts: int, z_counts: int):
+        """Write decomposed jog counts to the compound-slide HAL output pins.
+
+        These are the final jog counts that get routed to the joints
+        when compound mode is active.
+
+        Args:
+            x_counts: Cumulative X jog count output.
+            z_counts: Cumulative Z jog count output.
+        """
+        if self._hal_comp is not None:
+            try:
+                self._hal_comp["x-jog-counts"] = x_counts
+                self._hal_comp["z-jog-counts"] = z_counts
+            except Exception:
+                pass

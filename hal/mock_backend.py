@@ -380,6 +380,24 @@ class MockBackend(HALBackend):
         elif axis == "z":
             self._mpg_z_counts += counts
 
+    def set_compound_enable(self, enabled: bool):
+        """Set compound-enable state (no-op in mock, no HAL pins)."""
+        pass
+
+    def set_compound_angle(self, angle: float):
+        """Set compound angle (no-op in mock, no HAL pins)."""
+        pass
+
+    def set_compound_jog_counts(self, x_counts: int, z_counts: int):
+        """Write compound jog counts (mock: apply as position delta).
+
+        In mock mode, directly update position to simulate the effect
+        of the HAL mux2 routing jog counts to the joints.
+        """
+        # In mock mode, the jog_increment fallback handles motion.
+        # This method exists for interface compatibility.
+        pass
+
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
