@@ -171,7 +171,7 @@ net spindle-at-speed near-spindle.out        => spindle.0.at-speed
 #    When E-stop is pressed, emc-enable-in goes FALSE → LinuxCNC enters ESTOP.
 # ============================================================================
 
-net estop-ext    hm2_7i96s.0.gpio.004.in_not => iocontrol.0.emc-enable-in
+net estop-ext    hm2_7i96s.0.gpio.004.in => iocontrol.0.emc-enable-in
 
 # If E-stop gives trouble during initial testing, comment the line above
 # and uncomment this loop to bypass it temporarily:

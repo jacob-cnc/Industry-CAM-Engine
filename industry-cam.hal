@@ -19,7 +19,7 @@
 # ----------------------------------------------------------------------------
 
 loadrt hostmot2
-loadrt hm2_eth board_ip="192.168.1.121" config="num_encoders=6 num_stepgens=2 sserial_port_0=00000000"
+loadrt hm2_eth board_ip="192.168.1.121" config="num_encoders=5 num_stepgens=2 sserial_port_0=00000000"
 
 # DPLL timer: fire 200µs before servo period end for stable stepgen/encoder timing
 setp hm2_7i96s.0.dpll.01.timer-us -200

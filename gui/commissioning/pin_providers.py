@@ -114,8 +114,13 @@ class LivePinProvider(PinProvider):
     """
 
     def __init__(self):
-        import hal  # noqa: F811
-        self._hal = hal
+        import importlib.util as _ilu
+        _spec = _ilu.spec_from_file_location(
+            "hal_lcnc", "/usr/lib/python3/dist-packages/hal.py"
+        )
+        _mod = _ilu.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        self._hal = _mod
         # Verify we can read pins
         raw = self._hal.get_info_pins()
         if not raw:
