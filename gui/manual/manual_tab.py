@@ -316,7 +316,8 @@ class ManualTab(QWidget):
                 f"font-size: 13pt; font-weight: bold; color: {COLORS['text_disabled']};")
 
         self._state["mode_label"].setText(f"Mode: {s.task_mode.value.upper()}")
-        self._state["error_label"].setText(s.error_message)
+        if s.error_message:
+            self._state["error_label"].setText(s.error_message)
 
         # Homing
         for axis, label_key in [(s.x, "home_x_label"), (s.z, "home_z_label")]:
@@ -349,8 +350,10 @@ class ManualTab(QWidget):
         self._jog_velocity = value
 
     def _on_jog_inc_changed(self, index: int):
-        """Update MPG increment selection (mirrors rotary switch / 6-pos knob)."""
+        """Update MPG increment selection — updates both GUI state and HAL mux4."""
         self._jog_increment_idx = index
+        if hasattr(self._backend, 'set_mpg_scale_index'):
+            self._backend.set_mpg_scale_index(index)
 
     def _on_touchoff(self):
         """Execute touch-off (G10 L20)."""

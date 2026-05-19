@@ -398,6 +398,10 @@ class MockBackend(HALBackend):
         # This method exists for interface compatibility.
         pass
 
+    def set_mpg_scale_index(self, index: int):
+        """Set MPG jog increment index (no-op in mock — no HAL mux4 pins)."""
+        pass
+
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------

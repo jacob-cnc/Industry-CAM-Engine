@@ -9,8 +9,11 @@ into the HALBackend interface.
 Also creates a userspace HAL component for compound slide muxing.
 """
 
+import logging
 import linuxcnc
 import hal as hal_module  # LinuxCNC HAL Python bindings
+
+logger = logging.getLogger(__name__)
 
 from hal.interface import (
     HALBackend, MachineState, AxisState, SpindleState,
@@ -79,7 +82,13 @@ class LiveBackend(HALBackend):
             # Output pins — decomposed jog counts written by GUI
             self._hal_comp.newpin("x-jog-counts", hal_module.HAL_S32, hal_module.HAL_OUT)
             self._hal_comp.newpin("z-jog-counts", hal_module.HAL_S32, hal_module.HAL_OUT)
+            # MPG scale select pins — drive mux4.jogscale-*.sel0/sel1 via postgui.hal
+            self._hal_comp.newpin("mpg-scale-sel0", hal_module.HAL_BIT, hal_module.HAL_OUT)
+            self._hal_comp.newpin("mpg-scale-sel1", hal_module.HAL_BIT, hal_module.HAL_OUT)
             self._hal_comp.ready()
+            # Default to index 1 = 0.001" per MPG click (sel0=1, sel1=0)
+            self._hal_comp["mpg-scale-sel0"] = True
+            self._hal_comp["mpg-scale-sel1"] = False
         except Exception:
             # If component already exists or HAL not ready, continue without it
             self._hal_comp = None
@@ -127,12 +136,32 @@ class LiveBackend(HALBackend):
             except Exception:
                 pass
 
-        # Check error channel
+        # Check error channel — drain all queued messages per cycle
         error_msg = ""
-        err = self._error.poll()
-        if err:
+        while True:
+            err = self._error.poll()
+            if not err:
+                break
             kind, text = err
             error_msg = text
+            logger.error("LinuxCNC error [%s]: %s", kind, text)
+
+        # Log state transitions to help diagnose unexpected E-STOP
+        current_raw_state = self._stat.task_state
+        if not hasattr(self, '_last_raw_state'):
+            self._last_raw_state = current_raw_state
+            logger.info("Initial machine state: %s", current_raw_state)
+        elif current_raw_state != self._last_raw_state:
+            state_names = {
+                linuxcnc.STATE_ESTOP: "ESTOP",
+                linuxcnc.STATE_ESTOP_RESET: "ESTOP_RESET",
+                linuxcnc.STATE_OFF: "OFF",
+                linuxcnc.STATE_ON: "ON",
+            }
+            logger.info("State transition: %s → %s",
+                        state_names.get(self._last_raw_state, self._last_raw_state),
+                        state_names.get(current_raw_state, current_raw_state))
+            self._last_raw_state = current_raw_state
 
         s = self._stat
 
@@ -183,8 +212,9 @@ class LiveBackend(HALBackend):
         )
 
         # Spindle
-        spindle_speed = s.spindle[0]["speed"] if len(s.spindle) > 0 else 0.0
-        spindle_dir_val = s.spindle[0]["direction"] if len(s.spindle) > 0 else 0
+        sp = s.spindle[0] if len(s.spindle) > 0 else {}
+        spindle_speed = sp.get("speed", 0.0)
+        spindle_dir_val = sp.get("direction", 0)
         if spindle_dir_val > 0:
             spindle_dir = SpindleDirection.FORWARD
         elif spindle_dir_val < 0:
@@ -194,10 +224,10 @@ class LiveBackend(HALBackend):
 
         spindle = SpindleState(
             speed=abs(spindle_speed),
-            commanded_speed=abs(s.spindle[0]["commanded"] if len(s.spindle) > 0 else 0.0),
+            commanded_speed=abs(sp.get("speed_cmd", sp.get("commanded", spindle_speed))),
             direction=spindle_dir,
-            at_speed=bool(s.spindle[0]["at_speed"] if len(s.spindle) > 0 else False),
-            override=s.spindle[0]["override"] if len(s.spindle) > 0 else 1.0,
+            at_speed=bool(sp.get("at_speed", False)),
+            override=sp.get("override", 1.0),
         )
 
         # Active G-codes
@@ -245,7 +275,6 @@ class LiveBackend(HALBackend):
         if self._stat.interp_state != linuxcnc.INTERP_IDLE:
             return False
         self._cmd.mode(mode)
-        self._cmd.wait_complete()
         return True
 
     def set_mode_manual(self) -> bool:
@@ -262,27 +291,33 @@ class LiveBackend(HALBackend):
     # ------------------------------------------------------------------
 
     def estop_reset(self) -> bool:
+        logger.info("estop_reset: sending STATE_ESTOP_RESET")
         try:
             self._cmd.state(linuxcnc.STATE_ESTOP_RESET)
-            self._cmd.wait_complete()
+            logger.info("estop_reset: command accepted")
             return True
-        except linuxcnc.error:
+        except linuxcnc.error as e:
+            logger.error("estop_reset: FAILED — %s", e)
             return False
 
     def machine_on(self) -> bool:
+        logger.info("machine_on: sending STATE_ON")
         try:
             self._cmd.state(linuxcnc.STATE_ON)
-            self._cmd.wait_complete()
+            logger.info("machine_on: command accepted")
             return True
-        except linuxcnc.error:
+        except linuxcnc.error as e:
+            logger.error("machine_on: FAILED — %s", e)
             return False
 
     def machine_off(self) -> bool:
+        logger.info("machine_off: sending STATE_OFF")
         try:
             self._cmd.state(linuxcnc.STATE_OFF)
-            self._cmd.wait_complete()
+            logger.info("machine_off: command accepted")
             return True
-        except linuxcnc.error:
+        except linuxcnc.error as e:
+            logger.error("machine_off: FAILED — %s", e)
             return False
 
     # ------------------------------------------------------------------
@@ -320,8 +355,14 @@ class LiveBackend(HALBackend):
     # Jogging
     # ------------------------------------------------------------------
 
+    def _machine_is_on(self) -> bool:
+        """Return True only if machine is in STATE_ON (safe to jog)."""
+        return self._stat.task_state == linuxcnc.STATE_ON
+
     def jog_continuous(self, axis: int, direction: float, velocity: float) -> bool:
         try:
+            if not self._machine_is_on():
+                return False
             if not self._ensure_mode(linuxcnc.MODE_MANUAL):
                 return False
             vel = abs(velocity) * (1.0 if direction > 0 else -1.0)
@@ -332,6 +373,8 @@ class LiveBackend(HALBackend):
 
     def jog_increment(self, axis: int, direction: float, velocity: float, distance: float) -> bool:
         try:
+            if not self._machine_is_on():
+                return False
             if not self._ensure_mode(linuxcnc.MODE_MANUAL):
                 return False
             vel = abs(velocity)
@@ -343,6 +386,8 @@ class LiveBackend(HALBackend):
 
     def jog_stop(self, axis: int) -> bool:
         try:
+            if not self._machine_is_on():
+                return False
             self._cmd.jog(linuxcnc.JOG_STOP, False, axis)
             return True
         except linuxcnc.error:
@@ -547,5 +592,22 @@ class LiveBackend(HALBackend):
             try:
                 self._hal_comp["x-jog-counts"] = x_counts
                 self._hal_comp["z-jog-counts"] = z_counts
+            except Exception:
+                pass
+
+    def set_mpg_scale_index(self, index: int):
+        """Set the MPG jog increment via mux4 select pins.
+
+        Index maps to JOG_INCREMENTS: 0=0.0001", 1=0.001", 2=0.01", 3=0.1"
+        Drives compound-slide.mpg-scale-sel0/sel1, which postgui.hal routes
+        to mux4.jogscale-x/z.sel0/sel1.
+
+        Args:
+            index: 0–3 selecting the jog increment.
+        """
+        if self._hal_comp is not None:
+            try:
+                self._hal_comp["mpg-scale-sel0"] = bool(index & 1)
+                self._hal_comp["mpg-scale-sel1"] = bool((index >> 1) & 1)
             except Exception:
                 pass

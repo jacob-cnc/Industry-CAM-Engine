@@ -55,7 +55,7 @@ PID initial: P=500, FF1=1.0 (critical for velocity-mode stepgen), deadband=0.000
 | gpio.001 | P2 | Z Limit+ | NOT wired |
 | gpio.002 | P3 | X Limit- | NOT wired |
 | gpio.003 | P4 | X Home/Limit+ | NOT wired |
-| gpio.004 | P5 | E-Stop | CONNECTED (active-low, uses .in_not) |
+| gpio.004 | P5 | E-Stop | CONNECTED (NC button, uses .in — LED ON = released = safe) |
 | gpio.005 | P6 | Jog Z- | NOT wired |
 | gpio.006 | P7 | Jog Z+ | NOT wired |
 | gpio.007 | P8 | Jog X- | NOT wired |
@@ -67,6 +67,8 @@ PID initial: P=500, FF1=1.0 (critical for velocity-mode stepgen), deadband=0.000
 Triggered = `.in` HIGH = `.in_not` LOW (sourcing type)
 
 **HAL note:** when home/limit switches are eventually wired, use `.in` (not `.in_not`) for homing — the HAL currently has `.in_not` which would be wrong.
+
+**E-stop HAL note:** `net estop-loop user-enable-out => emc-enable-in` is a deadlock in LinuxCNC 2.9 — user-enable-out=0 in ESTOP pulls emc-enable-in=0, preventing escape. Current fix: `setp iocontrol.0.emc-enable-in 1`. When hardware E-stop is wired, replace with `net estop-ext hm2_7i96s.0.gpio.004.in => iocontrol.0.emc-enable-in` (gpio.004.in is HIGH when button is released = safe).
 
 ---
 

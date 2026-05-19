@@ -10,4 +10,4 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 export PYTHONPATH="$SCRIPT_DIR:$PYTHONPATH"
-exec python3 "$SCRIPT_DIR/gui/main_window.py" "$@"
+exec python3 -u "$SCRIPT_DIR/gui/main_window.py" "$@" >> /tmp/lcnc_gui.log 2>&1

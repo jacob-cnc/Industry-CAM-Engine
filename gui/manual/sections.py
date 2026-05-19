@@ -353,15 +353,24 @@ def build_state_section() -> tuple:
     btn_row = QHBoxLayout()
     btn_estop = QPushButton("Reset")
     btn_estop.setStyleSheet(
-        f"background: {COLORS['status_warning']}; color: {COLORS['text_primary']}; "
-        f"font-weight: bold; font-size: 9pt;"
+        f"QPushButton {{ background: {COLORS['status_warning']}; color: {COLORS['text_primary']}; "
+        f"font-weight: bold; font-size: 9pt; border-radius: 3px; }}"
+        f"QPushButton:hover {{ background: #e6a817; }}"
+        f"QPushButton:pressed {{ background: #c48a10; }}"
     )
     btn_on = QPushButton("ON")
     btn_on.setStyleSheet(
-        f"background: {COLORS['status_ok']}; color: {COLORS['text_primary']}; font-size: 9pt;"
+        f"QPushButton {{ background: {COLORS['status_ok']}; color: {COLORS['text_primary']}; "
+        f"font-size: 9pt; border-radius: 3px; }}"
+        f"QPushButton:hover {{ background: #2ea84a; }}"
+        f"QPushButton:pressed {{ background: #1e8a38; }}"
     )
     btn_off = QPushButton("OFF")
-    btn_off.setStyleSheet("font-size: 9pt;")
+    btn_off.setStyleSheet(
+        f"QPushButton {{ font-size: 9pt; border-radius: 3px; }}"
+        f"QPushButton:hover {{ background: {COLORS['bg_surface']}; }}"
+        f"QPushButton:pressed {{ background: {COLORS['border_normal']}; }}"
+    )
     btn_row.addWidget(btn_estop)
     btn_row.addWidget(btn_on)
     btn_row.addWidget(btn_off)

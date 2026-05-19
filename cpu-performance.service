@@ -1,0 +1,11 @@
+[Unit]
+Description=RT tuning for LinuxCNC (CPU governor + Mesa NIC qdisc)
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /home/jacob/linuxcnc/configs/industry-cam/set-cpu-performance.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
