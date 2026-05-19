@@ -36,13 +36,6 @@ loadrt mux4 names=mux4.jogscale-x,mux4.jogscale-z
 loadrt debounce cfg=12
 setp debounce.0.delay 5
 
-# Commissioning E-stop bypass — and2 gate with both inputs hardwired to 1
-# drives emc-enable-in via a proper realtime net every servo cycle.
-# Replace with hardware GPIO net when E-stop button wiring is confirmed.
-loadrt and2 names=and2.estop-bypass
-setp and2.estop-bypass.in0 1
-setp and2.estop-bypass.in1 1
-
 # ----------------------------------------------------------------------------
 # 2. Add functions to servo thread
 # ----------------------------------------------------------------------------
@@ -55,7 +48,6 @@ addf pid.z.do-pid-calcs            servo-thread
 addf near-spindle                   servo-thread
 addf mux4.jogscale-x               servo-thread
 addf mux4.jogscale-z               servo-thread
-addf and2.estop-bypass             servo-thread
 addf hm2_7i96s.0.write         servo-thread
 
 # ============================================================================
@@ -177,11 +169,10 @@ net spindle-at-speed near-spindle.out        => spindle.0.at-speed
 # ============================================================================
 # 8. E-Stop (7i96s TB3 P5 → gpio.004)
 # ============================================================================
-# Commissioning E-stop bypass — and2.estop-bypass drives emc-enable-in HIGH
-# every servo cycle via a proper realtime net.
-# Restore hardware connection when E-stop button wiring is confirmed:
-#   net estop-ext    hm2_7i96s.0.gpio.004.in => iocontrol.0.emc-enable-in
-net estop-always-enabled  and2.estop-bypass.out => iocontrol.0.emc-enable-in
+# iov2 estop loop — user-enable-out goes HIGH after RESET command clears aux.estop.
+# When hardware E-stop button is wired, add a second input to the net:
+#   net estop-loop  iocontrol.0.user-enable-out  hm2_7i96s.0.gpio.004.in  =>  iocontrol.0.emc-enable-in
+net estop-loop  iocontrol.0.user-enable-out  =>  iocontrol.0.emc-enable-in
 
 # ============================================================================
 # 9. Jog Buttons — velocity mode (7i96s TB3 P6–P9)

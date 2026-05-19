@@ -68,7 +68,7 @@ Triggered = `.in` HIGH = `.in_not` LOW (sourcing type)
 
 **HAL note:** when home/limit switches are eventually wired, use `.in` (not `.in_not`) for homing — the HAL currently has `.in_not` which would be wrong.
 
-**E-stop HAL note:** `net estop-loop user-enable-out => emc-enable-in` is a deadlock in LinuxCNC 2.9 — user-enable-out=0 in ESTOP pulls emc-enable-in=0, preventing escape. Current fix: `setp iocontrol.0.emc-enable-in 1`. When hardware E-stop is wired, replace with `net estop-ext hm2_7i96s.0.gpio.004.in => iocontrol.0.emc-enable-in` (gpio.004.in is HIGH when button is released = safe).
+**E-stop HAL note:** The correct iov2 estop loop is `net estop-loop iocontrol.0.user-enable-out => iocontrol.0.emc-enable-in`. This is NOT a deadlock — iov2 sets user-enable-out=TRUE after RESET clears aux.estop internally, breaking the loop. Do NOT use an and2 bypass or `setp iocontrol.0.emc-enable-in 1` — these drive emc-enable-in HIGH permanently but iov2 never clears aux.estop via NML, so task_state stays 1 forever. When hardware E-stop button is wired, extend the net: `net estop-loop iocontrol.0.user-enable-out hm2_7i96s.0.gpio.004.in => iocontrol.0.emc-enable-in` (gpio.004.in is HIGH when button released = safe, acts as AND with user-enable-out).
 
 ---
 
@@ -90,7 +90,8 @@ Triggered = `.in` HIGH = `.in_not` LOW (sourcing type)
 **HAL flags:**
 - `HOME_SEARCH_VEL=0` — home-in-place, no switch search
 - `NO_FORCE_HOMING=1` — can run without homing
-- `postgui.hal` and `custom.hal` are commented out in INI
+- `postgui.hal` active (direct MPG routing, no compound-slide)
+- `custom.hal` listed in INI (must exist or LinuxCNC fails to start)
 
 ---
 
