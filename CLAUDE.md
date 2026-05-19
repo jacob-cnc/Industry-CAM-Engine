@@ -15,9 +15,9 @@
 | Motion controller | Mesa 7i96s (Ethernet) at 192.168.1.121 |
 | Daughter card | Mesa 7i85s via SSERIAL (firmware: 7i96s_7i85sd.bin) |
 | Drives | UIRobot UIM8696PM closed-loop integrated steppers, 48V |
-| Linear encoders | Sino KA300/KA500, 5µm = 5080 counts/inch |
+| Linear encoders | Sino KA300/KA500, 5µm = 5080 counts/inch; Z=enc 0, X=enc 1, both on 7i85s TB3 |
 | Spindle | Manual (no VFD), 1000 PPR encoder on 7i96s TB2 |
-| MPGs | 2× 100 PPR handwheels: X on 7i85s TB2, Z on 7i85s TB3 |
+| MPGs | 2× 100 PPR handwheels: X MPG on 7i85s TB2 (enc 3), Z MPG on 7i85s TB3 (enc 2) |
 
 ---
 
@@ -27,10 +27,10 @@ The physical wiring reverses stepgen numbering from joint numbering:
 
 | stepgen | axis | joint | encoder (linear feedback) |
 |---|---|---|---|
-| stepgen.00 | Z | Joint 1 | encoder.01 |
-| stepgen.01 | X | Joint 0 | encoder.00 |
+| stepgen.00 | Z | Joint 1 | encoder.00 (7i85s TB3 enc 0) |
+| stepgen.01 | X | Joint 0 | encoder.01 (7i85s TB3 enc 1) |
 
-encoder.02 = Spindle, encoder.03 = X MPG, encoder.04 = Z MPG
+encoder.02 = Z MPG (7i85s TB3 enc 2), encoder.03 = X MPG (7i85s TB2 enc 3), encoder.04 = Spindle (7i96s TB2 onboard)
 
 **Never assume stepgen N = joint N. Always verify against this table.**
 
