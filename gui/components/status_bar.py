@@ -1,7 +1,8 @@
 """Status bar widget for Industry CAM Engine.
 
 Displays machine state, live DRO (X diameter, Z inches), active G-codes,
-spindle RPM, and feed rate. Supports offline mode with demo values.
+spindle RPM, and feed rate. Includes a prominent software E-Stop button.
+Supports offline mode with demo values.
 
 Placed at the top of the main window.
 """
@@ -13,9 +14,9 @@ except ImportError:
     HAS_LINUXCNC = False
 
 from PyQt5.QtWidgets import (
-    QWidget, QHBoxLayout, QLabel, QFrame,
+    QWidget, QHBoxLayout, QLabel, QFrame, QPushButton,
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont
 
 from gui.colors import COLORS, FONTS
@@ -44,9 +45,17 @@ class _Separator(QFrame):
 class StatusBar(QWidget):
     """Top status bar showing machine state, DRO, G-codes, and spindle info.
 
+    Includes a prominent software E-Stop button on the right side that is
+    always visible regardless of which tab is selected.
+
     In offline mode (no linuxcnc module), displays an OFFLINE badge and
     demo values. Provides update methods for live data integration.
+
+    Signals:
+        estop_clicked: Emitted when the E-Stop button is pressed.
     """
+
+    estop_clicked = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -175,8 +184,35 @@ class StatusBar(QWidget):
         self._feed_display.setMinimumWidth(60)
         layout.addWidget(self._feed_display)
 
-        # --- Spacer + Offline Badge ---
+        # --- Spacer + E-Stop Button + Offline Badge ---
         layout.addStretch()
+
+        self._estop_btn = QPushButton("E-STOP")
+        self._estop_btn.setFixedHeight(36)
+        self._estop_btn.setMinimumWidth(90)
+        self._estop_btn.setFont(QFont(FONTS["ui_family"], 11, QFont.Bold))
+        self._estop_btn.setCursor(Qt.PointingHandCursor)
+        self._estop_btn.setToolTip("Software E-Stop — immediately halt all motion")
+        self._estop_btn.setStyleSheet(
+            f"QPushButton {{"
+            f"  background-color: {COLORS['status_error']};"
+            f"  color: #ffffff;"
+            f"  border: 2px solid #ff2222;"
+            f"  border-radius: 6px;"
+            f"  padding: 0 12px;"
+            f"  font-weight: bold;"
+            f"}}"
+            f"QPushButton:hover {{"
+            f"  background-color: #ff3333;"
+            f"  border: 2px solid #ff5555;"
+            f"}}"
+            f"QPushButton:pressed {{"
+            f"  background-color: #aa0000;"
+            f"  border: 2px solid #cc0000;"
+            f"}}"
+        )
+        self._estop_btn.clicked.connect(self.estop_clicked.emit)
+        layout.addWidget(self._estop_btn)
 
         self._offline_badge = QLabel("OFFLINE")
         self._offline_badge.setFont(label_font)

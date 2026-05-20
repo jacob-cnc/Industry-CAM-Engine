@@ -82,33 +82,32 @@ class MainWindow(QMainWindow):
         self._tab_widget.setDocumentMode(True)
         layout.addWidget(self._tab_widget)
 
-        # --- P1 Tabs (fully implemented) ---
+        # --- Tabs in operator-priority order ---
+        self._manual_tab = ManualTab(self)
         self._program_tab = ProgramTab(self)
         self._edit_tab = EditTab(self)
         self._tools_tab = ToolsTab(self)
         self._debug_tab = DebugTab(self)
-
-        self._tab_widget.addTab(self._program_tab, "Program")
-        self._tab_widget.addTab(self._edit_tab, "Edit")
-        self._tab_widget.addTab(self._tools_tab, "Tools")
-        self._tab_widget.addTab(self._debug_tab, "Debug")
-
-        # --- P2 Placeholder Tabs ---
-        self._manual_tab = ManualTab(self)
-        self._tab_widget.addTab(
-            self._make_placeholder("Coming in Phase 2"), "Run"
-        )
-        self._tab_widget.addTab(self._manual_tab, "Manual")
-
-        # --- P3 Placeholder Tabs ---
         self._setup_tab = SetupTab(
             backend=self._backend,
             ini_path=self._get_ini_path(),
         )
+
+        self._tab_widget.addTab(self._manual_tab, "Manual")
+        self._tab_widget.addTab(self._tools_tab, "Tools")
+        self._tab_widget.addTab(
+            self._make_placeholder("Coming in Phase 2"), "Run"
+        )
+        self._tab_widget.addTab(self._program_tab, "Program")
+        self._tab_widget.addTab(self._edit_tab, "Edit")
+        self._tab_widget.addTab(self._debug_tab, "Debug")
         self._tab_widget.addTab(self._setup_tab, "Setup")
         self._tab_widget.addTab(
             self._make_placeholder("Coming in Phase 3"), "Help"
         )
+
+        # Default to Manual tab
+        self._tab_widget.setCurrentWidget(self._manual_tab)
 
     def _make_placeholder(self, text: str) -> QWidget:
         """Create a placeholder tab widget with a centered label.
@@ -163,6 +162,9 @@ class MainWindow(QMainWindow):
         # 6. Tab change → activate/deactivate Setup tab polling
         self._tab_widget.currentChanged.connect(self._on_tab_changed)
 
+        # 7. E-Stop button → trigger estop on backend
+        self._status_bar.estop_clicked.connect(self._on_estop_clicked)
+
     # ------------------------------------------------------------------
     # Signal Slots
     # ------------------------------------------------------------------
@@ -195,6 +197,16 @@ class MainWindow(QMainWindow):
         """Handle main tab switch — activate/deactivate Setup tab polling."""
         is_setup = (self._tab_widget.widget(index) is self._setup_tab)
         self._setup_tab.set_active(is_setup)
+
+    def _on_estop_clicked(self):
+        """Handle E-Stop button press — trigger estop on backend.
+
+        This is a software E-Stop that commands LinuxCNC into ESTOP state.
+        It does NOT replace the hardware E-Stop button but provides a
+        convenient always-visible trigger from any tab.
+        """
+        self._backend.machine_off()
+        logger.warning("Software E-Stop triggered from status bar")
 
     # ------------------------------------------------------------------
     # Helpers
