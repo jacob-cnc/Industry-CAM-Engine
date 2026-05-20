@@ -205,9 +205,9 @@ def _build_demo_pins() -> List[PinInfo]:
     _add(f"{_MESA}.gpio.003.in", "bit", "IN", False, "x-home-raw")
     _add(f"{_MESA}.gpio.003.in_not", "bit", "IN", True, "")
 
-    # --- E-Stop (gpio.004) ---
-    _add(f"{_MESA}.gpio.004.in", "bit", "IN", False, "")
-    _add(f"{_MESA}.gpio.004.in_not", "bit", "IN", True, "estop-ext")
+    # --- E-Stop (gpio.004, TB3 P5) — connected, not yet in estop net ---
+    _add(f"{_MESA}.gpio.004.in", "bit", "IN", True, "")
+    _add(f"{_MESA}.gpio.004.in_not", "bit", "IN", False, "")
 
     # --- Jog buttons (gpio.005–008) ---
     _add(f"{_MESA}.gpio.005.in_not", "bit", "IN", False, "jog-z-minus-raw")
@@ -219,21 +219,21 @@ def _build_demo_pins() -> List[PinInfo]:
     _add(f"{_MESA}.gpio.009.in_not", "bit", "IN", False, "cycle-go-raw")
     _add(f"{_MESA}.gpio.010.in_not", "bit", "IN", False, "cycle-stop-raw")
 
-    # --- Spindle encoder (encoder.02 on 7i96s TB2) ---
-    _add(f"{_MESA}.encoder.02.position", "float", "OUT", 0.0, "spindle-pos")
-    _add(f"{_MESA}.encoder.02.velocity", "float", "OUT", 13.33, "spindle-vel")
-    _add(f"{_MESA}.encoder.02.index-enable", "bit", "I/O", False, "spindle-index")
+    # --- Spindle encoder (encoder.04 on 7i96s TB2 onboard) ---
+    _add(f"{_MESA}.encoder.04.position", "float", "OUT", 0.0, "spindle-pos")
+    _add(f"{_MESA}.encoder.04.velocity", "float", "OUT", 13.33, "spindle-vel")
+    _add(f"{_MESA}.encoder.04.index-enable", "bit", "I/O", False, "spindle-index")
 
-    # --- MPG encoders (encoder.03=X, encoder.04=Z on 7i85s) ---
+    # --- MPG encoders (encoder.02=Z MPG, encoder.03=X MPG on 7i85s) ---
+    _add(f"{_MESA}.encoder.02.count", "s32", "OUT", 0, "mpg-z-counts")
+    _add(f"{_MESA}.encoder.02.position", "float", "OUT", 0.0, "")
     _add(f"{_MESA}.encoder.03.count", "s32", "OUT", 0, "mpg-x-counts")
     _add(f"{_MESA}.encoder.03.position", "float", "OUT", 0.0, "")
-    _add(f"{_MESA}.encoder.04.count", "s32", "OUT", 0, "mpg-z-counts")
-    _add(f"{_MESA}.encoder.04.position", "float", "OUT", 0.0, "")
 
-    # --- Linear encoders (encoder.00=X, encoder.01=Z on 7i85s TB1) ---
-    _add(f"{_MESA}.encoder.00.position", "float", "OUT", 0.0, "x-pos-fb")
+    # --- Linear encoders (encoder.00=Z, encoder.01=X on 7i85s TB3) ---
+    _add(f"{_MESA}.encoder.00.position", "float", "OUT", 0.0, "z-pos-fb")
     _add(f"{_MESA}.encoder.00.velocity", "float", "OUT", 0.0, "")
-    _add(f"{_MESA}.encoder.01.position", "float", "OUT", 0.0, "z-pos-fb")
+    _add(f"{_MESA}.encoder.01.position", "float", "OUT", 0.0, "x-pos-fb")
     _add(f"{_MESA}.encoder.01.velocity", "float", "OUT", 0.0, "")
 
     # --- PID (pid.x and pid.z) ---
