@@ -107,6 +107,49 @@ Triggered = `.in` HIGH = `.in_not` LOW (sourcing type)
 
 ---
 
+## Repository Layout (reorganized 2026-05-20)
+
+```
+Industry CAM Engine/
+├── geometry/          CAM geometry kernel (Build123d/OCCT)
+├── gui/               PyQt5 GUI application
+├── hal/               LinuxCNC HAL abstraction
+├── intervals/         Fiber/interval classes
+├── models/            Pure dataclasses (ClosedProfile, ToolDef, etc.)
+├── outputs/           G-code writer, graph adapter, DXF/SVG export
+├── pipeline/          Orchestration (execute() wires modules)
+├── planners/          Pass planning (staircase, face, finish, etc.)
+├── tools/             Tool geometry, reach analysis
+├── transitions/       Retract/approach/link logic
+├── validation/        Safety checking (3 gates)
+├── tests/             All tests (unit/, properties/, integration/, etc.)
+├── scripts/           Debug, export, and visual test scripts (not imported)
+├── session-notes/     AI session checkpoints, commissioning logs
+├── reference/         External reference repos (.gitignored)
+├── backups/           Timestamped source snapshots (.gitignored)
+├── .kiro/             Specs, steering rules, hooks (Kiro IDE)
+│
+├── industry-cam.*     LinuxCNC machine config (deployed to Linux)
+├── custom.hal         HAL additions
+├── postgui.hal        Post-GUI HAL connections
+├── tool.tbl           Tool table
+├── *.sh               Linux launcher/utility scripts
+├── *.bat              Windows dev launchers
+│
+├── ARCHITECTURE.md    Full system architecture reference
+├── README.md          Project overview
+├── CLAUDE.md          THIS FILE — Claude Code session context
+├── pyproject.toml     Python project config
+└── requirements.txt   Dependencies
+```
+
+**Key paths for Claude on Linux:**
+- Session notes: `session-notes/` (checkpoints, commissioning logs, handoff docs)
+- Debug scripts: `scripts/` (standalone, never imported by source)
+- This file: `CLAUDE.md` at repo root (Claude Code reads this automatically)
+
+---
+
 ## Start of Session Checklist
 
 When beginning a new session, tell Claude:
