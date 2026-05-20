@@ -59,7 +59,7 @@ TUNING_PINS = {
         'pid_command': 'pid.x.command',
         'pid_feedback': 'pid.x.feedback',
         'pid_output': 'pid.x.output',
-        'encoder_pos': 'hm2_7i96s.0.encoder.00.position',
+        'encoder_pos': 'hm2_7i96s.0.encoder.01.position',
         'stepgen_fb': 'hm2_7i96s.0.stepgen.01.position-fb',
     },
     'z': {
@@ -67,11 +67,11 @@ TUNING_PINS = {
         'pid_command': 'pid.z.command',
         'pid_feedback': 'pid.z.feedback',
         'pid_output': 'pid.z.output',
-        'encoder_pos': 'hm2_7i96s.0.encoder.01.position',
+        'encoder_pos': 'hm2_7i96s.0.encoder.00.position',
         'stepgen_fb': 'hm2_7i96s.0.stepgen.00.position-fb',
     },
     'spindle': {
-        'velocity': 'hm2_7i96s.0.encoder.02.velocity',
+        'velocity': 'hm2_7i96s.0.encoder.04.velocity',
     },
 }
 
@@ -548,13 +548,20 @@ class TuningTab(QWidget):
         x_vals = self._x_panel.get_values()
         z_vals = self._z_panel.get_values()
 
-        # Basic sanity checks
-        try:
-            p_x = float(x_vals.get('p_gain', '0'))
-            if p_x < 0:
-                errors.append("X P Gain cannot be negative")
-        except ValueError:
-            errors.append("X P Gain is not a valid number")
+        # Validate all PID fields are valid numbers and non-negative where required
+        non_negative_fields = {'p_gain', 'i_gain', 'd_gain', 'ff0', 'ff1', 'ff2',
+                               'deadband', 'max_output', 'max_error'}
+        for axis_name, vals in [('X', x_vals), ('Z', z_vals)]:
+            for fk in pid_field_map:
+                raw = vals.get(fk, '').strip()
+                if not raw:
+                    continue
+                try:
+                    v = float(raw)
+                    if fk in non_negative_fields and v < 0:
+                        errors.append(f"{axis_name} {fk}: cannot be negative")
+                except ValueError:
+                    errors.append(f"{axis_name} {fk}: not a valid number")
 
         if errors:
             QMessageBox.warning(self, "Validation Error",
@@ -562,22 +569,25 @@ class TuningTab(QWidget):
             return
 
         # Apply X axis PID
+        apply_errors = []
         for fk, hal_suffix in pid_field_map.items():
-            if fk in x_vals and x_vals[fk]:
+            raw = x_vals.get(fk, '').strip()
+            if raw:
                 pin = PID_HAL_PINS['x'][hal_suffix]
-                if not self._pin_provider.set_pin_value(pin, x_vals[fk]):
-                    errors.append(f"Failed: {pin}")
+                if not self._pin_provider.set_pin_value(pin, raw):
+                    apply_errors.append(f"Failed: {pin}")
 
         # Apply Z axis PID
         for fk, hal_suffix in pid_field_map.items():
-            if fk in z_vals and z_vals[fk]:
+            raw = z_vals.get(fk, '').strip()
+            if raw:
                 pin = PID_HAL_PINS['z'][hal_suffix]
-                if not self._pin_provider.set_pin_value(pin, z_vals[fk]):
-                    errors.append(f"Failed: {pin}")
+                if not self._pin_provider.set_pin_value(pin, raw):
+                    apply_errors.append(f"Failed: {pin}")
 
-        if errors:
+        if apply_errors:
             QMessageBox.warning(self, "Apply Errors",
-                                "Some values failed:\n" + "\n".join(errors))
+                                "Some values failed:\n" + "\n".join(apply_errors))
         else:
             QMessageBox.information(self, "Applied",
                                     "PID gains applied to HAL.\n"

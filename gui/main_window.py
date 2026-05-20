@@ -207,15 +207,15 @@ class MainWindow(QMainWindow):
         Returns empty string if not found (offline development without INI).
         """
         import os
+        # The project root is one level up from gui/
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         candidates = [
-            # Workspace-relative (development)
-            os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                         "..", "linuxcnc", "industry-cam.ini"),
-            # Ship to LinuxPC folder
-            os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                         "..", "Ship to LinuxPC", "industry-cam.ini"),
+            # Same directory as project root (deployed layout)
+            os.path.join(project_root, "industry-cam.ini"),
             # Linux deploy path
             "/home/jacob/linuxcnc/configs/industry-cam/industry-cam.ini",
+            # Workspace-relative (development)
+            os.path.join(project_root, "linuxcnc", "industry-cam.ini"),
         ]
         for path in candidates:
             if os.path.isfile(path):
