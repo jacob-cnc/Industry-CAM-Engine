@@ -1,0 +1,18 @@
+# ============================================================================
+# postgui-simple.hal — Direct MPG routing (no compound-slide dependency)
+#
+# Fallback version: routes MPG encoder counts directly to joints.
+# Use this if the compound-slide HAL component fails to create.
+#
+# To use: rename this to postgui.hal (and rename the full version away)
+# ============================================================================
+
+# --- MPG counts → joint jog-counts (direct, no mux) ---
+net mpg-x-counts  =>  joint.0.jog-counts  axis.x.jog-counts
+net mpg-z-counts  =>  joint.1.jog-counts  axis.z.jog-counts
+
+# --- MPG scale: 0.001"/click (mux4 index 1: sel0=1, sel1=0) ---
+setp mux4.jogscale-x.sel0  1
+setp mux4.jogscale-x.sel1  0
+setp mux4.jogscale-z.sel0  1
+setp mux4.jogscale-z.sel1  0

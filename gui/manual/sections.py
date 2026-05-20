@@ -448,21 +448,26 @@ def build_compound_section() -> tuple:
     handwheel drives coordinated X+Z motion along a user-defined angle
     (Linear mode) or circular arc (Arc mode).
 
+    Layout (Arc mode):
+        Large quadrant graphic (100×100) on left
+        Narrow stacked selectors on right (R, Quadrant, Start)
+
     Returns:
         (section, widgets) where widgets is a dict of named widget references.
     """
     from gui.components.quadrant_graphic import QuadrantGraphic
+    from hal.compound_logic import CompoundLinearLogic
 
     section = CollapsibleSection("Compound Slide", expanded=False)
 
     # --- Activation toggle ---
     btn_activate = QPushButton("OFF")
     btn_activate.setCheckable(True)
-    btn_activate.setFixedHeight(32)
+    btn_activate.setFixedHeight(36)
     btn_activate.setStyleSheet(
         f"QPushButton {{ background: {COLORS['bg_surface']}; "
         f"color: {COLORS['text_primary']}; border: 1px solid {COLORS['border_normal']}; "
-        f"border-radius: 3px; font-weight: bold; font-size: 10pt; "
+        f"border-radius: 4px; font-weight: bold; font-size: 11pt; "
         f"margin-top: 4px; margin-bottom: 4px; }}"
         f"QPushButton:checked {{ background: {COLORS['status_ok']}; "
         f"color: {COLORS['text_primary']}; border: 1px solid {COLORS['status_ok']}; "
@@ -472,32 +477,32 @@ def build_compound_section() -> tuple:
 
     # --- Mode selector ---
     mode_row = QHBoxLayout()
-    mode_row.setContentsMargins(0, 6, 0, 0)
+    mode_row.setContentsMargins(0, 4, 0, 0)
     mode_label = QLabel("Mode:")
-    mode_label.setMinimumWidth(56)
+    mode_label.setFixedWidth(40)
     mode_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 9pt;")
     combo_mode = QComboBox()
     combo_mode.addItems(["Linear", "Arc"])
     combo_mode.setCurrentIndex(0)
-    combo_mode.setFixedHeight(26)
+    combo_mode.setFixedHeight(30)
     mode_row.addWidget(mode_label)
     mode_row.addWidget(combo_mode, stretch=1)
     section.add_layout(mode_row)
 
     # --- Linear mode: Angle input (sign determines direction) ---
     angle_row = QHBoxLayout()
-    angle_row.setContentsMargins(0, 6, 0, 0)
+    angle_row.setContentsMargins(0, 4, 0, 0)
     angle_label = QLabel("Angle:")
-    angle_label.setMinimumWidth(56)
+    angle_label.setFixedWidth(40)
     angle_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 9pt;")
     from PyQt5.QtWidgets import QLineEdit as _QLE
     input_angle = _QLE("45.0")
-    input_angle.setAlignment(Qt.AlignRight)
-    input_angle.setFixedHeight(26)
+    input_angle.setAlignment(Qt.AlignCenter)
+    input_angle.setFixedHeight(30)
     input_angle.setStyleSheet(
-        f"font-family: {FONTS['mono_family']}; font-size: 10pt; "
+        f"font-family: {FONTS['mono_family']}; font-size: 11pt; "
         f"background: {COLORS['bg_base']}; color: {COLORS['text_primary']}; "
-        f"border: 1px solid {COLORS['border_normal']}; border-radius: 3px; padding: 2px 4px;"
+        f"border: 1px solid {COLORS['border_normal']}; border-radius: 3px; padding: 2px;"
     )
     input_angle.setToolTip(
         "Compound angle (-90 to +90°).\n"
@@ -506,22 +511,47 @@ def build_compound_section() -> tuple:
         "Examples: +45 = OD chamfer, -29.5 = ID threading"
     )
     deg_label = QLabel("°")
-    deg_label.setStyleSheet(f"color: {COLORS['text_disabled']};")
+    deg_label.setStyleSheet(f"color: {COLORS['text_disabled']}; font-size: 11pt;")
     angle_row.addWidget(angle_label)
     angle_row.addWidget(input_angle, stretch=1)
     angle_row.addWidget(deg_label)
     section.add_layout(angle_row)
 
-    # --- Arc mode: Radius + Quadrant + Start Type + Graphic ---
+    # --- Preset angle buttons ---
+    preset_row = QHBoxLayout()
+    preset_row.setContentsMargins(0, 3, 0, 0)
+    preset_row.setSpacing(4)
+    preset_buttons = {}
+    preset_btn_style = (
+        f"QPushButton {{ background: {COLORS['bg_surface']}; "
+        f"color: {COLORS['text_secondary']}; border: 1px solid {COLORS['border_normal']}; "
+        f"border-radius: 3px; font-size: 9pt; padding: 4px 6px; min-height: 26px; }}"
+        f"QPushButton:hover {{ background: {COLORS['btn_primary_hover']}; "
+        f"color: {COLORS['text_primary']}; }}"
+    )
+    for label, angle_val in CompoundLinearLogic.PRESETS.items():
+        short_label = label.split("°")[0] + "°"
+        btn = QPushButton(short_label)
+        btn.setStyleSheet(preset_btn_style)
+        btn.setToolTip(label)
+        preset_buttons[label] = btn
+        preset_row.addWidget(btn, stretch=1)
+    section.add_layout(preset_row)
+
+    # --- Arc mode container: large graphic left, selectors fill right ---
     arc_container = QWidget()
-    arc_container.setMinimumHeight(140)
-    arc_layout = QHBoxLayout(arc_container)
-    arc_layout.setContentsMargins(4, 10, 4, 10)
-    arc_layout.setSpacing(12)
+    arc_container.setMinimumHeight(160)
+    arc_main = QHBoxLayout(arc_container)
+    arc_main.setContentsMargins(0, 4, 0, 4)
+    arc_main.setSpacing(12)
 
+    # Left: large quadrant graphic (fixed size, won't be compressed)
     quadrant_graphic = QuadrantGraphic()
-    arc_layout.addWidget(quadrant_graphic, alignment=Qt.AlignTop)
+    quadrant_graphic.setFixedSize(150, 150)
+    quadrant_graphic.setMinimumSize(150, 150)
+    arc_main.addWidget(quadrant_graphic, stretch=0, alignment=Qt.AlignVCenter)
 
+    # Right: stacked selectors — fill remaining width
     arc_selectors = QVBoxLayout()
     arc_selectors.setSpacing(6)
 
@@ -529,17 +559,19 @@ def build_compound_section() -> tuple:
     radius_row = QHBoxLayout()
     radius_row.setSpacing(4)
     r_label = QLabel("R:")
+    r_label.setFixedWidth(18)
     r_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 9pt;")
     input_radius = _QLE("0.250")
-    input_radius.setAlignment(Qt.AlignRight)
-    input_radius.setFixedHeight(26)
+    input_radius.setAlignment(Qt.AlignCenter)
+    input_radius.setFixedHeight(30)
     input_radius.setStyleSheet(
-        f"font-family: {FONTS['mono_family']}; font-size: 9pt; "
+        f"font-family: {FONTS['mono_family']}; font-size: 11pt; "
         f"background: {COLORS['bg_base']}; color: {COLORS['text_primary']}; "
-        f"border: 1px solid {COLORS['border_normal']}; border-radius: 2px; padding: 2px 4px;"
+        f"border: 1px solid {COLORS['border_normal']}; border-radius: 3px; padding: 2px;"
     )
+    input_radius.setToolTip("Arc radius (inches)")
     r_unit = QLabel("\"")
-    r_unit.setStyleSheet(f"color: {COLORS['text_disabled']};")
+    r_unit.setStyleSheet(f"color: {COLORS['text_disabled']}; font-size: 11pt;")
     radius_row.addWidget(r_label)
     radius_row.addWidget(input_radius, stretch=1)
     radius_row.addWidget(r_unit)
@@ -549,50 +581,63 @@ def build_compound_section() -> tuple:
     combo_quadrant = QComboBox()
     combo_quadrant.addItems(["NE", "NW", "SW", "SE"])
     combo_quadrant.setCurrentIndex(3)  # SE default
-    combo_quadrant.setFixedHeight(26)
+    combo_quadrant.setFixedHeight(30)
     arc_selectors.addWidget(combo_quadrant)
 
     # Start type
     combo_start = QComboBox()
     combo_start.addItems(["Arc Top", "Arc Bottom"])
     combo_start.setCurrentIndex(0)
-    combo_start.setFixedHeight(26)
+    combo_start.setFixedHeight(30)
     arc_selectors.addWidget(combo_start)
 
-    arc_layout.addLayout(arc_selectors, stretch=1)
+    arc_main.addLayout(arc_selectors, stretch=1)
+
     section.add_widget(arc_container)
     arc_container.setVisible(False)  # Hidden by default (Linear mode)
 
     # --- MPG selector ---
     mpg_row = QHBoxLayout()
-    mpg_row.setContentsMargins(0, 6, 0, 0)
+    mpg_row.setContentsMargins(0, 4, 0, 0)
     mpg_label = QLabel("MPG:")
-    mpg_label.setMinimumWidth(56)
+    mpg_label.setFixedWidth(40)
     mpg_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 9pt;")
     combo_mpg = QComboBox()
     combo_mpg.addItems(["X MPG", "Z MPG"])
     combo_mpg.setCurrentIndex(0)
-    combo_mpg.setFixedHeight(26)
+    combo_mpg.setFixedHeight(30)
     mpg_row.addWidget(mpg_label)
     mpg_row.addWidget(combo_mpg, stretch=1)
     section.add_layout(mpg_row)
 
-    # --- Cumulative distance display ---
+    # --- Cumulative distance + reset ---
     dist_row = QHBoxLayout()
-    dist_row.setContentsMargins(0, 6, 0, 4)
+    dist_row.setContentsMargins(0, 6, 0, 0)
     dist_label = QLabel("Dist:")
-    dist_label.setMinimumWidth(56)
+    dist_label.setFixedWidth(40)
     dist_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 9pt;")
     lbl_distance = QLabel("0.0000\"")
-    lbl_distance.setAlignment(Qt.AlignRight)
+    lbl_distance.setAlignment(Qt.AlignCenter)
     lbl_distance.setStyleSheet(
         f"font-family: {FONTS['mono_family']}; font-size: 11pt; font-weight: bold; "
         f"color: {COLORS['text_primary']}; background: {COLORS['bg_base']}; "
         f"border: 1px solid {COLORS['border_normal']}; border-radius: 3px; "
-        f"padding: 2px 6px;"
+        f"padding: 3px 6px;"
     )
+    btn_reset_dist = QPushButton("Reset")
+    btn_reset_dist.setFixedHeight(28)
+    btn_reset_dist.setFixedWidth(52)
+    btn_reset_dist.setStyleSheet(
+        f"QPushButton {{ background: {COLORS['bg_surface']}; "
+        f"color: {COLORS['text_secondary']}; border: 1px solid {COLORS['border_normal']}; "
+        f"border-radius: 3px; font-size: 8pt; }}"
+        f"QPushButton:hover {{ background: {COLORS['btn_primary_hover']}; "
+        f"color: {COLORS['text_primary']}; }}"
+    )
+    btn_reset_dist.setToolTip("Zero the distance counter without deactivating")
     dist_row.addWidget(dist_label)
     dist_row.addWidget(lbl_distance, stretch=1)
+    dist_row.addWidget(btn_reset_dist)
     section.add_layout(dist_row)
 
     widgets = {
@@ -601,6 +646,7 @@ def build_compound_section() -> tuple:
         "input_angle": input_angle,
         "angle_label": angle_label,
         "deg_label": deg_label,
+        "preset_buttons": preset_buttons,
         "arc_container": arc_container,
         "input_radius": input_radius,
         "combo_quadrant": combo_quadrant,
@@ -608,5 +654,6 @@ def build_compound_section() -> tuple:
         "quadrant_graphic": quadrant_graphic,
         "combo_mpg": combo_mpg,
         "lbl_distance": lbl_distance,
+        "btn_reset_dist": btn_reset_dist,
     }
     return section, widgets

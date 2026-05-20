@@ -270,6 +270,13 @@ class ManualTab(QWidget):
         self._compound["combo_mpg"].currentIndexChanged.connect(
             lambda idx: setattr(self, '_compound_mpg', 'x' if idx == 0 else 'z')
         )
+        self._compound["input_radius"].editingFinished.connect(self._on_compound_radius_changed)
+        self._compound["btn_reset_dist"].clicked.connect(self._on_compound_reset_distance)
+
+        # Preset angle buttons
+        for label, btn in self._compound["preset_buttons"].items():
+            angle_val = CompoundLinearLogic.PRESETS[label]
+            btn.clicked.connect(self._make_preset_handler(angle_val))
 
     # ==================================================================
     # Polling
@@ -427,9 +434,20 @@ class ManualTab(QWidget):
                 radius = 0.25
             quadrant = self._get_selected_quadrant()
             start_idx = self._compound["combo_start"].currentIndex()
-            # User POV (inverted Y): "Arc Top" = top of screen = closer to centerline (small X)
-            #                         "Arc Bottom" = bottom of screen = further from centerline (large X)
-            start_type = ArcStartType.ARC_BOTTOM if start_idx == 0 else ArcStartType.ARC_TOP
+            # Combo: index 0 = "Arc Top", index 1 = "Arc Bottom"
+            start_type = ArcStartType.ARC_TOP if start_idx == 0 else ArcStartType.ARC_BOTTOM
+
+            # The N↔S quadrant swap (user NE/NW → logic SE/SW) inverts the
+            # meaning of "top" and "bottom" for north quadrants. Compensate:
+            user_idx = self._compound["combo_quadrant"].currentIndex()
+            user_is_north = user_idx in (0, 1)  # "NE"=0, "NW"=1
+            if user_is_north:
+                # Flip: user "Arc Top" (small X, top of graph) needs logic ARC_BOTTOM
+                #        user "Arc Bottom" (large X, bottom of graph) needs logic ARC_TOP
+                if start_type == ArcStartType.ARC_TOP:
+                    start_type = ArcStartType.ARC_BOTTOM
+                else:
+                    start_type = ArcStartType.ARC_TOP
             self._arc_logic.activate(current_x_r, current_z, radius, quadrant, start_type)
             # Draw arc overlay on graph
             self._draw_compound_overlay()
@@ -619,12 +637,18 @@ class ManualTab(QWidget):
             self._compound["angle_label"].setVisible(True)
             self._compound["deg_label"].setVisible(True)
             self._compound["arc_container"].setVisible(False)
+            # Show preset buttons (linear mode only)
+            for btn in self._compound["preset_buttons"].values():
+                btn.setVisible(True)
         else:
             self._compound_mode = "arc"
             self._compound["input_angle"].setVisible(False)
             self._compound["angle_label"].setVisible(False)
             self._compound["deg_label"].setVisible(False)
             self._compound["arc_container"].setVisible(True)
+            # Hide preset buttons (not applicable to arc mode)
+            for btn in self._compound["preset_buttons"].values():
+                btn.setVisible(False)
 
     def _on_compound_angle_changed(self):
         """Validate and update compound angle.
@@ -649,14 +673,72 @@ class ManualTab(QWidget):
             self._compound["input_angle"].setText(f"{self._compound_angle:.1f}")
 
     def _on_compound_quadrant_changed(self, index: int):
-        """Update quadrant graphic when selection changes."""
-        quadrant = self._get_selected_quadrant()
-        self._compound["quadrant_graphic"].set_quadrant(quadrant)
+        """Update quadrant graphic when selection changes.
+
+        The graphic uses the user-facing convention (NE=top-right, SE=bottom-right)
+        which matches the combo box labels directly.
+        """
+        # Pass the user-facing quadrant to the graphic (not the logic quadrant)
+        user_quadrant = [Quadrant.NE, Quadrant.NW, Quadrant.SW, Quadrant.SE][index]
+        self._compound["quadrant_graphic"].set_quadrant(user_quadrant)
 
     def _get_selected_quadrant(self) -> Quadrant:
-        """Get the currently selected quadrant enum."""
+        """Get the currently selected quadrant enum.
+
+        The combo box labels use the operator's visual convention:
+            NE = smaller X (toward centerline), +Z (away from headstock)
+            SE = larger X (away from centerline), +Z
+            NW = smaller X, -Z (toward headstock)
+            SW = larger X, -Z
+
+        The arc logic angle ranges use atan2(dx, dz) convention where
+        +X is at π/2. On the inverted-Y graph, +X is at the bottom.
+        So the logic's "NE" (0 to π/2) actually draws bottom-right = visual SE.
+
+        This mapping corrects the inversion:
+            User "NE" (top-right on graph) → Logic SE (3π/2 to 2π)
+            User "SE" (bottom-right on graph) → Logic NE (0 to π/2)
+            User "NW" (top-left on graph) → Logic SW (π to 3π/2)
+            User "SW" (bottom-left on graph) → Logic NW (π/2 to π)
+        """
         idx = self._compound["combo_quadrant"].currentIndex()
-        return [Quadrant.NE, Quadrant.NW, Quadrant.SW, Quadrant.SE][idx]
+        # Combo items: ["NE", "NW", "SW", "SE"] at indices 0, 1, 2, 3
+        # Map user-facing labels to logic quadrants (N/S swapped):
+        return [Quadrant.SE, Quadrant.SW, Quadrant.NW, Quadrant.NE][idx]
+
+    def _on_compound_radius_changed(self):
+        """Validate and update arc radius input.
+
+        Accepts any positive float. Invalid input reverts to previous value.
+        """
+        text = self._compound["input_radius"].text().strip()
+        valid, radius = CompoundArcLogic.validate_radius(text)
+        if not valid:
+            self._compound["input_radius"].setText("0.250")
+
+    def _on_compound_reset_distance(self):
+        """Reset the distance counter without deactivating compound mode."""
+        self._linear_logic.reset_distance()
+        self._arc_logic.reset_distance()
+        self._compound["lbl_distance"].setText("0.0000\"")
+
+    def _make_preset_handler(self, angle_val: float):
+        """Create a closure for preset angle button click.
+
+        Args:
+            angle_val: The preset angle value to apply.
+
+        Returns:
+            A callable that sets the angle input and updates state.
+        """
+        def handler():
+            self._compound_angle = angle_val
+            self._compound["input_angle"].setText(f"{angle_val:.1f}")
+            if hasattr(self._backend, 'set_compound_angle'):
+                self._backend.set_compound_angle(angle_val)
+            if self._compound_active:
+                self._draw_compound_overlay()
+        return handler
 
     # ==================================================================
     # Compound Slide — Graph Overlay

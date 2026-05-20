@@ -60,6 +60,14 @@ class CompoundLinearLogic:
         90° = pure X motion (perpendicular to spindle)
     """
 
+    # Common preset angles (degrees from Z axis)
+    PRESETS = {
+        "29.5° Thread": 29.5,
+        "45° Chamfer": 45.0,
+        "60° Dovetail": 60.0,
+        "30° Taper": 30.0,
+    }
+
     def __init__(self):
         self.cumulative_distance: float = 0.0
 
@@ -128,6 +136,10 @@ class CompoundLinearLogic:
         """
         self.cumulative_distance += math.sqrt(x_delta**2 + z_delta**2)
         return self.cumulative_distance
+
+    def reset_distance(self):
+        """Reset cumulative distance only."""
+        self.cumulative_distance = 0.0
 
     def reset(self):
         """Reset cumulative distance (called on deactivation)."""
@@ -323,6 +335,10 @@ class CompoundArcLogic:
         """Add to cumulative arc distance."""
         self.cumulative_distance += math.sqrt(x_delta**2 + z_delta**2)
         return self.cumulative_distance
+
+    def reset_distance(self):
+        """Reset cumulative distance only."""
+        self.cumulative_distance = 0.0
 
     def reset(self):
         """Reset arc state."""

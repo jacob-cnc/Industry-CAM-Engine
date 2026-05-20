@@ -22,7 +22,7 @@ class QuadrantGraphic(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedSize(60, 60)
+        self.setFixedSize(150, 150)
         self._selected = Quadrant.SE
 
     def set_quadrant(self, quadrant: Quadrant):
@@ -36,16 +36,16 @@ class QuadrantGraphic(QWidget):
         Orientation matches the operator's POV (graph has invertY=True):
             X+ (larger diameter) = bottom of graphic
             Z+ (away from headstock) = right of graphic
-        So NE = bottom-right, NW = bottom-left, SW = top-left, SE = top-right.
+        So NE = top-right, NW = top-left, SW = bottom-left, SE = bottom-right.
         """
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
-        cx, cy = 30, 30
-        r = 24
+        cx, cy = 75, 75
+        r = 60
 
         pen_inactive = QPen(QColor(COLORS['text_disabled']), 2)
-        pen_active = QPen(QColor("#4DE8C2"), 4)  # Bright blue-green, thicker for pop
+        pen_active = QPen(QColor("#4DE8C2"), 5)  # Bright blue-green, thick for visibility
 
         # Qt drawArc: 1/16th degree units, 0° = 3 o'clock, positive = CCW
         # Widget has normal screen coords (Y down). Operator POV on graph has invertY (X+ = down).
@@ -69,7 +69,7 @@ class QuadrantGraphic(QWidget):
         # Dotted crosshair
         pen_cross = QPen(QColor(COLORS['border_normal']), 1, Qt.DotLine)
         painter.setPen(pen_cross)
-        painter.drawLine(cx, cy - r - 4, cx, cy + r + 4)
-        painter.drawLine(cx - r - 4, cy, cx + r + 4, cy)
+        painter.drawLine(cx, cy - r - 6, cx, cy + r + 6)
+        painter.drawLine(cx - r - 6, cy, cx + r + 6, cy)
 
         painter.end()

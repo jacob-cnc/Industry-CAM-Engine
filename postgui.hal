@@ -1,21 +1,47 @@
 # ============================================================================
-# postgui.hal — Direct MPG routing (no compound-slide dependency)
+# postgui.hal — MPG routing with compound-slide mux support
 #
-# Simplified version: routes MPG encoder counts directly to joints.
-# The compound-slide mux feature is disabled until the Python GUI HAL
-# component creation (hal.component) is confirmed working.
+# Two routing modes controlled by compound-slide.compound-enable:
+#   OFF (default): MPG encoder counts go directly to joints (normal jog)
+#   ON:  compound-slide component outputs go to joints (compound jog)
 #
-# MPG jog scale is fixed at 0.001"/click by default; the GUI can still
-# change it via live_backend.set_mpg_scale_index() once compound-slide
-# is re-enabled.
+# The compound-slide HAL component is created by the GUI's LiveBackend.
+# If it doesn't exist (offline mode or component creation fails), the
+# mux2 components fall through to their default (input 0 = direct MPG).
 # ============================================================================
 
-# --- MPG counts → joint jog-counts (direct, no mux) ---
-net mpg-x-counts  =>  joint.0.jog-counts  axis.x.jog-counts
-net mpg-z-counts  =>  joint.1.jog-counts  axis.z.jog-counts
+# --- Load mux2 components for X and Z jog count routing ---
+loadrt mux2 names=mux2.x-jog,mux2.z-jog
+addf mux2.x-jog servo-thread
+addf mux2.z-jog servo-thread
 
-# --- MPG scale: 0.001"/click (mux4 index 1: sel0=1, sel1=0) ---
-setp mux4.jogscale-x.sel0  1
-setp mux4.jogscale-x.sel1  0
-setp mux4.jogscale-z.sel0  1
-setp mux4.jogscale-z.sel1  0
+# --- MPG jog scale (mux4 for increment selection) ---
+# Index 0: 0.0001"  (sel0=0, sel1=0)
+# Index 1: 0.001"   (sel0=1, sel1=0) — default
+# Index 2: 0.01"    (sel0=0, sel1=1)
+# Index 3: 0.1"     (sel0=1, sel1=1)
+net mpg-scale-sel0 compound-slide.mpg-scale-sel0 => mux4.jogscale-x.sel0 mux4.jogscale-z.sel0
+net mpg-scale-sel1 compound-slide.mpg-scale-sel1 => mux4.jogscale-x.sel1 mux4.jogscale-z.sel1
+
+# --- Feed MPG encoder counts to compound-slide component ---
+net mpg-x-counts => compound-slide.mpg-x-in
+net mpg-z-counts => compound-slide.mpg-z-in
+
+# --- Feed jog scale to compound-slide (from mux4 output) ---
+net mpg-x-scale => compound-slide.jog-scale
+
+# --- Mux2 routing: select between direct MPG and compound output ---
+# Input 0 (sel=0, default): direct MPG counts (normal jog)
+# Input 1 (sel=1): compound-slide decomposed counts (compound jog)
+
+# X axis mux
+net mpg-x-counts      => mux2.x-jog.in0
+net compound-x-jog    compound-slide.x-jog-counts => mux2.x-jog.in1
+net compound-enable   compound-slide.compound-enable => mux2.x-jog.sel
+net x-jog-final       mux2.x-jog.out => joint.0.jog-counts axis.x.jog-counts
+
+# Z axis mux
+net mpg-z-counts      => mux2.z-jog.in0
+net compound-z-jog    compound-slide.z-jog-counts => mux2.z-jog.in1
+net compound-enable   => mux2.z-jog.sel
+net z-jog-final       mux2.z-jog.out => joint.1.jog-counts axis.z.jog-counts
