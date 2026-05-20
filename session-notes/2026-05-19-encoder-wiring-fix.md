@@ -81,8 +81,27 @@ Green=pin6, Blue=pin7, Gray=pin8, White=pin9
 
 ## Outstanding issues
 
-- Linear encoder rewiring needed (Z and X)
 - X MPG (encoder.03) not yet confirmed — Z MPG confirmed encoder.02
 - PID tuning not started (P=500, FF1=1.0 initial values)
 - Home/limit switches not wired
 - Hardware E-stop (gpio.004) connected but not yet in HAL estop net
+
+## GUI Setup section — known bugs (deferred, do not fix yet)
+
+Reviewed all ~3000 lines of gui/commissioning/. What works: commissioning
+checklist, HAL monitor pin tree/filter/watch, tuning Load/Save/Apply Live,
+following error graph, offline mode. Bugs found:
+
+1. CRITICAL — tuning_tab.py:56-76 TUNING_PINS has wrong encoder numbers.
+   X encoder_pos reads encoder.00 (Z linear), Z reads encoder.01 (X linear),
+   spindle velocity reads encoder.02 (Z MPG). Tuning tab shows swapped axes.
+2. MEDIUM — commissioning_tab.py steps 5 and 8 description text references
+   wrong encoder numbers (same flip + spindle on .02 instead of .04).
+3. MEDIUM — LivePinProvider.get_signal_pins() always returns [] (TODO stub).
+   Signal tracing shows signal name but not connected pins in live mode.
+4. LOW — CommissioningTab.set_state_file() never called from SetupTab.
+   Checklist saves to fallback path inside gui/commissioning/ not config dir.
+5. LOW — _apply_live() only validates X P Gain; other fields go to HAL
+   without format checking.
+
+Estimate to fix all five: ~65 min. Fix #1 alone: 5 min.
