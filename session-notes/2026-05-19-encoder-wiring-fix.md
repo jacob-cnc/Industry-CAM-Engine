@@ -2,9 +2,9 @@
 
 ## Status at end of session
 
-**IN PROGRESS — Wiring map identified, physical rewiring not yet done.**
+**IN PROGRESS — MPGs and linear encoders all confirmed working. Next: PID tuning / following error.**
 
-Linear encoders (Z and X) confirmed not counting. Root cause found: incorrect signal pinout assumption on Sino KA300/KA500 DB9 connector. Rewiring needed before encoders will work.
+Linear encoders rewired with correct Sino DB9 pinout and confirmed counting. Both MPGs confirmed driving axes in the correct direction after wiring fixes. X linear encoder direction inverted in INI (ENCODER_SCALE = -5080). Now dialing in following error and PID tuning.
 
 ---
 
@@ -63,26 +63,50 @@ Green=pin6, Blue=pin7, Gray=pin8, White=pin9
 
 ---
 
+## Session continuation — MPG and encoder direction fixes (2026-05-19)
+
+### 6. Linear encoders confirmed working after rewiring
+- encoder.00 (Z linear): pushed Z carriage → 6991 counts. WORKING ✓
+- encoder.01 (X linear): pushed X carriage → 112 counts. WORKING ✓
+- encoder.04 (Spindle): confirmed from earlier test ✓
+
+### 7. X MPG A/B swap fixed (pins 1 & 4 at 7i85s TB2 enc3)
+- Symptom: X MPG caused axis to jiggle back and forth, encoder.03 netted 0 counts per click
+- Root cause: A and B signals swapped at Mesa TB2 enc3 terminals — each quadrature edge
+  alternated direction, net count = 0 per detent → rapid position command reversals
+- Fix: swapped green (QA+, pin 1) and gray (QB+, pin 4) wires at 7i85s TB2 enc3
+- Result: encoder.03 counts consistently (−4 per click), jiggling stopped ✓
+
+### 8. X linear encoder direction inverted
+- Symptom: with X connected to leadscrew and X MPG turned, axis jiggled even after A/B fix
+- Root cause: encoder.01 was counting in the wrong direction — PID feedback opposed command
+- Fix: set ENCODER_SCALE = −5080 in [JOINT_0] (industry-cam.ini:98)
+  Applied at runtime first (`halcmd setp hm2_7i96s.0.encoder.01.scale -5080`), confirmed fix,
+  then made permanent in INI
+- Result: jiggling gone. Now shows following error = next item to address ✓
+
+### 9. Z MPG direction confirmed correct
+- Z MPG (encoder.02) confirmed counting correctly and driving Z in correct direction ✓
+- Z linear encoder (encoder.00) has correct direction (ENCODER_SCALE = +5080, no change needed)
+
+---
+
 ## Next session: what to do first
 
-1. **Rewire Z linear scale** (encoder.00, TB3 pins 1–8) per wiring map
-2. **Rewire X linear scale** (encoder.01, TB3 pins 9–16) per wiring map
-3. **Boot LinuxCNC**, go to STATE_ON
-4. **Verify encoders counting:**
-   ```bash
-   watch -n 0.1 'halcmd show pin hm2_7i96s.0.encoder | grep rawcounts'
-   ```
-   Jog Z — encoder.00 should count. Jog X — encoder.01 should count.
-5. **Verify Z position tracking:** jog Z 0.5", confirm `s.position[1]` matches physical movement
-6. **Check MPG scale:** 10 MPG clicks should move 0.010" at default scale
-7. **PID tuning** — once linear encoders confirmed working
+1. **Restart LinuxCNC** for clean state (INI change takes effect)
+2. **Reconnect Z leadscrew** (was disconnected for testing)
+3. **Verify MPG jog scale:** 10 clicks should move 0.010" at default selector position
+4. **Dial in following error:** reduce FERROR once motion is stable, start PID tuning
+   - Current: P=500, FF1=1.0, FERROR=0.050" (loose for initial testing)
+   - Tune FF1 first (should be close to 1.0 for velocity-mode steppers), then P
+5. **Verify Z position tracking** with Z connected to leadscrew
+6. **Home/limit switches** — not yet wired
 
 ---
 
 ## Outstanding issues
 
-- X MPG (encoder.03) not yet confirmed — Z MPG confirmed encoder.02
-- PID tuning not started (P=500, FF1=1.0 initial values)
+- PID tuning not started (P=500, FF1=1.0 initial values — following error being resolved)
 - Home/limit switches not wired
 - Hardware E-stop (gpio.004) connected but not yet in HAL estop net
 
