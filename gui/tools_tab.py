@@ -1,215 +1,65 @@
 # -*- coding: utf-8 -*-
-"""Tools Tab for Industry CAM Engine.
+"""Tools Tab for Industry CAM Engine — Mazak-style card-based tool geometry editor.
 
-Tool table management: list (left) + edit panel with graphic preview (right).
-Auto-saves on every change, session backup on launch (max 5).
-LinuxCNC tool.tbl format compatibility via pipeline/file_io.
+Displays tools as a vertically scrollable list of ToolGeometryRow cards.
+Each card shows all fields inline (wear offsets, geometry offsets, type/insert/
+orientation dropdowns, angles, and a live orientation graphic).
+
+A TopButtonBar provides file operations, tool addition, touch-off controls,
+and active tool display.
 
 This tab is usable in offline mode (no LinuxCNC dependency).
 """
 
-import math
+import json
 import os
+import logging
 from typing import Optional, List
 
-from PyQt5.QtCore import Qt, pyqtSignal, QRectF, QPointF
-from PyQt5.QtGui import QPainter, QPainterPath, QPen, QBrush, QColor, QFont
+from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
-    QLabel, QComboBox, QPushButton, QGroupBox,
-    QFormLayout, QFrame, QListWidget, QListWidgetItem,
-    QLineEdit, QFileDialog, QMessageBox,
+    QWidget,
+    QVBoxLayout,
+    QScrollArea,
+    QFileDialog,
+    QMessageBox,
 )
 
-from gui.colors import COLORS, FONTS
-from gui.components.numeric_field import NumericField, NumericFieldConfig
-from models.tool import ToolDef, ToolOrientation, ToolDirection, ToolType
-from pipeline.file_io import save_tool_table, load_tool_table, create_backup
+from gui.colors import COLORS
+from gui.components.top_button_bar import TopButtonBar
+from gui.components.tool_geometry_row import ToolGeometryRow
+from pipeline.tool_card_data import ToolCardData
+from pipeline.tool_table_io import load_tool_table, save_tool_table, create_backup
+
+# LinuxCNC detection — offline mode when unavailable
+try:
+    import linuxcnc
+    HAS_LINUXCNC = True
+except ImportError:
+    HAS_LINUXCNC = False
+
+logger = logging.getLogger(__name__)
+
+# Settings file name (stored alongside .tbl files / project directory)
+_SETTINGS_FILE = ".tool_tab_settings.json"
 
 
-# Insert shape presets: name -> (tip_angle, edge_length)
-INSERT_PRESETS = {
-    "CNMG": (80.0, 0.500),
-    "VNMG": (35.0, 0.375),
-    "CCMT": (80.0, 0.375),
-    "DNMG": (55.0, 0.500),
-    "WNMG": (80.0, 0.500),
-    "TNMG": (60.0, 0.375),
-}
+class Tools_Tab(QWidget):
+    """Mazak-style card-based tool geometry editor tab.
 
-# Default tool table path
-DEFAULT_TOOL_TABLE = "tool.tbl"
-BACKUP_DIR = "backups"
-
-
-class ToolGraphicWidget(QWidget):
-    """Visual-only tool insert preview using QPainterPath.
-
-    Draws a diamond/triangle shape based on tip_angle, nose radius arc,
-    and orientation indicator. Does NOT use the engine's ToolShape class.
-    """
-
-    def __init__(self, parent: Optional[QWidget] = None):
-        super().__init__(parent)
-        self._tip_angle = 80.0
-        self._edge_length = 0.500
-        self._nose_radius = 0.016
-        self._orientation = ToolOrientation.OD_FRONT_RIGHT
-        self._direction = ToolDirection.RIGHT
-        self.setMinimumSize(180, 180)
-        self.setMaximumSize(300, 300)
-
-    def set_tool_params(
-        self,
-        tip_angle: float,
-        edge_length: float,
-        nose_radius: float,
-        orientation: ToolOrientation,
-        direction: ToolDirection,
-    ) -> None:
-        """Update tool parameters and repaint."""
-        self._tip_angle = tip_angle
-        self._edge_length = edge_length
-        self._nose_radius = nose_radius
-        self._orientation = orientation
-        self._direction = direction
-        self.update()
-
-    def paintEvent(self, event):
-        """Draw the tool insert shape with nose radius and orientation arrow."""
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-
-        # Background
-        painter.fillRect(self.rect(), QColor(COLORS["bg_panel"]))
-
-        # Drawing area with margin
-        margin = 20
-        w = self.width() - 2 * margin
-        h = self.height() - 2 * margin
-        cx = self.width() / 2
-        cy = self.height() / 2
-
-        # Scale factor: map edge_length to pixels
-        scale = min(w, h) * 0.7 / max(self._edge_length, 0.1)
-
-        # Build insert shape path
-        path = self._build_insert_path(scale)
-
-        # Center the path
-        bounds = path.boundingRect()
-        dx = cx - bounds.center().x()
-        dy = cy - bounds.center().y()
-        painter.translate(dx, dy)
-
-        # Draw insert body
-        pen = QPen(QColor(COLORS["text_primary"]), 2)
-        painter.setPen(pen)
-        painter.setBrush(QBrush(QColor(COLORS["bg_surface"])))
-        painter.drawPath(path)
-
-        # Draw nose radius arc highlight
-        self._draw_nose_radius(painter, scale)
-
-        # Draw orientation arrow
-        self._draw_orientation_arrow(painter, scale)
-
-        painter.end()
-
-    def _build_insert_path(self, scale: float) -> QPainterPath:
-        """Build QPainterPath for the insert diamond/triangle shape."""
-        path = QPainterPath()
-        half_angle = math.radians(self._tip_angle / 2.0)
-        edge_px = self._edge_length * scale
-
-        # Tip at origin, edges extend upward at +/- half_angle from vertical
-        tip = QPointF(0, 0)
-
-        # Left edge
-        lx = -edge_px * math.sin(half_angle)
-        ly = -edge_px * math.cos(half_angle)
-        left = QPointF(lx, ly)
-
-        # Right edge
-        rx = edge_px * math.sin(half_angle)
-        ry = -edge_px * math.cos(half_angle)
-        right = QPointF(rx, ry)
-
-        # Diamond: mirror bottom
-        blx = lx * 0.6
-        bly = -ly * 0.4
-        brx = rx * 0.6
-        bry = -ry * 0.4
-
-        path.moveTo(tip)
-        path.lineTo(left)
-        path.lineTo(QPointF(blx + (brx - blx) * 0.5, ly - edge_px * 0.3))
-        path.lineTo(right)
-        path.closeSubpath()
-
-        return path
-
-    def _draw_nose_radius(self, painter: QPainter, scale: float) -> None:
-        """Draw a small arc at the tool tip representing nose radius."""
-        r_px = self._nose_radius * scale
-        if r_px < 2:
-            r_px = 2  # Minimum visible size
-
-        pen = QPen(QColor(COLORS["status_info"]), 2)
-        painter.setPen(pen)
-        painter.setBrush(Qt.NoBrush)
-
-        # Arc at tip (0, 0)
-        rect = QRectF(-r_px, -r_px, 2 * r_px, 2 * r_px)
-        start_angle = 180 * 16  # Start from left
-        span_angle = 180 * 16   # Half circle
-        painter.drawArc(rect, start_angle, span_angle)
-
-    def _draw_orientation_arrow(self, painter: QPainter, scale: float) -> None:
-        """Draw an arrow indicating cutting direction based on orientation."""
-        pen = QPen(QColor(COLORS["btn_generate"]), 2)
-        painter.setPen(pen)
-
-        arrow_len = 25.0
-        # Direction determines arrow side
-        if self._direction == ToolDirection.RIGHT:
-            start = QPointF(10, 5)
-            end = QPointF(10 + arrow_len, 5)
-        elif self._direction == ToolDirection.LEFT:
-            start = QPointF(-10, 5)
-            end = QPointF(-10 - arrow_len, 5)
-        else:
-            start = QPointF(0, 10)
-            end = QPointF(0, 10 + arrow_len)
-
-        painter.drawLine(start, end)
-
-        # Arrowhead
-        angle = math.atan2(end.y() - start.y(), end.x() - start.x())
-        head_len = 8
-        p1 = QPointF(
-            end.x() - head_len * math.cos(angle - 0.4),
-            end.y() - head_len * math.sin(angle - 0.4),
-        )
-        p2 = QPointF(
-            end.x() - head_len * math.cos(angle + 0.4),
-            end.y() - head_len * math.sin(angle + 0.4),
-        )
-        painter.drawLine(end, p1)
-        painter.drawLine(end, p2)
-
-
-class ToolsTab(QWidget):
-    """Tool table management tab.
-
-    Layout:
-        Left: Tool list (QListWidget showing tool# + description)
-        Right: Edit panel with fields for selected tool + graphic preview
-        Bottom: Save/Load buttons, file path display
+    Architecture:
+        Tools_Tab (QWidget)
+        ├── TopButtonBar
+        └── QScrollArea
+            └── QWidget (container)
+                └── QVBoxLayout
+                    ├── ToolGeometryRow(tool_1)
+                    ├── ToolGeometryRow(tool_2)
+                    └── ...
 
     Signals:
-        tool_changed(int): Emitted with tool_number when any tool field is edited
-        tool_selected(object): Emitted with ToolDef when user selects a tool
+        tool_changed(int): Emitted with tool_number when any tool field is edited.
+        tool_selected(object): Emitted with ToolCardData when user clicks a card.
     """
 
     tool_changed = pyqtSignal(int)
@@ -217,598 +67,597 @@ class ToolsTab(QWidget):
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        self._tools: List[ToolDef] = []
-        self._current_index: int = -1
-        self._file_path: str = DEFAULT_TOOL_TABLE
-        self._suppress_signals = False
+        self._cards: List[ToolGeometryRow] = []
+        self._selected_index: int = -1
+        self._active_file_path: Optional[str] = None
+
+        # LinuxCNC stat/command channels (None in offline mode)
+        self._linuxcnc_stat = None
+        self._linuxcnc_command = None
+        if HAS_LINUXCNC:
+            try:
+                self._linuxcnc_stat = linuxcnc.stat()
+                self._linuxcnc_command = linuxcnc.command()
+            except Exception:
+                # If connection fails, fall back to offline mode
+                self._linuxcnc_stat = None
+                self._linuxcnc_command = None
 
         self._setup_ui()
-        self._connect_signals()
-        self._load_or_create_default()
-        self._create_session_backup()
+        self._connect_button_bar_signals()
+        self._setup_offline_mode()
+
+        # Load settings and auto-load last table
+        self._load_settings_and_auto_load()
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
-    def get_tools(self) -> List[ToolDef]:
-        """Return the current tool list."""
-        return list(self._tools)
+    def get_tools(self) -> List[ToolCardData]:
+        """Return a list of ToolCardData for all tool cards.
 
-    def get_tool(self, tool_number: int) -> Optional[ToolDef]:
-        """Return a specific tool by number, or None."""
-        for t in self._tools:
-            if t.tool_number == tool_number:
-                return t
+        Returns:
+            List of ToolCardData instances, one per card in display order.
+        """
+        return [card.get_data() for card in self._cards]
+
+    def get_tool(self, tool_number: int) -> Optional[ToolCardData]:
+        """Return the ToolCardData for a specific tool number, or None.
+
+        Args:
+            tool_number: The tool number to look up (e.g. 1, 2, 3...).
+
+        Returns:
+            ToolCardData if found, None otherwise.
+        """
+        for card in self._cards:
+            data = card.get_data()
+            if data.tool_number == tool_number:
+                return data
         return None
 
-    def get_selected_tool(self) -> Optional[ToolDef]:
-        """Return the currently selected tool, or None."""
-        if 0 <= self._current_index < len(self._tools):
-            return self._tools[self._current_index]
+    def get_selected_tool(self) -> Optional[ToolCardData]:
+        """Return the ToolCardData for the currently selected card, or None.
+
+        Returns:
+            ToolCardData of the selected card, or None if no card is selected.
+        """
+        if 0 <= self._selected_index < len(self._cards):
+            return self._cards[self._selected_index].get_data()
         return None
+
+    def refresh_current_tool_display(self) -> None:
+        """Refresh the current tool display in the TopButtonBar.
+
+        In offline mode, shows "Offline". When LinuxCNC is connected,
+        reads the active tool from the stat channel.
+        """
+        if self._linuxcnc_stat is not None:
+            try:
+                self._linuxcnc_stat.poll()
+                tool_in_spindle = self._linuxcnc_stat.tool_in_spindle
+                if tool_in_spindle > 0:
+                    # Look up description from our cards
+                    tool_data = self.get_tool(tool_in_spindle)
+                    desc = tool_data.description if tool_data else ""
+                    self._button_bar.set_current_tool(tool_in_spindle, desc)
+                else:
+                    self._button_bar.set_current_tool(0, "No tool")
+            except Exception:
+                self._button_bar._current_tool_label.setText("Offline")
+        else:
+            self._button_bar._current_tool_label.setText("Offline")
+
+    # ------------------------------------------------------------------
+    # Card Management
+    # ------------------------------------------------------------------
+
+    def add_card(self, tool_data: ToolCardData) -> None:
+        """Create a ToolGeometryRow for the given data and append it to the scroll area.
+
+        Args:
+            tool_data: The ToolCardData to populate the new card with.
+        """
+        card = ToolGeometryRow(tool_data)
+        self._wire_card_signals(card)
+        self._cards.append(card)
+        self._card_layout.addWidget(card)
+
+    def clear_cards(self) -> None:
+        """Remove all tool cards from the scroll area."""
+        for card in self._cards:
+            card.setParent(None)
+            card.deleteLater()
+        self._cards.clear()
+        self._selected_index = -1
+
+    def set_cards(self, tools: List[ToolCardData]) -> None:
+        """Replace all cards with a new list of tool data.
+
+        Args:
+            tools: List of ToolCardData to display.
+        """
+        self.clear_cards()
+        for tool_data in tools:
+            self.add_card(tool_data)
+        # Select first card if available
+        if self._cards:
+            self._select_card(0)
+        self._update_delete_buttons()
 
     # ------------------------------------------------------------------
     # UI Setup
     # ------------------------------------------------------------------
 
-    def _setup_ui(self):
-        """Build the complete tab layout."""
-        outer_layout = QVBoxLayout(self)
-        outer_layout.setContentsMargins(0, 0, 0, 0)
-        outer_layout.setSpacing(0)
+    def _setup_ui(self) -> None:
+        """Build the tab layout: TopButtonBar + QScrollArea with card container."""
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
-        # Main splitter: tool list (left) + edit panel (right)
-        self._splitter = QSplitter(Qt.Horizontal)
-        outer_layout.addWidget(self._splitter, stretch=1)
+        # --- Top Button Bar ---
+        self._button_bar = TopButtonBar()
+        main_layout.addWidget(self._button_bar)
 
-        # Left panel: tool list + add/remove buttons
-        self._left_panel = self._build_left_panel()
-        self._splitter.addWidget(self._left_panel)
-
-        # Right panel: edit fields + graphic preview
-        self._right_panel = self._build_right_panel()
-        self._splitter.addWidget(self._right_panel)
-
-        # Splitter proportions: 30% left, 70% right
-        self._splitter.setSizes([280, 650])
-        self._splitter.setStretchFactor(0, 0)
-        self._splitter.setStretchFactor(1, 1)
-
-        # Bottom bar: file path + save/load buttons
-        bottom_bar = self._build_bottom_bar()
-        outer_layout.addWidget(bottom_bar)
-
-    def _build_left_panel(self) -> QWidget:
-        """Build the left panel with tool list and add/remove buttons."""
-        panel = QWidget()
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(8, 8, 4, 8)
-        layout.setSpacing(8)
-
-        # Header
-        header = QLabel("Tool Table")
-        header.setStyleSheet(
-            f"color: {COLORS['text_primary']}; font-weight: bold; font-size: 11pt;"
+        # --- Scroll Area containing tool cards ---
+        self._scroll_area = QScrollArea()
+        self._scroll_area.setWidgetResizable(True)
+        self._scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self._scroll_area.setStyleSheet(
+            f"QScrollArea {{ background-color: {COLORS['bg_base']}; border: none; }}"
         )
-        layout.addWidget(header)
 
-        # Tool list
-        self._tool_list = QListWidget()
-        self._tool_list.setStyleSheet(
-            f"QListWidget {{"
-            f"  background-color: {COLORS['bg_panel']};"
-            f"  color: {COLORS['text_primary']};"
-            f"  border: 1px solid {COLORS['border_normal']};"
-            f"  border-radius: 3px;"
-            f"  font-family: {FONTS['mono_family']}, {FONTS['fallback_mono']};"
-            f"  font-size: {FONTS['code_size']}pt;"
-            f"}}"
-            f"QListWidget::item {{"
-            f"  padding: 6px 8px;"
-            f"  min-height: 28px;"
-            f"}}"
-            f"QListWidget::item:selected {{"
-            f"  background-color: {COLORS['bg_surface']};"
-            f"}}"
+        # Container widget inside scroll area
+        self._card_container = QWidget()
+        self._card_container.setStyleSheet(
+            f"background-color: {COLORS['bg_base']};"
         )
-        layout.addWidget(self._tool_list, stretch=1)
+        self._card_layout = QVBoxLayout(self._card_container)
+        self._card_layout.setContentsMargins(12, 12, 12, 12)
+        self._card_layout.setSpacing(8)
+        self._card_layout.addStretch()  # Push cards to top
 
-        # Add/Remove buttons
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(8)
+        self._scroll_area.setWidget(self._card_container)
+        main_layout.addWidget(self._scroll_area, stretch=1)
 
-        self._btn_add = QPushButton("+ Add Tool")
-        self._btn_add.setMinimumHeight(36)
-        btn_row.addWidget(self._btn_add)
-
-        self._btn_remove = QPushButton("- Remove")
-        self._btn_remove.setMinimumHeight(36)
-        self._btn_remove.setStyleSheet(
-            f"QPushButton {{"
-            f"  background-color: {COLORS['btn_danger']};"
-            f"  color: {COLORS['text_primary']};"
-            f"  border: none; border-radius: 4px;"
-            f"  padding: 8px 12px; min-height: 36px; font-weight: bold;"
-            f"}}"
-            f"QPushButton:hover {{ background-color: {COLORS['status_warning']}; }}"
-        )
-        btn_row.addWidget(self._btn_remove)
-
-        layout.addLayout(btn_row)
-        return panel
-
-    def _build_right_panel(self) -> QWidget:
-        """Build the right panel with edit fields and tool graphic preview."""
-        panel = QWidget()
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(4, 8, 8, 8)
-        layout.setSpacing(12)
-
-        # Insert shape preset dropdown
-        preset_row = QHBoxLayout()
-        preset_row.setSpacing(8)
-        preset_label = QLabel("Insert Shape:")
-        preset_label.setStyleSheet(f"color: {COLORS['text_secondary']};")
-        preset_row.addWidget(preset_label)
-
-        self._insert_combo = QComboBox()
-        self._insert_combo.addItem("(Custom)")
-        for name in INSERT_PRESETS:
-            self._insert_combo.addItem(name)
-        self._insert_combo.setMinimumWidth(120)
-        preset_row.addWidget(self._insert_combo)
-        preset_row.addStretch()
-        layout.addLayout(preset_row)
-
-        # Edit fields in a form layout
-        fields_group = self._build_fields_group()
-        layout.addWidget(fields_group)
-
-        # Tool graphic preview
-        preview_label = QLabel("Preview")
-        preview_label.setStyleSheet(
-            f"color: {COLORS['text_secondary']}; font-weight: bold;"
-        )
-        layout.addWidget(preview_label)
-
-        self._tool_graphic = ToolGraphicWidget()
-        self._tool_graphic.setStyleSheet(
-            f"border: 1px solid {COLORS['border_normal']}; border-radius: 4px;"
-        )
-        layout.addWidget(self._tool_graphic)
-
-        layout.addStretch()
-        return panel
-
-    def _build_fields_group(self) -> QGroupBox:
-        """Build the editable fields group for the selected tool."""
-        group = QGroupBox("Tool Parameters")
-        group.setStyleSheet(
-            f"QGroupBox {{"
-            f"  color: {COLORS['text_primary']};"
-            f"  font-weight: bold;"
-            f"  font-size: {FONTS['ui_size']}pt;"
-            f"  border: 1px solid {COLORS['border_normal']};"
-            f"  border-radius: 4px;"
-            f"  margin-top: 12px;"
-            f"  padding-top: 8px;"
-            f"}}"
-            f"QGroupBox::title {{"
-            f"  subcontrol-origin: margin;"
-            f"  left: 8px;"
-            f"  padding: 0 4px;"
-            f"}}"
-        )
-        form = QFormLayout()
-        form.setContentsMargins(8, 16, 8, 8)
-        form.setSpacing(6)
-
-        # Tool number
-        self._field_tool_number = NumericField(NumericFieldConfig(
-            min_value=1, max_value=99, decimals=0,
-            default_value=1, suffix="",
-        ))
-        form.addRow("Tool #:", self._field_tool_number)
-
-        # Nose radius
-        self._field_nose_radius = NumericField(NumericFieldConfig(
-            min_value=0.001, max_value=0.250, decimals=4,
-            default_value=0.016, suffix="in",
-        ))
-        form.addRow("Nose Radius:", self._field_nose_radius)
-
-        # Tip angle
-        self._field_tip_angle = NumericField(NumericFieldConfig(
-            min_value=10.0, max_value=120.0, decimals=1,
-            default_value=80.0, suffix="°",
-        ))
-        form.addRow("Tip Angle:", self._field_tip_angle)
-
-        # Edge length
-        self._field_edge_length = NumericField(NumericFieldConfig(
-            min_value=0.050, max_value=2.0, decimals=3,
-            default_value=0.375, suffix="in",
-        ))
-        form.addRow("Edge Length:", self._field_edge_length)
-
-        # Orientation
-        self._field_orientation = QComboBox()
-        for orient in ToolOrientation:
-            self._field_orientation.addItem(
-                f"{orient.value} - {orient.name.replace('_', ' ').title()}",
-                orient.value,
-            )
-        form.addRow("Orientation:", self._field_orientation)
-
-        # Direction
-        self._field_direction = QComboBox()
-        for d in ToolDirection:
-            self._field_direction.addItem(d.name, d.value)
-        form.addRow("Direction:", self._field_direction)
-
-        # Description
-        self._field_description = QLineEdit()
-        self._field_description.setPlaceholderText("e.g. CNMG 432 Roughing")
-        self._field_description.setStyleSheet(
-            f"QLineEdit {{"
-            f"  background-color: {COLORS['bg_panel']};"
-            f"  color: {COLORS['text_primary']};"
-            f"  border: 1px solid {COLORS['border_normal']};"
-            f"  border-radius: 3px; padding: 6px; min-height: 36px;"
-            f"}}"
-            f"QLineEdit:focus {{ border-color: {COLORS['border_focused']}; }}"
-        )
-        form.addRow("Description:", self._field_description)
-
-        group.setLayout(form)
-        return group
-
-    def _build_bottom_bar(self) -> QWidget:
-        """Build the bottom bar with file path display and save/load buttons."""
-        bar = QWidget()
-        bar.setStyleSheet(f"background-color: {COLORS['bg_panel']};")
-        bar.setFixedHeight(48)
-        layout = QHBoxLayout(bar)
-        layout.setContentsMargins(8, 4, 8, 4)
-        layout.setSpacing(8)
-
-        # File path label
-        path_icon = QLabel("File:")
-        path_icon.setStyleSheet(f"color: {COLORS['text_secondary']}; font-weight: bold;")
-        layout.addWidget(path_icon)
-
-        self._path_label = QLabel(self._file_path)
-        self._path_label.setStyleSheet(
-            f"color: {COLORS['text_secondary']};"
-            f" font-family: {FONTS['mono_family']}, {FONTS['fallback_mono']};"
-            f" font-size: {FONTS['small_size']}pt;"
-        )
-        layout.addWidget(self._path_label, stretch=1)
-
-        # Load button
-        self._btn_load = QPushButton("Load")
-        self._btn_load.setMinimumHeight(36)
-        layout.addWidget(self._btn_load)
-
-        # Save button
-        self._btn_save = QPushButton("Save")
-        self._btn_save.setMinimumHeight(36)
-        layout.addWidget(self._btn_save)
-
-        # Save As button
-        self._btn_save_as = QPushButton("Save As...")
-        self._btn_save_as.setMinimumHeight(36)
-        layout.addWidget(self._btn_save_as)
-
-        return bar
+    def _setup_offline_mode(self) -> None:
+        """Configure offline mode: disable touch-off buttons and show 'Offline'."""
+        if not HAS_LINUXCNC or self._linuxcnc_command is None:
+            # Disable touch-off buttons
+            self._button_bar._set_x_btn.setEnabled(False)
+            self._button_bar._set_z_btn.setEnabled(False)
+            self._button_bar._x_spinbox.setEnabled(False)
+            self._button_bar._z_spinbox.setEnabled(False)
+            # Show "Offline" in current tool display
+            self._button_bar._current_tool_label.setText("Offline")
 
     # ------------------------------------------------------------------
-    # Signal Connections
+    # Signal Wiring
     # ------------------------------------------------------------------
 
-    def _connect_signals(self):
-        """Wire up all internal signals."""
-        # Tool list selection
-        self._tool_list.currentRowChanged.connect(self._on_tool_selected)
+    def _connect_button_bar_signals(self) -> None:
+        """Wire TopButtonBar signals to handler methods."""
+        self._button_bar.load_clicked.connect(self._on_load_clicked)
+        self._button_bar.save_as_clicked.connect(self._on_save_as_clicked)
+        self._button_bar.add_tool_clicked.connect(self._on_add_tool_clicked)
+        self._button_bar.set_x_clicked.connect(self._on_set_x_clicked)
+        self._button_bar.set_z_clicked.connect(self._on_set_z_clicked)
 
-        # Add/Remove buttons
-        self._btn_add.clicked.connect(self._on_add_tool)
-        self._btn_remove.clicked.connect(self._on_remove_tool)
+    def _wire_card_signals(self, card: ToolGeometryRow) -> None:
+        """Connect a ToolGeometryRow's signals to tab-level handlers.
 
-        # Insert shape preset
-        self._insert_combo.currentIndexChanged.connect(self._on_insert_preset_changed)
-
-        # Edit fields — auto-save on change
-        self._field_tool_number.value_changed.connect(self._on_field_edited)
-        self._field_nose_radius.value_changed.connect(self._on_field_edited)
-        self._field_tip_angle.value_changed.connect(self._on_field_edited)
-        self._field_edge_length.value_changed.connect(self._on_field_edited)
-        self._field_orientation.currentIndexChanged.connect(self._on_field_edited)
-        self._field_direction.currentIndexChanged.connect(self._on_field_edited)
-        self._field_description.editingFinished.connect(self._on_field_edited)
-
-        # File buttons
-        self._btn_load.clicked.connect(self._on_load)
-        self._btn_save.clicked.connect(self._on_save)
-        self._btn_save_as.clicked.connect(self._on_save_as)
+        Args:
+            card: The ToolGeometryRow to wire up.
+        """
+        card.field_changed.connect(self._on_card_field_changed)
+        card.clicked.connect(self._on_card_clicked)
+        card.delete_requested.connect(self._on_card_delete_requested)
 
     # ------------------------------------------------------------------
-    # Event Handlers
+    # Card Signal Handlers
     # ------------------------------------------------------------------
 
-    def _on_tool_selected(self, row: int):
-        """User selected a tool in the list — populate edit fields."""
-        if row < 0 or row >= len(self._tools):
-            self._current_index = -1
-            return
+    def _on_card_field_changed(self, tool_number: int) -> None:
+        """Handle field_changed from a ToolGeometryRow.
 
-        self._current_index = row
-        tool = self._tools[row]
+        Emits tool_changed signal and triggers autosave.
 
-        # Suppress signals while populating fields
-        self._suppress_signals = True
-        self._field_tool_number.set_value(float(tool.tool_number))
-        self._field_nose_radius.set_value(tool.nose_radius)
-        self._field_tip_angle.set_value(tool.tip_angle)
-        self._field_edge_length.set_value(tool.edge_length)
+        Args:
+            tool_number: The tool number of the card that changed.
+        """
+        self.tool_changed.emit(tool_number)
+        self._autosave()
 
-        # Set orientation combo
-        orient_idx = 0
-        for i in range(self._field_orientation.count()):
-            if self._field_orientation.itemData(i) == tool.orientation.value:
-                orient_idx = i
+    def _on_card_clicked(self, tool_number: int) -> None:
+        """Handle clicked from a ToolGeometryRow.
+
+        Selects the card and emits tool_selected signal.
+
+        Args:
+            tool_number: The tool number of the clicked card.
+        """
+        for i, card in enumerate(self._cards):
+            data = card.get_data()
+            if data.tool_number == tool_number:
+                self._select_card(i)
+                self.tool_selected.emit(data)
                 break
-        self._field_orientation.setCurrentIndex(orient_idx)
 
-        # Set direction combo
-        dir_idx = 0
-        for i in range(self._field_direction.count()):
-            if self._field_direction.itemData(i) == tool.direction.value:
-                dir_idx = i
+    def _on_card_delete_requested(self, tool_number: int) -> None:
+        """Handle delete_requested from a ToolGeometryRow.
+
+        Shows confirmation dialog, removes the card, renumbers remaining
+        tools sequentially from T1, and autosaves.
+
+        Args:
+            tool_number: The tool number of the card requesting deletion.
+        """
+        # Don't allow deletion if only 1 tool remains
+        if len(self._cards) <= 1:
+            return
+
+        # Show confirmation dialog
+        reply = QMessageBox.question(
+            self,
+            "Delete Tool",
+            f"Delete tool T{tool_number}? Remaining tools will be renumbered.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        # Find and remove the card
+        card_to_remove = None
+        for i, card in enumerate(self._cards):
+            data = card.get_data()
+            if data.tool_number == tool_number:
+                card_to_remove = card
+                self._cards.pop(i)
+                card.setParent(None)
+                card.deleteLater()
                 break
-        self._field_direction.setCurrentIndex(dir_idx)
 
-        self._field_description.setText(tool.description)
-
-        # Reset insert combo to (Custom) since we're loading existing
-        self._insert_combo.setCurrentIndex(0)
-        self._suppress_signals = False
-
-        # Update graphic preview
-        self._update_graphic_preview()
-
-        # Emit selection signal
-        self.tool_selected.emit(tool)
-
-    def _on_field_edited(self, *args):
-        """Any edit field changed — update tool, auto-save, emit signal."""
-        if self._suppress_signals:
-            return
-        if self._current_index < 0 or self._current_index >= len(self._tools):
+        if card_to_remove is None:
             return
 
-        # Build updated ToolDef from fields
-        updated = self._build_tool_from_fields()
-        if updated is None:
-            return
+        # Renumber all remaining tools sequentially from T1
+        for i, card in enumerate(self._cards):
+            card.set_tool_number(i + 1)
 
-        self._tools[self._current_index] = updated
-        self._refresh_list_item(self._current_index)
-        self._update_graphic_preview()
-        self._auto_save()
-        self.tool_changed.emit(updated.tool_number)
+        # Update selection
+        if self._selected_index >= len(self._cards):
+            self._selected_index = len(self._cards) - 1
+        if self._cards:
+            self._select_card(max(0, self._selected_index))
 
-    def _on_insert_preset_changed(self, index: int):
-        """Insert shape dropdown changed — auto-populate tip_angle and edge_length."""
-        if self._suppress_signals:
-            return
-        if index <= 0:
-            return  # "(Custom)" selected
+        self._update_delete_buttons()
+        self._autosave()
 
-        preset_name = self._insert_combo.currentText()
-        if preset_name in INSERT_PRESETS:
-            tip_angle, edge_length = INSERT_PRESETS[preset_name]
-            self._suppress_signals = True
-            self._field_tip_angle.set_value(tip_angle)
-            self._field_edge_length.set_value(edge_length)
-            self._suppress_signals = False
-            # Trigger field edit to save
-            self._on_field_edited()
+    # ------------------------------------------------------------------
+    # TopButtonBar Signal Handlers
+    # ------------------------------------------------------------------
 
-    def _on_add_tool(self):
-        """Add a new tool to the table."""
-        # Find next available tool number
-        used_numbers = {t.tool_number for t in self._tools}
-        new_number = 1
-        while new_number in used_numbers and new_number <= 99:
-            new_number += 1
-        if new_number > 99:
-            return  # Table full
+    def _on_load_clicked(self) -> None:
+        """Handle Load Table button click.
 
-        new_tool = ToolDef(
-            tool_number=new_number,
-            nose_radius=0.016,
-            tip_angle=80.0,
-            edge_length=0.500,
-            orientation=ToolOrientation.OD_FRONT_RIGHT,
-            direction=ToolDirection.RIGHT,
-            description=f"T{new_number} New Tool",
+        Opens a file dialog filtered to .tbl files, loads the selected
+        tool table, and populates the card list.
+        """
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Load Tool Table",
+            "",
+            "Tool Table Files (*.tbl);;All Files (*)",
         )
-        self._tools.append(new_tool)
-        self._refresh_tool_list()
-        self._tool_list.setCurrentRow(len(self._tools) - 1)
-        self._auto_save()
-
-    def _on_remove_tool(self):
-        """Remove the currently selected tool."""
-        if self._current_index < 0 or self._current_index >= len(self._tools):
-            return
-        if len(self._tools) <= 1:
-            return  # Keep at least one tool
-
-        self._tools.pop(self._current_index)
-        self._refresh_tool_list()
-
-        # Select nearest tool
-        new_idx = min(self._current_index, len(self._tools) - 1)
-        self._tool_list.setCurrentRow(new_idx)
-        self._auto_save()
-
-    def _on_load(self):
-        """Load tool table from file."""
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Load Tool Table", "",
-            "Tool Table (*.tbl);;All Files (*)",
-        )
-        if not path:
+        if not file_path:
             return
 
         try:
-            tools = load_tool_table(path)
-            if tools:
-                self._tools = tools
-                self._file_path = path
-                self._path_label.setText(path)
-                self._refresh_tool_list()
-                if self._tools:
-                    self._tool_list.setCurrentRow(0)
+            tools = load_tool_table(file_path)
+        except FileNotFoundError:
+            QMessageBox.warning(self, "File Not Found", f"Could not find: {file_path}")
+            return
         except Exception as e:
-            QMessageBox.warning(self, "Load Error", f"Failed to load tool table:\n{e}")
-
-    def _on_save(self):
-        """Save tool table to current file path."""
-        try:
-            save_tool_table(self._tools, self._file_path)
-        except Exception as e:
-            QMessageBox.warning(self, "Save Error", f"Failed to save tool table:\n{e}")
-
-    def _on_save_as(self):
-        """Save tool table to a new file path."""
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save Tool Table As", self._file_path,
-            "Tool Table (*.tbl);;All Files (*)",
-        )
-        if not path:
+            QMessageBox.warning(self, "Load Error", f"Error loading tool table:\n{e}")
             return
 
-        self._file_path = path
-        self._path_label.setText(path)
-        self._on_save()
+        self._active_file_path = file_path
+        self.set_cards(tools)
+        self._button_bar.set_table_name(os.path.basename(file_path))
+        self._save_settings()
+
+    def _on_save_as_clicked(self) -> None:
+        """Handle Save Table As button click.
+
+        Opens a file dialog for save path, creates a backup of the existing
+        file if it exists, then saves the current tool data.
+        """
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Tool Table As",
+            "",
+            "Tool Table Files (*.tbl);;All Files (*)",
+        )
+        if not file_path:
+            return
+
+        # Create backup if the target file already exists
+        if os.path.exists(file_path):
+            try:
+                create_backup(file_path)
+            except Exception as e:
+                logger.warning(f"Backup creation failed: {e}")
+
+        # Save the tool table
+        tools = self.get_tools()
+        try:
+            save_tool_table(tools, file_path)
+        except Exception as e:
+            QMessageBox.warning(self, "Save Error", f"Error saving tool table:\n{e}")
+            return
+
+        self._active_file_path = file_path
+        self._button_bar.set_table_name(os.path.basename(file_path))
+        self._save_settings()
+
+    def _on_add_tool_clicked(self) -> None:
+        """Handle Add Tool button click.
+
+        Appends a new blank tool card with the next available tool number.
+        """
+        # Determine next tool number
+        if self._cards:
+            next_number = len(self._cards) + 1
+        else:
+            next_number = 1
+
+        # Create blank ToolCardData with defaults
+        new_tool = ToolCardData(
+            tool_number=next_number,
+            tool_type="Turning RH",
+            insert_code="CNMG",
+            orientation=1,
+            description="",
+            nose_radius=0.0160,
+            front_angle=95.0,
+            back_angle=175.0,
+            x_offset=0.0,
+            z_offset=0.0,
+            x_wear=0.0,
+            z_wear=0.0,
+            blade_width=0.0,
+        )
+
+        self.add_card(new_tool)
+        self._update_delete_buttons()
+        self._autosave()
+
+    def _on_set_x_clicked(self, value: float) -> None:
+        """Handle Set X touch-off button click.
+
+        Sends G10 L1 MDI command with the entered X diameter value
+        for the currently selected tool.
+
+        Args:
+            value: The X diameter value from the touch-off spinbox.
+        """
+        if self._linuxcnc_command is None:
+            return
+
+        selected_tool = self.get_selected_tool()
+        if selected_tool is None:
+            return
+
+        tool_number = selected_tool.tool_number
+        # G10 L1 P<tool> X<diameter_value>
+        command = f"G10 L1 P{tool_number} X{value:.6f}"
+        self._send_mdi_command(command)
+
+    def _on_set_z_clicked(self, value: float) -> None:
+        """Handle Set Z touch-off button click.
+
+        Sends G10 L1 MDI command with the entered Z value
+        for the currently selected tool.
+
+        Args:
+            value: The Z value from the touch-off spinbox.
+        """
+        if self._linuxcnc_command is None:
+            return
+
+        selected_tool = self.get_selected_tool()
+        if selected_tool is None:
+            return
+
+        tool_number = selected_tool.tool_number
+        # G10 L1 P<tool> Z<value>
+        command = f"G10 L1 P{tool_number} Z{value:.6f}"
+        self._send_mdi_command(command)
+
+    # ------------------------------------------------------------------
+    # Wear Offset → G10 Integration
+    # ------------------------------------------------------------------
+
+    def _on_wear_offset_changed(self, tool_number: int) -> None:
+        """Combine wear + geometry offsets and write via G10 L1 MDI.
+
+        Called when a wear field changes. Combines the wear offset with
+        the geometry offset and sends the combined value to LinuxCNC.
+
+        Args:
+            tool_number: The tool number whose wear offset changed.
+        """
+        if self._linuxcnc_command is None:
+            return
+
+        tool_data = self.get_tool(tool_number)
+        if tool_data is None:
+            return
+
+        # Combined X = (geometry_x + wear_x) in radius, convert to diameter for G10
+        combined_x_diameter = (tool_data.x_offset + tool_data.x_wear) * 2.0
+        combined_z = tool_data.z_offset + tool_data.z_wear
+
+        command = f"G10 L1 P{tool_number} X{combined_x_diameter:.6f} Z{combined_z:.6f}"
+        self._send_mdi_command(command)
+
+    # ------------------------------------------------------------------
+    # LinuxCNC MDI
+    # ------------------------------------------------------------------
+
+    def _send_mdi_command(self, command: str) -> None:
+        """Send an MDI command to LinuxCNC.
+
+        Args:
+            command: The G-code command string to send.
+        """
+        if self._linuxcnc_command is None:
+            return
+
+        try:
+            self._linuxcnc_command.mode(linuxcnc.MODE_MDI)
+            self._linuxcnc_command.wait_complete()
+            self._linuxcnc_command.mdi(command)
+        except Exception as e:
+            logger.error(f"MDI command failed: {command!r} — {e}")
+
+    # ------------------------------------------------------------------
+    # Autosave
+    # ------------------------------------------------------------------
+
+    def _autosave(self) -> None:
+        """Save the entire tool table to the active file path.
+
+        Silent failure — does not block the UI on write errors.
+        """
+        if not self._active_file_path:
+            return
+
+        tools = self.get_tools()
+        try:
+            save_tool_table(tools, self._active_file_path)
+        except Exception as e:
+            logger.warning(f"Autosave failed: {e}")
+
+    # ------------------------------------------------------------------
+    # Settings Persistence
+    # ------------------------------------------------------------------
+
+    def _get_settings_path(self) -> str:
+        """Return the path to the settings JSON file.
+
+        Uses the directory of the active file if available, otherwise
+        the current working directory.
+        """
+        if self._active_file_path:
+            directory = os.path.dirname(self._active_file_path)
+        else:
+            directory = os.getcwd()
+        return os.path.join(directory, _SETTINGS_FILE)
+
+    def _load_settings(self) -> Optional[str]:
+        """Load settings from .tool_tab_settings.json.
+
+        Searches for the settings file in the current working directory.
+
+        Returns:
+            The last_table_path if found, None otherwise.
+        """
+        # Try current working directory first
+        settings_path = os.path.join(os.getcwd(), _SETTINGS_FILE)
+        if not os.path.exists(settings_path):
+            return None
+
+        try:
+            with open(settings_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get("last_table_path")
+        except (json.JSONDecodeError, OSError, KeyError):
+            return None
+
+    def _save_settings(self) -> None:
+        """Persist the current active file path to .tool_tab_settings.json."""
+        if not self._active_file_path:
+            return
+
+        settings_data = {"last_table_path": self._active_file_path}
+
+        # Save in the directory of the active file
+        settings_path = os.path.join(
+            os.path.dirname(self._active_file_path) or os.getcwd(),
+            _SETTINGS_FILE,
+        )
+        try:
+            with open(settings_path, "w", encoding="utf-8") as f:
+                json.dump(settings_data, f, indent=2)
+        except OSError as e:
+            logger.warning(f"Failed to save settings: {e}")
+
+    def _load_settings_and_auto_load(self) -> None:
+        """On startup, load settings and auto-load the previously active table.
+
+        If the file does not exist, displays an empty list and clears
+        the table name label.
+        """
+        last_path = self._load_settings()
+        if not last_path:
+            return
+
+        if not os.path.exists(last_path):
+            # File not found — display empty list, clear table name
+            self._button_bar.set_table_name("")
+            return
+
+        try:
+            tools = load_tool_table(last_path)
+            self._active_file_path = last_path
+            self.set_cards(tools)
+            self._button_bar.set_table_name(os.path.basename(last_path))
+        except Exception as e:
+            logger.warning(f"Auto-load failed for {last_path}: {e}")
+            self._button_bar.set_table_name("")
+
+    # ------------------------------------------------------------------
+    # Delete Button Management
+    # ------------------------------------------------------------------
+
+    def _update_delete_buttons(self) -> None:
+        """Disable delete button on all cards when only 1 tool remains."""
+        only_one = len(self._cards) <= 1
+        for card in self._cards:
+            card._delete_btn.setEnabled(not only_one)
 
     # ------------------------------------------------------------------
     # Internal Helpers
     # ------------------------------------------------------------------
 
-    def _build_tool_from_fields(self) -> Optional[ToolDef]:
-        """Build a ToolDef from the current edit field values."""
-        try:
-            tool_number = int(self._field_tool_number.value())
-            nose_radius = self._field_nose_radius.value()
-            tip_angle = self._field_tip_angle.value()
-            edge_length = self._field_edge_length.value()
+    def _select_card(self, index: int) -> None:
+        """Update the selected card index and apply visual selection styling.
 
-            orient_val = self._field_orientation.currentData()
-            orientation = ToolOrientation(orient_val)
-
-            dir_val = self._field_direction.currentData()
-            direction = ToolDirection(dir_val)
-
-            description = self._field_description.text().strip()
-
-            # Preserve offsets from existing tool
-            existing = self._tools[self._current_index]
-
-            return ToolDef(
-                tool_number=tool_number,
-                nose_radius=nose_radius,
-                tip_angle=tip_angle,
-                edge_length=edge_length,
-                orientation=orientation,
-                direction=direction,
-                tool_type=existing.tool_type,
-                rotation=existing.rotation,
-                description=description,
-                x_offset=existing.x_offset,
-                z_offset=existing.z_offset,
-                x_wear=existing.x_wear,
-                z_wear=existing.z_wear,
+        Args:
+            index: The index of the card to select in self._cards.
+        """
+        # Deselect previous
+        if 0 <= self._selected_index < len(self._cards):
+            self._cards[self._selected_index].setStyleSheet(
+                f"ToolGeometryRow {{"
+                f"  background-color: {COLORS['bg_surface']};"
+                f"  border: 1px solid {COLORS['border_normal']};"
+                f"  border-radius: 6px;"
+                f"}}"
             )
-        except (ValueError, TypeError, IndexError):
-            return None
 
-    def _update_graphic_preview(self):
-        """Update the tool graphic widget with current field values."""
-        if self._current_index < 0 or self._current_index >= len(self._tools):
-            return
+        self._selected_index = index
 
-        tool = self._tools[self._current_index]
-        self._tool_graphic.set_tool_params(
-            tip_angle=tool.tip_angle,
-            edge_length=tool.edge_length,
-            nose_radius=tool.nose_radius,
-            orientation=tool.orientation,
-            direction=tool.direction,
-        )
-
-    def _refresh_tool_list(self):
-        """Rebuild the tool list widget from self._tools."""
-        self._tool_list.blockSignals(True)
-        self._tool_list.clear()
-        for tool in self._tools:
-            text = f"T{tool.tool_number:02d}  {tool.description}"
-            self._tool_list.addItem(text)
-        self._tool_list.blockSignals(False)
-
-    def _refresh_list_item(self, index: int):
-        """Update a single list item text after edit."""
-        if 0 <= index < len(self._tools):
-            tool = self._tools[index]
-            text = f"T{tool.tool_number:02d}  {tool.description}"
-            item = self._tool_list.item(index)
-            if item:
-                item.setText(text)
-
-    def _auto_save(self):
-        """Auto-save tool table on every change."""
-        try:
-            save_tool_table(self._tools, self._file_path)
-        except Exception:
-            pass  # Silent fail on auto-save — user can manually save
-
-    def _load_or_create_default(self):
-        """Load existing tool table or create default with one CNMG tool."""
-        if os.path.exists(self._file_path):
-            try:
-                self._tools = load_tool_table(self._file_path)
-            except Exception:
-                self._tools = []
-
-        if not self._tools:
-            # Create default tool: T1 CNMG roughing
-            self._tools = [
-                ToolDef(
-                    tool_number=1,
-                    nose_radius=0.016,
-                    tip_angle=80.0,
-                    edge_length=0.500,
-                    orientation=ToolOrientation.OD_FRONT_RIGHT,
-                    direction=ToolDirection.RIGHT,
-                    description="CNMG 432 Roughing",
-                ),
-            ]
-            # Save the default
-            self._auto_save()
-
-        self._refresh_tool_list()
-        if self._tools:
-            self._tool_list.setCurrentRow(0)
-
-    def _create_session_backup(self):
-        """Create a session backup on launch (max 5 backups)."""
-        if not os.path.exists(self._file_path):
-            return
-        try:
-            create_backup(self._file_path, BACKUP_DIR, max_backups=5)
-        except Exception:
-            pass  # Non-critical — don't block startup
+        # Highlight new selection
+        if 0 <= self._selected_index < len(self._cards):
+            self._cards[self._selected_index].setStyleSheet(
+                f"ToolGeometryRow {{"
+                f"  background-color: {COLORS['bg_surface']};"
+                f"  border: 2px solid {COLORS['border_focused']};"
+                f"  border-radius: 6px;"
+                f"}}"
+            )

@@ -29,7 +29,7 @@ from gui.colors import COLORS, FONTS, STYLESHEET
 from gui.components.status_bar import StatusBar
 from gui.program_tab import ProgramTab
 from gui.edit_tab import EditTab
-from gui.tools_tab import ToolsTab
+from gui.tools_tab import Tools_Tab
 from gui.debug_tab import DebugTab
 from gui.manual import ManualTab
 from gui.commissioning import SetupTab
@@ -86,7 +86,7 @@ class MainWindow(QMainWindow):
         self._manual_tab = ManualTab(self)
         self._program_tab = ProgramTab(self)
         self._edit_tab = EditTab(self)
-        self._tools_tab = ToolsTab(self)
+        self._tools_tab = Tools_Tab(self)
         self._debug_tab = DebugTab(self)
         self._setup_tab = SetupTab(
             backend=self._backend,
@@ -254,7 +254,7 @@ class MainWindow(QMainWindow):
         return self._edit_tab
 
     @property
-    def tools_tab(self) -> ToolsTab:
+    def tools_tab(self) -> Tools_Tab:
         """The Tools tab instance."""
         return self._tools_tab
 
