@@ -10,8 +10,20 @@ Also creates a userspace HAL component for compound slide muxing.
 """
 
 import logging
+import importlib.util as _ilu
 import linuxcnc
-import hal as hal_module  # LinuxCNC HAL Python bindings
+
+# Load system hal.so explicitly so the project's hal/ package in PYTHONPATH
+# doesn't shadow it. Only available inside the LinuxCNC RT environment.
+try:
+    _spec = _ilu.spec_from_file_location(
+        "hal_sys", "/usr/lib/python3/dist-packages/hal.py"
+    )
+    hal_module = _ilu.module_from_spec(_spec)
+    _spec.loader.exec_module(hal_module)
+except Exception:
+    hal_module = None
+del _ilu, _spec
 
 logger = logging.getLogger(__name__)
 
