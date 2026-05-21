@@ -230,10 +230,10 @@ setp mux4.jogscale-x.in1  0.000125
 setp mux4.jogscale-x.in2  0.00125
 setp mux4.jogscale-x.in3  0.0125
 
-setp mux4.jogscale-z.in0 -0.000025
-setp mux4.jogscale-z.in1 -0.00025
-setp mux4.jogscale-z.in2 -0.0025
-setp mux4.jogscale-z.in3 -0.025
+setp mux4.jogscale-z.in0  0.000025
+setp mux4.jogscale-z.in1  0.00025
+setp mux4.jogscale-z.in2  0.0025
+setp mux4.jogscale-z.in3  0.025
 
 # sel0/sel1 are driven by compound-slide HAL pins via postgui.hal (GUI controls increment)
 
