@@ -23,13 +23,12 @@ from gui.manual.sections import (
     build_tool_section,
     build_touchoff_section,
     build_mdi_section,
-    build_state_section,
     build_homing_section,
     build_compound_section,
 )
 from hal import get_backend, HALBackend
 from hal.interface import TaskState, HomingState
-from hal.constants import JOG_INCREMENTS, DEFAULT_JOG_INCREMENT_INDEX, DEFAULT_JOG_VELOCITY
+from hal.constants import JOG_MODES, DEFAULT_JOG_MODE_INDEX, JOG_INCREMENTS, DEFAULT_JOG_VELOCITY
 from hal.compound_logic import (
     CompoundLinearLogic, CompoundArcLogic,
     Quadrant, ArcStartType,
@@ -55,7 +54,7 @@ class ManualTab(QWidget):
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._backend: HALBackend = get_backend()
-        self._jog_increment_idx = DEFAULT_JOG_INCREMENT_INDEX
+        self._jog_increment_idx = DEFAULT_JOG_MODE_INDEX
         self._jog_velocity = DEFAULT_JOG_VELOCITY
 
         # Compound slide state
@@ -123,7 +122,6 @@ class ManualTab(QWidget):
         tool_section, self._tool = build_tool_section()
         touchoff_section, self._touchoff = build_touchoff_section()
         mdi_section, self._mdi = build_mdi_section()
-        state_section, self._state = build_state_section()
         homing_section, self._homing = build_homing_section()
 
         scroll_layout.addWidget(jog_section)
@@ -131,7 +129,6 @@ class ManualTab(QWidget):
         scroll_layout.addWidget(tool_section)
         scroll_layout.addWidget(touchoff_section)
         scroll_layout.addWidget(mdi_section)
-        scroll_layout.addWidget(state_section)
         scroll_layout.addWidget(homing_section)
         scroll_layout.addStretch()
 
@@ -249,11 +246,6 @@ class ManualTab(QWidget):
         self._mdi["history"].activated.connect(
             lambda idx: self._mdi["input"].setText(self._mdi["history"].itemText(idx)))
 
-        # Machine state
-        self._state["btn_estop"].clicked.connect(self._backend.estop_reset)
-        self._state["btn_on"].clicked.connect(self._backend.machine_on)
-        self._state["btn_off"].clicked.connect(self._backend.machine_off)
-
         # Homing
         self._homing["btn_all"].clicked.connect(self._backend.home_all)
         self._homing["btn_x"].clicked.connect(lambda: self._backend.home_axis(0))
@@ -304,28 +296,6 @@ class ManualTab(QWidget):
         if self._compound_active:
             self._update_compound(s)
 
-        # Machine state
-        if s.task_state == TaskState.ESTOP:
-            self._state["state_label"].setText("● E-STOP")
-            self._state["state_label"].setStyleSheet(
-                f"font-size: 13pt; font-weight: bold; color: {COLORS['status_error']};")
-        elif s.task_state == TaskState.ESTOP_RESET:
-            self._state["state_label"].setText("● RESET")
-            self._state["state_label"].setStyleSheet(
-                f"font-size: 13pt; font-weight: bold; color: {COLORS['status_warning']};")
-        elif s.machine_on:
-            self._state["state_label"].setText("● ON")
-            self._state["state_label"].setStyleSheet(
-                f"font-size: 13pt; font-weight: bold; color: {COLORS['status_ok']};")
-        else:
-            self._state["state_label"].setText("● OFF")
-            self._state["state_label"].setStyleSheet(
-                f"font-size: 13pt; font-weight: bold; color: {COLORS['text_disabled']};")
-
-        self._state["mode_label"].setText(f"Mode: {s.task_mode.value.upper()}")
-        if s.error_message:
-            self._state["error_label"].setText(s.error_message)
-
         # Homing
         for axis, label_key in [(s.x, "home_x_label"), (s.z, "home_z_label")]:
             lbl = self._homing[label_key]
@@ -357,7 +327,7 @@ class ManualTab(QWidget):
         self._jog_velocity = value
 
     def _on_jog_inc_changed(self, index: int):
-        """Update MPG increment selection — updates both GUI state and HAL mux4."""
+        """Update MPG mode selection — updates both GUI state and HAL mux8."""
         self._jog_increment_idx = index
         if hasattr(self._backend, 'set_mpg_scale_index'):
             self._backend.set_mpg_scale_index(index)

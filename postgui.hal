@@ -15,19 +15,26 @@ loadrt mux2 names=mux2.x-jog,mux2.z-jog
 addf mux2.x-jog servo-thread
 addf mux2.z-jog servo-thread
 
-# --- MPG jog scale (mux4 for increment selection) ---
-# Index 0: 0.0002"  (sel0=0, sel1=0)
-# Index 1: 0.001"   (sel0=1, sel1=0) — default
-# Index 2: 0.01"    (sel0=0, sel1=1)
-# Index 3: 0.1"     (sel0=1, sel1=1)
-net mpg-scale-sel0 compound-slide.mpg-scale-sel0 => mux4.jogscale-x.sel0 mux4.jogscale-z.sel0
-net mpg-scale-sel1 compound-slide.mpg-scale-sel1 => mux4.jogscale-x.sel1 mux4.jogscale-z.sel1
+# --- MPG jog scale (mux8 for increment/velocity selection) ---
+# Index 0: 0.0002" pos  (sel2=0, sel1=0, sel0=0)
+# Index 1: 0.001"  pos  (sel2=0, sel1=0, sel0=1) — default
+# Index 2: Vel Slow     (sel2=0, sel1=1, sel0=0)
+# Index 3: Vel Med      (sel2=0, sel1=1, sel0=1)
+# Index 4: Vel Fast     (sel2=1, sel1=0, sel0=0)
+net mpg-scale-sel0 compound-slide.mpg-scale-sel0 => mux8.jogscale-x.sel0 mux8.jogscale-z.sel0
+net mpg-scale-sel1 compound-slide.mpg-scale-sel1 => mux8.jogscale-x.sel1 mux8.jogscale-z.sel1
+net mpg-scale-sel2 compound-slide.mpg-scale-sel2 => mux8.jogscale-x.sel2 mux8.jogscale-z.sel2
+
+# --- jog-vel-mode: velocity mode when sel1 OR sel2 is HIGH ---
+net mpg-scale-sel1 => or2.jog-vel-mode.in0
+net mpg-scale-sel2 => or2.jog-vel-mode.in1
+net jog-vel-mode-sig or2.jog-vel-mode.out => joint.0.jog-vel-mode axis.x.jog-vel-mode joint.1.jog-vel-mode axis.z.jog-vel-mode
 
 # --- Feed MPG encoder counts to compound-slide component ---
 net mpg-x-counts => compound-slide.mpg-x-in
 net mpg-z-counts => compound-slide.mpg-z-in
 
-# --- Feed jog scale to compound-slide (from mux4 output) ---
+# --- Feed jog scale to compound-slide (from mux8 output) ---
 net mpg-x-scale => compound-slide.jog-scale
 
 # --- Mux2 routing: select between direct MPG and compound output ---

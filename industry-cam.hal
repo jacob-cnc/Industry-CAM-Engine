@@ -36,8 +36,11 @@ loadrt pid names=pid.x,pid.z
 # Spindle near/at-speed detection
 loadrt near names=near-spindle
 
-# Mux for MPG jog scale selection (sel0/sel1 driven by compound-slide HAL pins via postgui.hal)
-loadrt mux4 names=mux4.jogscale-x,mux4.jogscale-z
+# Mux for MPG jog scale selection (sel0/sel1/sel2 driven by compound-slide HAL pins via postgui.hal)
+loadrt mux8 names=mux8.jogscale-x,mux8.jogscale-z
+
+# OR gate for jog-vel-mode: velocity mode when sel1 OR sel2 is HIGH
+loadrt or2 names=or2.jog-vel-mode
 
 # Debounce for switches and buttons
 loadrt debounce cfg=12
@@ -53,8 +56,9 @@ addf debounce.0                     servo-thread
 addf pid.x.do-pid-calcs            servo-thread
 addf pid.z.do-pid-calcs            servo-thread
 addf near-spindle                   servo-thread
-addf mux4.jogscale-x               servo-thread
-addf mux4.jogscale-z               servo-thread
+addf mux8.jogscale-x               servo-thread
+addf mux8.jogscale-z               servo-thread
+addf or2.jog-vel-mode              servo-thread
 addf hm2_7i96s.0.write         servo-thread
 
 # ============================================================================
@@ -223,39 +227,43 @@ setp hm2_7i96s.0.encoder.03.filter 1
 setp hm2_7i96s.0.encoder.02.scale 100
 setp hm2_7i96s.0.encoder.02.filter 1
 
-# Jog scale — GUI-controlled until panel rotary switch is wired
-# Default: 0.001" per MPG click
-setp mux4.jogscale-x.in0  0.000025
-setp mux4.jogscale-x.in1  0.000125
-setp mux4.jogscale-x.in2  0.00125
-setp mux4.jogscale-x.in3  0.0125
+# Jog scale — GUI-controlled via mux8 (5 modes: 2 position + 3 velocity)
+# Index 0: 0.0002" position mode
+# Index 1: 0.001"  position mode (default)
+# Index 2: Vel Slow (~0.1 in/s at moderate spin)
+# Index 3: Vel Med  (~0.3 in/s at moderate spin)
+# Index 4: Vel Fast (~0.6 in/s, capped by MAX_VEL)
+# Indices 5-7: fallback to Vel Fast scale (unused but safe)
+setp mux8.jogscale-x.in0  0.000025
+setp mux8.jogscale-x.in1  0.000125
+setp mux8.jogscale-x.in2  0.000125
+setp mux8.jogscale-x.in3  0.000375
+setp mux8.jogscale-x.in4  0.000750
+setp mux8.jogscale-x.in5  0.000750
+setp mux8.jogscale-x.in6  0.000750
+setp mux8.jogscale-x.in7  0.000750
 
-setp mux4.jogscale-z.in0  0.000025
-setp mux4.jogscale-z.in1  0.00025
-setp mux4.jogscale-z.in2  0.0025
-setp mux4.jogscale-z.in3  0.025
+setp mux8.jogscale-z.in0  0.000025
+setp mux8.jogscale-z.in1  0.000125
+setp mux8.jogscale-z.in2  0.000125
+setp mux8.jogscale-z.in3  0.000375
+setp mux8.jogscale-z.in4  0.000750
+setp mux8.jogscale-z.in5  0.000750
+setp mux8.jogscale-z.in6  0.000750
+setp mux8.jogscale-z.in7  0.000750
 
-# sel0/sel1 are driven by compound-slide HAL pins via postgui.hal (GUI controls increment)
+# sel0/sel1/sel2 are driven by compound-slide HAL pins via postgui.hal (GUI controls mode)
 
 # MPG connections
 net mpg-x-counts   hm2_7i96s.0.encoder.03.count  =>  joint.0.jog-counts  axis.x.jog-counts
-net mpg-x-scale    mux4.jogscale-x.out            =>  joint.0.jog-scale   axis.x.jog-scale
+net mpg-x-scale    mux8.jogscale-x.out            =>  joint.0.jog-scale   axis.x.jog-scale
 net mpg-z-counts   hm2_7i96s.0.encoder.02.count  =>  joint.1.jog-counts  axis.z.jog-counts
-net mpg-z-scale    mux4.jogscale-z.out            =>  joint.1.jog-scale   axis.z.jog-scale
-
-# MPG scale: default 0.001"/click (mux4 index 1: sel0=1, sel1=0)
-setp mux4.jogscale-x.sel0  1
-setp mux4.jogscale-x.sel1  0
-setp mux4.jogscale-z.sel0  1
-setp mux4.jogscale-z.sel1  0
+net mpg-z-scale    mux8.jogscale-z.out            =>  joint.1.jog-scale   axis.z.jog-scale
 
 # Jog enable — machine must be ON for MPG to move axes
 net mpg-jog-enable halui.machine.is-on => joint.0.jog-enable joint.1.jog-enable axis.x.jog-enable axis.z.jog-enable
 
-setp joint.0.jog-vel-mode 0
-setp axis.x.jog-vel-mode 0
-setp joint.1.jog-vel-mode 0
-setp axis.z.jog-vel-mode 0
+# jog-vel-mode driven by or2 (set dynamically from postgui.hal)
 
 # ============================================================================
 # 12. Manual Tool Change

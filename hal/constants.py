@@ -30,7 +30,23 @@ MAX_ACCELERATION = 10.0   # inches/sec²
 DEFAULT_JOG_VELOCITY = 1.0    # inches/sec
 MAX_JOG_VELOCITY = 2.0        # inches/sec
 
-# MPG jog increments (inches, diameter for X)
+# MPG jog modes: (label, is_velocity_mode)
+# Index must map directly to mux8 select encoding:
+#   0 = sel2:0 sel1:0 sel0:0
+#   1 = sel2:0 sel1:0 sel0:1
+#   2 = sel2:0 sel1:1 sel0:0
+#   3 = sel2:0 sel1:1 sel0:1
+#   4 = sel2:1 sel1:0 sel0:0
+JOG_MODES = [
+    (".0002",  False),   # Position: 0.0002" per MPG click
+    (".001",   False),   # Position: 0.001" per MPG click
+    ("Slow",   True),    # Velocity: ~0.1 in/s at moderate spin
+    ("Medium", True),    # Velocity: ~0.3 in/s at moderate spin
+    ("Fast",   True),    # Velocity: ~0.6 in/s (capped by MAX_VEL)
+]
+DEFAULT_JOG_MODE_INDEX = 1  # 0.001" position mode
+
+# Legacy alias for code that still references JOG_INCREMENTS
 JOG_INCREMENTS = [0.0002, 0.001, 0.01, 0.1]
 DEFAULT_JOG_INCREMENT_INDEX = 1  # 0.001"
 

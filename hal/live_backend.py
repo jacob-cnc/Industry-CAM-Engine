@@ -95,13 +95,15 @@ class LiveBackend(HALBackend):
             # Output pins — decomposed jog counts written by GUI
             self._hal_comp.newpin("x-jog-counts", hal_module.HAL_S32, hal_module.HAL_OUT)
             self._hal_comp.newpin("z-jog-counts", hal_module.HAL_S32, hal_module.HAL_OUT)
-            # MPG scale select pins — wired to mux4.jogscale-*.sel0/sel1 via _connect_scale_select_pins
+            # MPG scale select pins — wired to mux8.jogscale-*.sel0/sel1/sel2 via _connect_scale_select_pins
             self._hal_comp.newpin("mpg-scale-sel0", hal_module.HAL_BIT, hal_module.HAL_OUT)
             self._hal_comp.newpin("mpg-scale-sel1", hal_module.HAL_BIT, hal_module.HAL_OUT)
+            self._hal_comp.newpin("mpg-scale-sel2", hal_module.HAL_BIT, hal_module.HAL_OUT)
             self._hal_comp.ready()
-            # Default to index 1 = 0.001" per MPG click (sel0=1, sel1=0)
+            # Default to index 1 = 0.001" per MPG click (sel0=1, sel1=0, sel2=0)
             self._hal_comp["mpg-scale-sel0"] = True
             self._hal_comp["mpg-scale-sel1"] = False
+            self._hal_comp["mpg-scale-sel2"] = False
         except Exception:
             # If component already exists or HAL not ready, continue without it
             self._hal_comp = None
@@ -612,7 +614,7 @@ class LiveBackend(HALBackend):
                 pass
 
     def _connect_scale_select_pins(self):
-        """Wire compound-slide scale-select OUT pins to mux4 sel inputs.
+        """Wire compound-slide scale-select OUT pins to mux8 sel inputs and or2.
 
         Equivalent to the postgui.hal 'net' commands, but run here because
         display_gui.sh is a plain DISPLAY program (no POSTGUI_HALFILE support).
@@ -621,10 +623,15 @@ class LiveBackend(HALBackend):
         nets = [
             ["mpg-scale-sel0",
              "compound-slide.mpg-scale-sel0",
-             "mux4.jogscale-x.sel0", "mux4.jogscale-z.sel0"],
+             "mux8.jogscale-x.sel0", "mux8.jogscale-z.sel0"],
             ["mpg-scale-sel1",
              "compound-slide.mpg-scale-sel1",
-             "mux4.jogscale-x.sel1", "mux4.jogscale-z.sel1"],
+             "mux8.jogscale-x.sel1", "mux8.jogscale-z.sel1",
+             "or2.jog-vel-mode.in0"],
+            ["mpg-scale-sel2",
+             "compound-slide.mpg-scale-sel2",
+             "mux8.jogscale-x.sel2", "mux8.jogscale-z.sel2",
+             "or2.jog-vel-mode.in1"],
         ]
         for net_args in nets:
             result = subprocess.run(
@@ -637,19 +644,43 @@ class LiveBackend(HALBackend):
             else:
                 logger.info("HAL net established: %s", " ".join(net_args))
 
-    def set_mpg_scale_index(self, index: int):
-        """Set the MPG jog increment via mux4 select pins.
+        # Wire or2 output to jog-vel-mode pins
+        vel_mode_net = [
+            "jog-vel-mode-sig",
+            "or2.jog-vel-mode.out",
+            "joint.0.jog-vel-mode", "axis.x.jog-vel-mode",
+            "joint.1.jog-vel-mode", "axis.z.jog-vel-mode",
+        ]
+        result = subprocess.run(
+            ["halcmd", "net"] + vel_mode_net,
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            logger.warning("halcmd net %s failed: %s",
+                           " ".join(vel_mode_net), result.stderr.strip())
+        else:
+            logger.info("HAL net established: %s", " ".join(vel_mode_net))
 
-        Index maps to JOG_INCREMENTS: 0=0.0001", 1=0.001", 2=0.01", 3=0.1"
-        Drives compound-slide.mpg-scale-sel0/sel1, which postgui.hal routes
-        to mux4.jogscale-x/z.sel0/sel1.
+    def set_mpg_scale_index(self, index: int):
+        """Set the MPG jog mode via mux8 select pins.
+
+        Index maps to JOG_MODES:
+            0 = 0.0002" position mode
+            1 = 0.001"  position mode
+            2 = Vel Slow
+            3 = Vel Med
+            4 = Vel Fast
+
+        Drives compound-slide.mpg-scale-sel0/sel1/sel2, which postgui.hal
+        routes to mux8.jogscale-x/z.sel0/sel1/sel2 and or2.jog-vel-mode.
 
         Args:
-            index: 0–3 selecting the jog increment.
+            index: 0–4 selecting the jog mode.
         """
         if self._hal_comp is not None:
             try:
                 self._hal_comp["mpg-scale-sel0"] = bool(index & 1)
                 self._hal_comp["mpg-scale-sel1"] = bool((index >> 1) & 1)
+                self._hal_comp["mpg-scale-sel2"] = bool((index >> 2) & 1)
             except Exception:
                 pass

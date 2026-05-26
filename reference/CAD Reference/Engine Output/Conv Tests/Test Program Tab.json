@@ -5,14 +5,14 @@
     "diameter": 2.0,
     "x_start": 0.0,
     "z_start": 0.1,
-    "z_end": -1.0,
+    "z_end": -1.5,
     "pilot_hole_dia": 0.0,
     "mode": "od"
   },
   "roughing": {
     "doc_dia": 0.05,
     "feed": 0.008,
-    "strategy": "staircase",
+    "strategy": "offset_contour",
     "fin_allowance": 0.005,
     "peck_enabled": false,
     "peck_length": null,
@@ -49,10 +49,16 @@
       "radius": -0.0
     },
     {
-      "type": "arc",
-      "x": 1.25,
+      "type": "line",
+      "x": 1.0,
       "z": -1.0,
-      "radius": -1.0
+      "radius": -0.0
+    },
+    {
+      "type": "arc",
+      "x": 1.5,
+      "z": -1.5,
+      "radius": -0.5
     }
   ]
 }

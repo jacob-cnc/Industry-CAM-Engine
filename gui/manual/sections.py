@@ -19,7 +19,7 @@ from PyQt5.QtWidgets import (
 from gui.colors import COLORS, FONTS
 from gui.components.collapsible_section import CollapsibleSection
 from hal.constants import (
-    JOG_INCREMENTS, DEFAULT_JOG_INCREMENT_INDEX,
+    JOG_MODES, DEFAULT_JOG_MODE_INDEX,
     DEFAULT_JOG_VELOCITY, MAX_JOG_VELOCITY,
     MAX_TOOLS,
 )
@@ -109,22 +109,23 @@ def build_jog_section() -> tuple:
     sep.setStyleSheet(f"color: {COLORS['border_normal']};")
     section.add_widget(sep)
 
-    mpg_header = QLabel("MPG Increment (per detent)")
+    mpg_header = QLabel("MPG Mode (per detent)")
     mpg_header.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 8pt;")
     section.add_widget(mpg_header)
 
     inc_row = QHBoxLayout()
-    inc_label = QLabel("Step:")
+    inc_label = QLabel("Mode:")
     inc_label.setFixedWidth(44)
     inc_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 9pt;")
     jog_inc_combo = QComboBox()
-    for inc in JOG_INCREMENTS:
-        jog_inc_combo.addItem(f"{inc:.4f}\"")
-    jog_inc_combo.setCurrentIndex(DEFAULT_JOG_INCREMENT_INDEX)
+    for label, is_vel in JOG_MODES:
+        jog_inc_combo.addItem(label)
+    jog_inc_combo.setCurrentIndex(DEFAULT_JOG_MODE_INDEX)
     jog_inc_combo.setToolTip(
-        "MPG jog increment per encoder detent.\n"
-        "Mirrors rotary switch (mux4 sel0/sel1). Will track 6-pos knob when wired.\n"
-        "x1=0.0001\" | x10=0.001\" | x100=0.01\" | x1000=0.1\""
+        "MPG jog mode per encoder detent.\n"
+        "Position modes: fixed increment per click.\n"
+        "Velocity modes: axis speed proportional to MPG spin rate.\n"
+        "Stopping the wheel stops the axis within decel ramp."
     )
     inc_row.addWidget(inc_label)
     inc_row.addWidget(jog_inc_combo, stretch=1)

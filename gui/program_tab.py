@@ -14,7 +14,7 @@ import os
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
-    QScrollArea, QLabel, QComboBox, QCheckBox,
+    QScrollArea, QLabel, QComboBox, QCheckBox, QSpinBox,
     QPushButton, QGroupBox, QFormLayout, QFrame,
     QFileDialog, QMessageBox,
 )
@@ -78,6 +78,7 @@ class ProgramTab(QWidget):
         self._state = ProgramState.IDLE
         self._active_tool: Optional[ToolDef] = None
         self._program_file_path: Optional[str] = None
+        self._last_gcode_text: str = ""  # Last generated G-code for saving
         self._setup_ui()
         self._connect_signals()
         self._update_ui_for_state()
@@ -113,6 +114,7 @@ class ProgramTab(QWidget):
     def get_roughing_values(self) -> dict:
         """Return current roughing field values as a dict."""
         return {
+            "tool_number": self._rough_tool_num.value(),
             "doc_dia": self._rough_doc.value(),
             "feed": self._rough_feed.value(),
             "strategy": self._rough_strategy.currentText().lower().replace(" ", "_"),
@@ -125,9 +127,11 @@ class ProgramTab(QWidget):
     def get_finishing_values(self) -> dict:
         """Return current finishing field values as a dict."""
         return {
+            "tool_number": self._finish_tool_num.value(),
             "passes": int(self._finish_passes.value()),
             "doc_dia": self._finish_doc.value(),
             "feed": self._finish_feed.value(),
+            "spring_pass": self._finish_spring_pass.isChecked(),
         }
 
     def get_segments(self) -> list:
@@ -351,6 +355,14 @@ class ProgramTab(QWidget):
         form.setContentsMargins(4, 2, 4, 2)
         form.setSpacing(2)
 
+        self._rough_tool_num = QSpinBox()
+        self._rough_tool_num.setMinimum(1)
+        self._rough_tool_num.setMaximum(99)
+        self._rough_tool_num.setValue(1)
+        self._rough_tool_num.setPrefix("T")
+        self._rough_tool_num.setFixedHeight(32)
+        form.addRow("Tool:", self._rough_tool_num)
+
         self._rough_doc = NumericField(NumericFieldConfig(
             min_value=0.001, max_value=1.0, decimals=4,
             default_value=0.050, suffix="dia",
@@ -405,6 +417,14 @@ class ProgramTab(QWidget):
         form.setContentsMargins(4, 2, 4, 2)
         form.setSpacing(2)
 
+        self._finish_tool_num = QSpinBox()
+        self._finish_tool_num.setMinimum(1)
+        self._finish_tool_num.setMaximum(99)
+        self._finish_tool_num.setValue(1)
+        self._finish_tool_num.setPrefix("T")
+        self._finish_tool_num.setFixedHeight(32)
+        form.addRow("Tool:", self._finish_tool_num)
+
         self._finish_passes = NumericField(NumericFieldConfig(
             min_value=1.0, max_value=10.0, decimals=0,
             default_value=1.0, suffix="",
@@ -422,6 +442,14 @@ class ProgramTab(QWidget):
             default_value=0.003, suffix="ipr",
         ))
         form.addRow("Feed:", self._finish_feed)
+
+        self._finish_spring_pass = QCheckBox("Spring pass")
+        self._finish_spring_pass.setToolTip(
+            "Repeat the final finish pass at zero DOC to remove deflection.\n"
+            "The last pass runs twice — second time with no additional cut."
+        )
+        self._finish_spring_pass.setStyleSheet(f"color: {COLORS['text_primary']};")
+        form.addRow("", self._finish_spring_pass)
 
         section.add_layout(form)
 
@@ -676,6 +704,7 @@ class ProgramTab(QWidget):
             self._sim_viewer.load(graph_data, gcode_text, sim_moves)
 
             # 10. Emit signals
+            self._last_gcode_text = gcode_text
             self.gcode_generated.emit(gcode_text)
             self.plan_result_ready.emit(plan_result)
 
@@ -825,6 +854,7 @@ class ProgramTab(QWidget):
             self._sim_viewer.load(graph_data, gcode_text, sim_moves)
 
             # Emit G-code to Edit tab
+            self._last_gcode_text = gcode_text
             self.gcode_generated.emit(gcode_text)
 
             # Update state
@@ -881,7 +911,12 @@ class ProgramTab(QWidget):
         self._program_file_label.setToolTip(path)
 
     def _write_program_file(self, path: str):
-        """Serialize current program state to JSON."""
+        """Serialize current program state to JSON and save G-code as .ngc companion.
+
+        Saves two files:
+            - <name>.json — conversational program parameters (reloadable)
+            - <name>.ngc — G-code output (loadable by Run tab)
+        """
         import json
         data = {
             "version": 1,
@@ -895,7 +930,21 @@ class ProgramTab(QWidget):
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2)
         except Exception as e:
-            QMessageBox.warning(self, "Save Error", f"Failed to save:\n{e}")
+            QMessageBox.warning(self, "Save Error", f"Failed to save program:\n{e}")
+            return
+
+        # Save companion .ngc file with the generated G-code
+        if self._last_gcode_text:
+            ngc_path = os.path.splitext(path)[0] + '.ngc'
+            try:
+                with open(ngc_path, 'w', encoding='utf-8') as f:
+                    f.write(self._last_gcode_text)
+                logger.info("Saved G-code companion: %s", ngc_path)
+            except Exception as e:
+                QMessageBox.warning(
+                    self, "Save Warning",
+                    f"Program saved, but G-code file failed:\n{e}",
+                )
 
     def _load_program_data(self, data: dict):
         """Deserialize program state from JSON dict into fields."""
@@ -935,15 +984,21 @@ class ProgramTab(QWidget):
             self._rough_peck_length.set_value(roughing["peck_length"])
         if "spindle_rpm" in roughing:
             self._rough_rpm.set_value(roughing["spindle_rpm"])
+        if "tool_number" in roughing:
+            self._rough_tool_num.setValue(int(roughing["tool_number"]))
 
         # Finishing
         finishing = data.get("finishing", {})
+        if "tool_number" in finishing:
+            self._finish_tool_num.setValue(int(finishing["tool_number"]))
         if "passes" in finishing:
             self._finish_passes.set_value(float(finishing["passes"]))
         if "doc_dia" in finishing:
             self._finish_doc.set_value(finishing["doc_dia"])
         if "feed" in finishing:
             self._finish_feed.set_value(finishing["feed"])
+        if "spring_pass" in finishing:
+            self._finish_spring_pass.setChecked(finishing["spring_pass"])
 
         # Segments
         segments = data.get("segments", [])

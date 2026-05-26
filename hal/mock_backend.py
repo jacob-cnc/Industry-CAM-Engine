@@ -399,7 +399,7 @@ class MockBackend(HALBackend):
         pass
 
     def set_mpg_scale_index(self, index: int):
-        """Set MPG jog increment index (no-op in mock — no HAL mux4 pins)."""
+        """Set MPG jog mode index (no-op in mock — no HAL mux8 pins)."""
         pass
 
     # ------------------------------------------------------------------

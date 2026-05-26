@@ -32,6 +32,8 @@ from gui.edit_tab import EditTab
 from gui.tools_tab import Tools_Tab
 from gui.debug_tab import DebugTab
 from gui.manual import ManualTab
+from gui.run_tab import RunTab
+from gui.help_tab import HelpTab
 from gui.commissioning import SetupTab
 from hal.factory import get_backend
 
@@ -56,6 +58,12 @@ class MainWindow(QMainWindow):
 
         self._setup_ui()
         self._wire_signals()
+
+        # Status bar poll timer — updates position, RPM, feed, tool, gcodes
+        from PyQt5.QtCore import QTimer
+        self._status_timer = QTimer(self)
+        self._status_timer.timeout.connect(self._poll_status_bar)
+        self._status_timer.start(200)  # 5 Hz
 
         logger.info("MainWindow initialized (offline preview mode)")
 
@@ -84,6 +92,7 @@ class MainWindow(QMainWindow):
 
         # --- Tabs in operator-priority order ---
         self._manual_tab = ManualTab(self)
+        self._run_tab = RunTab(self)
         self._program_tab = ProgramTab(self)
         self._edit_tab = EditTab(self)
         self._tools_tab = Tools_Tab(self)
@@ -95,16 +104,13 @@ class MainWindow(QMainWindow):
 
         self._tab_widget.addTab(self._manual_tab, "Manual")
         self._tab_widget.addTab(self._tools_tab, "Tools")
-        self._tab_widget.addTab(
-            self._make_placeholder("Coming in Phase 2"), "Run"
-        )
+        self._tab_widget.addTab(self._run_tab, "Run")
         self._tab_widget.addTab(self._program_tab, "Program")
         self._tab_widget.addTab(self._edit_tab, "Edit")
         self._tab_widget.addTab(self._debug_tab, "Debug")
         self._tab_widget.addTab(self._setup_tab, "Setup")
-        self._tab_widget.addTab(
-            self._make_placeholder("Coming in Phase 3"), "Help"
-        )
+        self._help_tab = HelpTab(self)
+        self._tab_widget.addTab(self._help_tab, "Help")
 
         # Default to Manual tab
         self._tab_widget.setCurrentWidget(self._manual_tab)
@@ -165,6 +171,11 @@ class MainWindow(QMainWindow):
         # 7. E-Stop button → trigger estop on backend
         self._status_bar.estop_clicked.connect(self._on_estop_clicked)
 
+        # 8. Machine control buttons (Reset, ON, OFF) in status bar
+        self._status_bar.reset_clicked.connect(self._backend.estop_reset)
+        self._status_bar.machine_on_clicked.connect(self._backend.machine_on)
+        self._status_bar.machine_off_clicked.connect(self._backend.machine_off)
+
     # ------------------------------------------------------------------
     # Signal Slots
     # ------------------------------------------------------------------
@@ -194,9 +205,10 @@ class MainWindow(QMainWindow):
         self._program_tab.set_active_tool(tool_def)
 
     def _on_tab_changed(self, index: int):
-        """Handle main tab switch — activate/deactivate Setup tab polling."""
-        is_setup = (self._tab_widget.widget(index) is self._setup_tab)
-        self._setup_tab.set_active(is_setup)
+        """Handle main tab switch — activate/deactivate polling tabs."""
+        current = self._tab_widget.widget(index)
+        self._setup_tab.set_active(current is self._setup_tab)
+        self._run_tab.set_active(current is self._run_tab)
 
     def _on_estop_clicked(self):
         """Handle E-Stop button press — trigger estop on backend.
@@ -207,6 +219,46 @@ class MainWindow(QMainWindow):
         """
         self._backend.machine_off()
         logger.warning("Software E-Stop triggered from status bar")
+
+    def _poll_status_bar(self):
+        """Update the status bar with live machine data (runs at 5 Hz)."""
+        self._backend.poll()
+        s = self._backend.state
+
+        # Position
+        self._status_bar.update_position(s.x.position, s.z.position)
+
+        # Machine state
+        from hal.interface import InterpState, TaskState
+        if s.estop_active:
+            state_str = "ESTOP"
+        elif s.interp_state == InterpState.READING:
+            state_str = "RUN"
+        elif s.interp_state == InterpState.PAUSED:
+            state_str = "PAUSE"
+        else:
+            state_str = "IDLE"
+        self._status_bar.update_state(state_str)
+
+        # Spindle
+        rpm = int(s.spindle.speed)
+        direction = ""
+        from hal.interface import SpindleDirection
+        if s.spindle.direction == SpindleDirection.FORWARD:
+            direction = "FWD"
+        elif s.spindle.direction == SpindleDirection.REVERSE:
+            direction = "REV"
+        self._status_bar.update_rpm(rpm, direction)
+
+        # Feed rate (from active feed override × programmed, or just show override)
+        self._status_bar.update_feed(s.feed_override)
+
+        # Tool
+        self._status_bar.update_tool(s.tool_in_spindle)
+
+        # G-codes
+        if s.active_gcodes:
+            self._status_bar.update_gcodes(s.active_gcodes)
 
     # ------------------------------------------------------------------
     # Helpers

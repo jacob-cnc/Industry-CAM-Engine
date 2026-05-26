@@ -191,9 +191,27 @@ class OrientationGraphicWidget(QWidget):
         tip = QPointF(0, 0)
         front_end = QPointF(front_dx, front_dy)
         back_end = QPointF(back_dx, back_dy)
-        body_corner = QPointF(front_dx + back_dx, front_dy + back_dy)
 
-        polygon = QPolygonF([tip, front_end, body_corner, back_end])
+        # For narrow inserts (threading, V-shape), use a triangle.
+        # For wider inserts (turning), use a parallelogram body.
+        included_angle = self._back_angle - self._front_angle
+        if included_angle <= 65.0:
+            # Narrow insert (threading, V-shape): triangle with a flat back
+            # The back of the insert is a line connecting the two edge endpoints
+            # extended slightly for visual body mass
+            mid_x = (front_dx + back_dx) / 2.0
+            mid_y = (front_dy + back_dy) / 2.0
+            # Extend the body behind the midpoint
+            body_depth = scale * 0.6
+            body_dir_x = mid_x / max(0.01, math.sqrt(mid_x**2 + mid_y**2))
+            body_dir_y = mid_y / max(0.01, math.sqrt(mid_x**2 + mid_y**2))
+            body_pt = QPointF(mid_x + body_dir_x * body_depth,
+                              mid_y + body_dir_y * body_depth)
+            polygon = QPolygonF([tip, front_end, body_pt, back_end])
+        else:
+            # Standard insert (turning): parallelogram body
+            body_corner = QPointF(front_dx + back_dx, front_dy + back_dy)
+            polygon = QPolygonF([tip, front_end, body_corner, back_end])
 
         # Apply orientation transform (mirror for Q2-Q8)
         transform = self._get_orientation_transform()

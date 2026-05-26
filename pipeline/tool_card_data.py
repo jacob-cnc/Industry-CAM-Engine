@@ -61,12 +61,12 @@ TOOL_TYPES: List[str] = [
 ]
 
 TYPE_ORIENTATIONS: Dict[str, List[int]] = {
-    "Turning RH": [1, 2, 3, 4],
-    "Turning LH": [1, 2, 3, 4],
-    "Boring Bar": [5, 6, 7, 8],
-    "Threading External": [1, 2],
-    "Threading Internal": [5, 6],
-    "Grooving/Parting": [1, 2, 5, 6],
+    "Turning RH": [2, 1, 3, 4],
+    "Turning LH": [4, 3, 1, 2],
+    "Boring Bar": [8, 6, 5, 7],
+    "Threading External": [2, 1],
+    "Threading Internal": [6, 5],
+    "Grooving/Parting": [2, 6, 1, 5],
     "Knurling": [9],
     "Custom": [1, 2, 3, 4, 5, 6, 7, 8, 9],
 }
@@ -116,15 +116,15 @@ _CARD_TYPE_TO_DIRECTION: Dict[str, ToolDirection] = {
 def _tip_angle_from_angles(front_angle: float, back_angle: float) -> float:
     """Derive included tip angle from front and back cutting edge angles.
 
-    The tip angle is the included angle at the tool nose, calculated as:
-    tip_angle = 180 - (front_angle - 90) - (back_angle - 90)
-             = 360 - front_angle - back_angle
+    The tip angle is the included angle at the tool nose — the angular span
+    between the front and back cutting edges:
+        tip_angle = back_angle - front_angle
 
-    For a round insert (0, 0) this returns 360 which represents a full circle.
+    For a round insert (0, 0) this returns 0 (no angular tip).
     """
     if front_angle == 0.0 and back_angle == 0.0:
         return 0.0  # Round insert — no angular tip
-    return 360.0 - front_angle - back_angle
+    return back_angle - front_angle
 
 
 def tool_card_to_tool_def(card: ToolCardData) -> ToolDef:

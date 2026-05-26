@@ -18,9 +18,9 @@ INSERT_GEOMETRY: Dict[str, Tuple[float, float]] = {
     "TNMG": (60.0, 120.0),
     "SNMG": (45.0, 135.0),
     "RCMT": (0.0, 0.0),
-    "60° UN/Metric": (30.0, 30.0),
-    "55° Whitworth": (27.5, 27.5),
-    "ACME": (14.5, 14.5),
+    "60° UN/Metric": (60.0, 120.0),
+    "55° Whitworth": (62.5, 117.5),
+    "ACME": (75.5, 104.5),
     "Grooving": (0.0, 0.0),
 }
 

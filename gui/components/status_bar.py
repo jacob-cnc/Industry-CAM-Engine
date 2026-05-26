@@ -56,6 +56,9 @@ class StatusBar(QWidget):
     """
 
     estop_clicked = pyqtSignal()
+    reset_clicked = pyqtSignal()
+    machine_on_clicked = pyqtSignal()
+    machine_off_clicked = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -184,8 +187,63 @@ class StatusBar(QWidget):
         self._feed_display.setMinimumWidth(60)
         layout.addWidget(self._feed_display)
 
-        # --- Spacer + E-Stop Button + Offline Badge ---
+        # --- Tool Number ---
+        tool_label = QLabel("T")
+        tool_label.setFont(label_font)
+        tool_label.setStyleSheet(f"color: {COLORS['text_secondary']}; border: none;")
+        layout.addWidget(tool_label)
+
+        self._tool_display = QLabel("0")
+        self._tool_display.setFont(mono_font_small)
+        self._tool_display.setStyleSheet(
+            f"color: {COLORS['text_primary']}; border: none;"
+        )
+        self._tool_display.setMinimumWidth(30)
+        layout.addWidget(self._tool_display)
+
+        # --- Spacer + Machine Control Buttons + E-Stop Button + Offline Badge ---
         layout.addStretch()
+
+        # Machine control buttons (Reset, ON, OFF)
+        ctrl_btn_style = (
+            "QPushButton {{ font-size: 9pt; font-weight: bold; border-radius: 4px;"
+            " padding: 4px 10px; min-height: 28px; min-width: 44px; }}"
+        )
+
+        self._btn_reset = QPushButton("Reset")
+        self._btn_reset.setStyleSheet(
+            f"QPushButton {{ background: {COLORS['status_warning']}; color: {COLORS['bg_base']}; "
+            f"font-size: 9pt; font-weight: bold; border-radius: 4px; padding: 4px 10px;"
+            f" min-height: 28px; }}"
+            f"QPushButton:hover {{ background: #e6a817; }}"
+        )
+        self._btn_reset.setToolTip("Reset E-Stop")
+        layout.addWidget(self._btn_reset)
+
+        self._btn_on = QPushButton("ON")
+        self._btn_on.setStyleSheet(
+            f"QPushButton {{ background: {COLORS['status_ok']}; color: {COLORS['bg_base']}; "
+            f"font-size: 9pt; font-weight: bold; border-radius: 4px; padding: 4px 10px;"
+            f" min-height: 28px; }}"
+            f"QPushButton:hover {{ background: #6FB8A8; }}"
+        )
+        self._btn_on.setToolTip("Machine On")
+        layout.addWidget(self._btn_on)
+
+        self._btn_off = QPushButton("OFF")
+        self._btn_off.setStyleSheet(
+            f"QPushButton {{ background: {COLORS['bg_surface']}; color: {COLORS['text_primary']}; "
+            f"font-size: 9pt; font-weight: bold; border-radius: 4px; padding: 4px 10px;"
+            f" min-height: 28px; border: 1px solid {COLORS['border_normal']}; }}"
+            f"QPushButton:hover {{ background: {COLORS['border_normal']}; }}"
+        )
+        self._btn_off.setToolTip("Machine Off")
+        layout.addWidget(self._btn_off)
+
+        # Connect machine control signals
+        self._btn_reset.clicked.connect(self.reset_clicked.emit)
+        self._btn_on.clicked.connect(self.machine_on_clicked.emit)
+        self._btn_off.clicked.connect(self.machine_off_clicked.emit)
 
         self._estop_btn = QPushButton("E-STOP")
         self._estop_btn.setFixedHeight(36)
@@ -301,6 +359,14 @@ class StatusBar(QWidget):
         """
         self._feed = feed
         self._feed_display.setText(f"{feed:.3f}")
+
+    def update_tool(self, tool_number: int):
+        """Update current tool number display.
+
+        Args:
+            tool_number: Tool currently in spindle (0 = no tool).
+        """
+        self._tool_display.setText(str(tool_number))
 
     def update_gcodes(self, gcodes: str):
         """Update active G-codes display.

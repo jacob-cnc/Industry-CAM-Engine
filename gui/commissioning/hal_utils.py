@@ -18,7 +18,7 @@ FILTER_PRESETS = {
     "Jog": ["gpio.005", "gpio.006", "gpio.007", "gpio.008",
              "debounce.0.4", "debounce.0.5", "debounce.0.6", "debounce.0.7"],
     "Cycle": ["gpio.009", "gpio.010", "debounce.0.8", "debounce.0.9"],
-    "MPG": ["encoder.03", "encoder.04", "mux4.jogscale"],
+    "MPG": ["encoder.03", "encoder.04", "mux8.jogscale", "or2.jog-vel-mode"],
     "Spindle": ["encoder.02", "spindle.0"],
     "PID": ["pid.x", "pid.z"],
     "Stepgen": ["stepgen.00", "stepgen.01"],

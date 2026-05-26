@@ -410,8 +410,17 @@ class TuningTab(QWidget):
                     TUNING_PINS['x']['pid_error'])
                 z_err = self._pin_provider.get_pin_value(
                     TUNING_PINS['z']['pid_error'])
-            except (KeyError, Exception):
-                x_err, z_err = 0.0, 0.0
+            except (KeyError, Exception) as e:
+                # pid.x.error / pid.z.error not found — fall back to
+                # the backend's following_error from linuxcnc.stat
+                state = self._backend.state
+                x_err = state.x.following_error
+                z_err = state.z.following_error
+                if not hasattr(self, '_pin_fallback_warned'):
+                    self._pin_fallback_warned = True
+                    logger.warning(
+                        "Tuning graph: pid.error pins not readable (%s), "
+                        "falling back to stat.following_error", e)
         elif self._sim_provider:
             self._sim_provider.tick()
             x_err = self._sim_provider.get_following_error('x')
@@ -425,6 +434,20 @@ class TuningTab(QWidget):
         """200ms timer — update numeric readouts."""
         if not self._is_offline:
             data = self._read_live_status()
+            # If pin reads failed, fall back to backend state for error fields
+            if not data:
+                state = self._backend.state
+                data = {
+                    'x_err': state.x.following_error,
+                    'z_err': state.z.following_error,
+                    'x_cmd': state.x.commanded,
+                    'z_cmd': state.z.commanded,
+                    'x_enc': state.x.position / 2.0,  # diameter → radius
+                    'z_enc': state.z.position,
+                    'x_pid': 0.0,
+                    'z_pid': 0.0,
+                    'rpm': state.spindle.speed,
+                }
         elif self._sim_provider:
             snap = self._sim_provider.get_snapshot()
             data = {

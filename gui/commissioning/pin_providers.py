@@ -136,21 +136,95 @@ class LivePinProvider(PinProvider):
             if len(entry) < 4:
                 continue
             name, direction, pin_type, value = entry[:4]
-            if not isinstance(pin_type, int) or not isinstance(direction, int):
+            # Accept both int and string type/direction values
+            if isinstance(pin_type, int):
+                type_str = _TYPE_MAP.get(pin_type, "unknown")
+            elif isinstance(pin_type, str):
+                type_str = pin_type
+            else:
+                continue
+            if isinstance(direction, int):
+                dir_str = _DIR_MAP.get(direction, "???")
+            elif isinstance(direction, str):
+                dir_str = direction
+            else:
                 continue
             pins.append(PinInfo(
                 name=name,
-                pin_type=_TYPE_MAP.get(pin_type, "unknown"),
-                direction=_DIR_MAP.get(direction, "???"),
+                pin_type=type_str,
+                direction=dir_str,
                 value=value,
                 signal="",
             ))
+        if not pins:
+            # Fallback: parse halcmd show pin output
+            pins = self._get_all_pins_halcmd()
+        return pins
+
+    def _get_all_pins_halcmd(self) -> List[PinInfo]:
+        """Fallback: enumerate pins via halcmd show pin."""
+        import subprocess
+        pins = []
+        try:
+            result = subprocess.run(
+                ['halcmd', 'show', 'pin'],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode != 0:
+                return pins
+            for line in result.stdout.splitlines():
+                # halcmd show pin format:
+                # <owner> <type> <dir> <value> <name> [<== signal]
+                parts = line.split()
+                if len(parts) < 5:
+                    continue
+                # Skip header lines
+                if parts[0] in ('Owner', 'Comp', '-----'):
+                    continue
+                try:
+                    int(parts[0])  # owner is numeric
+                except ValueError:
+                    continue
+                pin_type = parts[1].lower()  # bit, float, s32, u32
+                direction = parts[2]  # IN, OUT, I/O
+                value_str = parts[3]
+                name = parts[4]
+                signal = parts[6] if len(parts) >= 7 and parts[5] in ('==>', '<==', '<=>') else ""
+                # Parse value
+                if pin_type == 'bit':
+                    value = value_str == 'TRUE'
+                elif pin_type == 'float':
+                    value = float(value_str)
+                elif pin_type in ('s32', 'u32'):
+                    value = int(value_str)
+                else:
+                    value = value_str
+                pins.append(PinInfo(
+                    name=name,
+                    pin_type=pin_type,
+                    direction=direction,
+                    value=value,
+                    signal=signal,
+                ))
+        except (subprocess.TimeoutExpired, OSError, ValueError) as e:
+            logger.warning("halcmd show pin fallback failed: %s", e)
         return pins
 
     def get_pin_value(self, pin_name: str):
         for entry in self._hal.get_info_pins():
             if len(entry) >= 4 and entry[0] == pin_name:
                 return entry[3]
+        # Fallback: try halcmd getp (slower but handles name mismatches)
+        import subprocess
+        try:
+            result = subprocess.run(
+                ['halcmd', 'getp', pin_name],
+                capture_output=True, text=True, timeout=1,
+            )
+            if result.returncode == 0:
+                return float(result.stdout.strip())
+        except (subprocess.TimeoutExpired, ValueError, OSError):
+            pass
         raise KeyError(f"HAL pin not found: {pin_name}")
 
     def get_pin_info(self, pin_name: str) -> Optional[PinInfo]:

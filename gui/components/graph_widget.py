@@ -87,10 +87,33 @@ class MachiningGraphWidget(pg.PlotWidget):
         self._graph_data: Optional[GraphData] = None
         self._material_fill_items: list = []
 
+        # Idle coordinate overlay (QLabel in screen space, not data space)
+        from PyQt5.QtWidgets import QLabel
+        from PyQt5.QtCore import QTimer
+        self._coord_overlay = QLabel(self)
+        self._coord_overlay.setStyleSheet(
+            f"background-color: rgba(30, 53, 72, 220);"
+            f"color: {COLORS['text_primary']};"
+            f"font-family: {FONTS['mono_family']};"
+            f"font-size: 9pt;"
+            f"padding: 4px 6px;"
+            f"border: 1px solid {COLORS['border_normal']};"
+            f"border-radius: 3px;"
+        )
+        self._coord_overlay.setVisible(False)
+        self._coord_overlay.raise_()
+
+        self._idle_timer = QTimer(self)
+        self._idle_timer.setSingleShot(True)
+        self._idle_timer.timeout.connect(self._show_coord_overlay)
+        self._last_mouse_screen_pos = None
+        self._last_mouse_data_pos = None
+
     def _setup_plot(self):
-        """Configure the plot area — 1:1 aspect ratio, Y inverted for operator POV."""
+        """Configure the plot area — Y inverted for operator POV."""
         plot_item = self.getPlotItem()
-        plot_item.setAspectLocked(True, ratio=1)
+        # No aspect lock — lathe parts have very different Z vs X ranges.
+        # Locking 1:1 causes excessive empty space and missing gridlines.
         plot_item.showGrid(x=True, y=True, alpha=0.3)
 
         # Set axis labels
@@ -130,6 +153,33 @@ class MachiningGraphWidget(pg.PlotWidget):
             self._hline.setPos(x_radius)
             self.coordinate_changed.emit(x_radius, z)
 
+            # Track position and restart idle timer for coordinate overlay
+            self._last_mouse_data_pos = (x_radius, z)
+            # Map scene pos to widget-local coordinates for overlay placement
+            self._last_mouse_screen_pos = self.mapFromScene(pos)
+            self._coord_overlay.setVisible(False)
+            self._idle_timer.start(1500)  # Show after 1.5s idle
+
+    def _show_coord_overlay(self):
+        """Show coordinate overlay at the cursor position after idle timeout."""
+        if self._last_mouse_data_pos is None or self._last_mouse_screen_pos is None:
+            return
+        x_radius, z = self._last_mouse_data_pos
+        x_dia = x_radius * 2.0
+        self._coord_overlay.setText(f"X {x_dia:.6f} dia\nZ {z:.6f}")
+        self._coord_overlay.adjustSize()
+        # Position the label near the cursor (offset slightly so it doesn't cover crosshair)
+        px = int(self._last_mouse_screen_pos.x()) + 15
+        py = int(self._last_mouse_screen_pos.y()) - 10
+        # Keep within widget bounds
+        if px + self._coord_overlay.width() > self.width():
+            px = int(self._last_mouse_screen_pos.x()) - self._coord_overlay.width() - 15
+        if py < 0:
+            py = int(self._last_mouse_screen_pos.y()) + 15
+        self._coord_overlay.move(px, py)
+        self._coord_overlay.setVisible(True)
+        self._coord_overlay.raise_()
+
     def set_graph_data(self, data: GraphData):
         """Load complete graph data. Replaces all current display items."""
         self.clear()
@@ -152,11 +202,9 @@ class MachiningGraphWidget(pg.PlotWidget):
         stock_y = [x_min_r, x_min_r, x_max_r, x_max_r, x_min_r]
         self.plot(stock_x, stock_y, pen=stock_pen)
 
-        # Profile boundary — SKIP in generated view.
-        # The preview's profile line (from segment building) is already correct
-        # and the toolpath traces show the actual cutting path.
-        # Drawing the extracted boundary here adds a redundant (and sometimes
-        # inaccurate for arcs) line on top of the toolpath.
+        # Profile boundary — not drawn. The toolpath traces show the actual cutting
+        # path accurately. The kernel-extracted boundary has OCCT numerical tolerance
+        # (~0.0001") that creates a visible gap vs the exact toolpath coordinates.
 
         # Toolpath segments (color-coded by move type)
         # Initially hidden — revealed progressively during sim playback
@@ -179,8 +227,8 @@ class MachiningGraphWidget(pg.PlotWidget):
             cl_pen = pg.mkPen('#FFFFFF40', width=2, style=QtCore.Qt.DashDotLine)
             self.plot([z_min_cl, z_max_cl], [0, 0], pen=cl_pen)
 
-        # Auto-fit view to show everything
-        self.getViewBox().autoRange()
+        # Auto-fit view to show everything (small padding for grid visibility at edges)
+        self.getViewBox().autoRange(padding=0.05)
 
     def set_tool_position(self, x_radius: float, z: float):
         """Update animated tool dot position during playback."""
