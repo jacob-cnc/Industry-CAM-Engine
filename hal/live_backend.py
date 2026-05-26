@@ -11,6 +11,7 @@ Also creates a userspace HAL component for compound slide muxing.
 
 import logging
 import importlib.util as _ilu
+import subprocess
 import linuxcnc
 
 # Load system hal.so explicitly so the project's hal/ package in PYTHONPATH
@@ -84,17 +85,17 @@ class LiveBackend(HALBackend):
         self._hal_comp = None
         try:
             self._hal_comp = hal_module.component("compound-slide")
-            # Input pins — MPG encoder counts fed from postgui.hal
+            # Input pins — MPG encoder counts
             self._hal_comp.newpin("mpg-x-in", hal_module.HAL_S32, hal_module.HAL_IN)
             self._hal_comp.newpin("mpg-z-in", hal_module.HAL_S32, hal_module.HAL_IN)
             self._hal_comp.newpin("jog-scale", hal_module.HAL_FLOAT, hal_module.HAL_IN)
-            # Control pins — written by GUI, read by HAL for mux selection
+            # Control pins — written by GUI
             self._hal_comp.newpin("compound-enable", hal_module.HAL_BIT, hal_module.HAL_OUT)
             self._hal_comp.newpin("compound-angle", hal_module.HAL_FLOAT, hal_module.HAL_OUT)
             # Output pins — decomposed jog counts written by GUI
             self._hal_comp.newpin("x-jog-counts", hal_module.HAL_S32, hal_module.HAL_OUT)
             self._hal_comp.newpin("z-jog-counts", hal_module.HAL_S32, hal_module.HAL_OUT)
-            # MPG scale select pins — drive mux4.jogscale-*.sel0/sel1 via postgui.hal
+            # MPG scale select pins — wired to mux4.jogscale-*.sel0/sel1 via _connect_scale_select_pins
             self._hal_comp.newpin("mpg-scale-sel0", hal_module.HAL_BIT, hal_module.HAL_OUT)
             self._hal_comp.newpin("mpg-scale-sel1", hal_module.HAL_BIT, hal_module.HAL_OUT)
             self._hal_comp.ready()
@@ -104,6 +105,9 @@ class LiveBackend(HALBackend):
         except Exception:
             # If component already exists or HAL not ready, continue without it
             self._hal_comp = None
+
+        if self._hal_comp is not None:
+            self._connect_scale_select_pins()
 
         try:
             self._stat.poll()
@@ -606,6 +610,32 @@ class LiveBackend(HALBackend):
                 self._hal_comp["z-jog-counts"] = z_counts
             except Exception:
                 pass
+
+    def _connect_scale_select_pins(self):
+        """Wire compound-slide scale-select OUT pins to mux4 sel inputs.
+
+        Equivalent to the postgui.hal 'net' commands, but run here because
+        display_gui.sh is a plain DISPLAY program (no POSTGUI_HALFILE support).
+        Called once at startup after the component is ready.
+        """
+        nets = [
+            ["mpg-scale-sel0",
+             "compound-slide.mpg-scale-sel0",
+             "mux4.jogscale-x.sel0", "mux4.jogscale-z.sel0"],
+            ["mpg-scale-sel1",
+             "compound-slide.mpg-scale-sel1",
+             "mux4.jogscale-x.sel1", "mux4.jogscale-z.sel1"],
+        ]
+        for net_args in nets:
+            result = subprocess.run(
+                ["halcmd", "net"] + net_args,
+                capture_output=True, text=True,
+            )
+            if result.returncode != 0:
+                logger.warning("halcmd net %s failed: %s",
+                               " ".join(net_args), result.stderr.strip())
+            else:
+                logger.info("HAL net established: %s", " ".join(net_args))
 
     def set_mpg_scale_index(self, index: int):
         """Set the MPG jog increment via mux4 select pins.

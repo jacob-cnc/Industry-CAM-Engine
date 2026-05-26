@@ -31,7 +31,7 @@ DEFAULT_JOG_VELOCITY = 1.0    # inches/sec
 MAX_JOG_VELOCITY = 2.0        # inches/sec
 
 # MPG jog increments (inches, diameter for X)
-JOG_INCREMENTS = [0.0001, 0.001, 0.01, 0.1]
+JOG_INCREMENTS = [0.0002, 0.001, 0.01, 0.1]
 DEFAULT_JOG_INCREMENT_INDEX = 1  # 0.001"
 
 # =============================================================================

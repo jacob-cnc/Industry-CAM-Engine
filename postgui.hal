@@ -16,7 +16,7 @@ addf mux2.x-jog servo-thread
 addf mux2.z-jog servo-thread
 
 # --- MPG jog scale (mux4 for increment selection) ---
-# Index 0: 0.0001"  (sel0=0, sel1=0)
+# Index 0: 0.0002"  (sel0=0, sel1=0)
 # Index 1: 0.001"   (sel0=1, sel1=0) — default
 # Index 2: 0.01"    (sel0=0, sel1=1)
 # Index 3: 0.1"     (sel0=1, sel1=1)
