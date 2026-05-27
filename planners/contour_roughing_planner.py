@@ -184,18 +184,24 @@ class ContourRoughingPlanner:
         keep = []
         for e in raw:
             s, en = e[0], e[1]
+            # Filter edges that lie entirely on clip boundaries (no material there)
+            # X_min boundary (centerline / pilot hole)
             if abs(s[0] - xmin_d) < tol and abs(en[0] - xmin_d) < tol:
                 continue
-            # Stock OD edge: only filter if it spans the full Z range (boundary edge)
-            # Partial vertical at stock OD is a connector between split arc sections — keep it
+            # Stock OD boundary: remove if either endpoint touches Z_bot or Z_top
+            # (these are clip artifacts, not real cutting geometry).
+            # Keep only true connectors between split arc sections (both endpoints
+            # are at stock OD but neither touches Z_top or Z_bot).
             if abs(s[0] - xmax_d) < tol and abs(en[0] - xmax_d) < tol:
-                z_span = abs(s[1] - en[1])
-                full_span = abs(z_top - z_bot)
-                if z_span > full_span * 0.9:  # Nearly full span = boundary edge
+                at_z_top = abs(s[1] - z_top) < tol or abs(en[1] - z_top) < tol
+                at_z_bot = abs(s[1] - z_bot) < tol or abs(en[1] - z_bot) < tol
+                if at_z_top or at_z_bot:
                     continue
-                # Otherwise it's a partial connector — keep it
+                # Neither endpoint at Z boundary — true connector between split arcs
+            # Z_top boundary (face)
             if abs(s[1] - z_top) < tol and abs(en[1] - z_top) < tol:
                 continue
+            # Z_bot boundary (bottom)
             if abs(s[1] - z_bot) < tol and abs(en[1] - z_bot) < tol:
                 continue
             keep.append(e)
@@ -229,10 +235,20 @@ class ContourRoughingPlanner:
         return ordered
 
     def _to_moves(self, edges, params):
-        """Convert edges to ToolMoves."""
+        """Convert edges to ToolMoves.
+        
+        Emits a feed move to the first edge's start point so that arc I/K
+        values (which are relative to the arc start) are correct in the
+        assembled move sequence.
+        """
         moves = []
-        for e in edges:
+        for idx, e in enumerate(edges):
             s, en, tp, ctr, rad = e
+            # Emit a positioning feed to the start of the first edge
+            # so that arc I/K offsets are relative to the correct point.
+            if idx == 0:
+                moves.append(ToolMove(MoveType.FEED, s[0], s[1],
+                             feed=params.feed, pass_type=PassType.ROUGH))
             if tp == "RAPID":
                 moves.append(ToolMove(MoveType.RAPID, en[0], en[1],
                              feed=0.0, pass_type=PassType.ROUGH))

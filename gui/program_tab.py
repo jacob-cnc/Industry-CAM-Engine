@@ -107,6 +107,8 @@ class ProgramTab(QWidget):
             "x_start": self._stock_x_start.value(),
             "z_start": self._stock_z_start.value(),
             "z_end": self._stock_z_end.value(),
+            "x_park": self._stock_x_park.value(),
+            "z_park": self._stock_z_park.value(),
             "pilot_hole_dia": self._stock_pilot_hole.value(),
             "mode": self._get_machining_mode(),
         }
@@ -131,6 +133,7 @@ class ProgramTab(QWidget):
             "passes": int(self._finish_passes.value()),
             "doc_dia": self._finish_doc.value(),
             "feed": self._finish_feed.value(),
+            "spindle_rpm": self._finish_rpm.value(),
             "spring_pass": self._finish_spring_pass.isChecked(),
         }
 
@@ -337,6 +340,18 @@ class ProgramTab(QWidget):
         ))
         form.addRow("Z End:", self._stock_z_end)
 
+        self._stock_x_park = NumericField(NumericFieldConfig(
+            min_value=0.0, max_value=20.0, decimals=4,
+            default_value=2.0, suffix="dia",
+        ))
+        form.addRow("X Park:", self._stock_x_park)
+
+        self._stock_z_park = NumericField(NumericFieldConfig(
+            min_value=0.0, max_value=20.0, decimals=4,
+            default_value=2.0, suffix="in",
+        ))
+        form.addRow("Z Park:", self._stock_z_park)
+
         self._stock_pilot_hole = NumericField(NumericFieldConfig(
             min_value=0.0, max_value=10.0, decimals=4,
             default_value=0.0, suffix="dia",
@@ -371,7 +386,7 @@ class ProgramTab(QWidget):
 
         self._rough_feed = NumericField(NumericFieldConfig(
             min_value=0.0001, max_value=0.1, decimals=4,
-            default_value=0.008, suffix="ipr",
+            default_value=0.006, suffix="ipr",
         ))
         form.addRow("Feed:", self._rough_feed)
 
@@ -442,6 +457,12 @@ class ProgramTab(QWidget):
             default_value=0.003, suffix="ipr",
         ))
         form.addRow("Feed:", self._finish_feed)
+
+        self._finish_rpm = NumericField(NumericFieldConfig(
+            min_value=50.0, max_value=5000.0, decimals=0,
+            default_value=1200.0, suffix="rpm",
+        ))
+        form.addRow("RPM:", self._finish_rpm)
 
         self._finish_spring_pass = QCheckBox("Spring pass")
         self._finish_spring_pass.setToolTip(
@@ -542,6 +563,8 @@ class ProgramTab(QWidget):
         self._stock_x_start.value_changed.connect(self._on_field_changed)
         self._stock_z_start.value_changed.connect(self._on_field_changed)
         self._stock_z_end.value_changed.connect(self._on_field_changed)
+        self._stock_x_park.value_changed.connect(self._on_field_changed)
+        self._stock_z_park.value_changed.connect(self._on_field_changed)
         self._stock_pilot_hole.value_changed.connect(self._on_field_changed)
 
         # Roughing fields
@@ -557,6 +580,7 @@ class ProgramTab(QWidget):
         self._finish_passes.value_changed.connect(self._on_field_changed)
         self._finish_doc.value_changed.connect(self._on_field_changed)
         self._finish_feed.value_changed.connect(self._on_field_changed)
+        self._finish_rpm.value_changed.connect(self._on_field_changed)
 
         # Segment list
         self._segment_list.segments_changed.connect(self._on_segments_changed)
@@ -609,7 +633,11 @@ class ProgramTab(QWidget):
         self._on_field_changed()
 
     def _on_generate_clicked(self):
-        """Generate button clicked — execute pipeline and display results."""
+        """Generate button clicked — execute pipeline and display results.
+
+        Uses staged error handling: each pipeline phase is wrapped individually
+        so the error dialog can report exactly which stage failed and why.
+        """
         # Allow generate from BUILDING or READY (user may not have triggered validation)
         if self._state not in (ProgramState.READY, ProgramState.BUILDING):
             return
@@ -617,6 +645,7 @@ class ProgramTab(QWidget):
         self.set_state(ProgramState.GENERATING)
         self.generate_requested.emit()
 
+        stage = "model_build"
         try:
             # 1. Gather field values
             stock = self.get_stock_values()
@@ -661,9 +690,12 @@ class ProgramTab(QWidget):
                 finish_doc_dia=finishing["doc_dia"],
                 finish_feed=finishing["feed"],
                 tool_def=tool_def,
+                x_park=stock["x_park"],
+                z_park=stock["z_park"],
             )
 
             # 4. Execute pipeline
+            stage = "pipeline"
             pipeline_result = pipeline_execute(
                 profile=profile,
                 stock=stock_def,
@@ -674,13 +706,23 @@ class ProgramTab(QWidget):
 
             # 5. Check result status
             if pipeline_result.status not in (PipelineStatus.SUCCESS, PipelineStatus.SUCCESS_WITH_WARNINGS):
-                # Show validation errors
-                error_msgs = [v.message for v in pipeline_result.validations]
-                error_text = "\n".join(error_msgs[:5])  # Show first 5
-                self._status_label.setText(f"Error: {error_msgs[0] if error_msgs else 'Pipeline failed'}")
+                # Show validation errors in status label (brief)
+                errors = [v for v in pipeline_result.validations
+                          if v.severity.value == "error"]
+                first_msg = errors[0].message if errors else "Pipeline blocked"
+                self._status_label.setText(f"Error: {first_msg}")
                 self._status_label.setStyleSheet(
                     f"color: {COLORS['status_error']}; font-size: {FONTS['small_size']}pt;"
                 )
+                # Log all validation results
+                for v in pipeline_result.validations:
+                    logger.warning("Validation [%s/%s]: %s", v.severity.value, v.category, v.message)
+
+                # Show detailed error dialog
+                from gui.components.error_dialog import GenerationErrorDialog
+                dlg = GenerationErrorDialog(self)
+                dlg.show_validation_errors(pipeline_result.validations, stage="pipeline validation")
+
                 self.set_state(ProgramState.READY)
                 return
 
@@ -693,12 +735,15 @@ class ProgramTab(QWidget):
             sim_data = None
 
             # 7. Convert to graph data
+            stage = "graph_convert"
             graph_data = graph_convert(plan_result, material_sim_data=sim_data)
 
             # 8. Generate G-code
+            stage = "gcode_write"
             gcode_text = GCodeWriter().write(plan_result)
 
             # 9. Parse for sim and load into SimViewerWidget
+            stage = "sim_load"
             from gui.components.sim_viewer import parse_gcode_for_sim
             sim_moves = parse_gcode_for_sim(gcode_text)
             self._sim_viewer.load(graph_data, gcode_text, sim_moves)
@@ -727,12 +772,29 @@ class ProgramTab(QWidget):
                 )
 
         except Exception as e:
-            # On error, show message and return to READY
+            import traceback as tb_module
+            tb_str = tb_module.format_exc()
+
+            # Log full traceback
+            logger.error(
+                "Generation failed at stage '%s': %s\n%s",
+                stage, e, tb_str,
+            )
+
+            # Brief status label message
             error_msg = str(e) if str(e) else type(e).__name__
-            self._status_label.setText(f"Error: {error_msg}")
+            # Truncate for status label (single line)
+            display_msg = error_msg[:80] + "..." if len(error_msg) > 80 else error_msg
+            self._status_label.setText(f"Error ({stage}): {display_msg}")
             self._status_label.setStyleSheet(
                 f"color: {COLORS['status_error']}; font-size: {FONTS['small_size']}pt;"
             )
+
+            # Show detailed error dialog
+            from gui.components.error_dialog import GenerationErrorDialog
+            dlg = GenerationErrorDialog(self)
+            dlg.show_exception(e, tb_str, stage=stage)
+
             self.set_state(ProgramState.READY)
 
     # ------------------------------------------------------------------
@@ -753,9 +815,11 @@ class ProgramTab(QWidget):
         numeric_fields = [
             self._stock_diameter, self._stock_x_start,
             self._stock_z_start, self._stock_z_end,
+            self._stock_x_park, self._stock_z_park,
             self._rough_doc, self._rough_feed, self._rough_fin_allowance,
             self._rough_rpm,
             self._finish_passes, self._finish_doc, self._finish_feed,
+            self._finish_rpm,
         ]
 
         # Include pilot hole if in ID mode
@@ -962,6 +1026,10 @@ class ProgramTab(QWidget):
             self._stock_z_start.set_value(stock["z_start"])
         if "z_end" in stock:
             self._stock_z_end.set_value(stock["z_end"])
+        if "x_park" in stock:
+            self._stock_x_park.set_value(stock["x_park"])
+        if "z_park" in stock:
+            self._stock_z_park.set_value(stock["z_park"])
         if "pilot_hole_dia" in stock:
             self._stock_pilot_hole.set_value(stock["pilot_hole_dia"])
 
@@ -997,6 +1065,8 @@ class ProgramTab(QWidget):
             self._finish_doc.set_value(finishing["doc_dia"])
         if "feed" in finishing:
             self._finish_feed.set_value(finishing["feed"])
+        if "spindle_rpm" in finishing:
+            self._finish_rpm.set_value(finishing["spindle_rpm"])
         if "spring_pass" in finishing:
             self._finish_spring_pass.setChecked(finishing["spring_pass"])
 

@@ -6,11 +6,9 @@ profile boundary, stock boundary, playback tool dot.
 
 All coordinates displayed in RADIUS internally, axis labels show DIAMETER.
 
-Architecture matches the proven _visual_test_arc.py viewer:
-  - No aspect lock (lathe parts have different Z vs X ranges)
-  - No restrictive setLimits (prevents zoom lock-up)
-  - Native pyqtgraph wheel zoom and pan
-  - Double-click to auto-fit
+Aspect ratio is locked 1:1 — arcs display as true circles, geometry is always
+accurate. The view may have empty space on one axis for non-square parts, but
+the user can pan/zoom freely to focus on the area of interest.
 """
 
 import pyqtgraph as pg
@@ -54,7 +52,7 @@ class MachiningGraphWidget(pg.PlotWidget):
     """Reusable graph widget for machining visualization.
 
     Features:
-    - Free zoom/pan (no aspect lock — lathe parts aren't square)
+    - 1:1 aspect ratio (arcs display as true circles, geometry is accurate)
     - Crosshair with coordinate readout (radius + diameter for X)
     - Zone shading (filled polygons)
     - Toolpath trace (PlotCurveItem per move type, color-coded)
@@ -110,10 +108,8 @@ class MachiningGraphWidget(pg.PlotWidget):
         self._last_mouse_data_pos = None
 
     def _setup_plot(self):
-        """Configure the plot area — Y inverted for operator POV."""
+        """Configure the plot area — Y inverted for operator POV, 1:1 aspect."""
         plot_item = self.getPlotItem()
-        # No aspect lock — lathe parts have very different Z vs X ranges.
-        # Locking 1:1 causes excessive empty space and missing gridlines.
         plot_item.showGrid(x=True, y=True, alpha=0.3)
 
         # Set axis labels
@@ -124,6 +120,11 @@ class MachiningGraphWidget(pg.PlotWidget):
         vb = self.getViewBox()
         vb.invertY(True)
         vb.setMouseEnabled(x=True, y=True)
+
+        # Lock 1:1 aspect ratio — geometry is always accurate.
+        # X axis is in RADIUS internally, Z in inches. ratio=1.0 means
+        # 1 inch of radius = 1 inch of Z on screen.
+        vb.setAspectLocked(True, ratio=1.0)
 
     def mouseDoubleClickEvent(self, event):
         """Double-click to auto-fit the view back to the full part."""

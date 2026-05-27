@@ -125,12 +125,14 @@ def execute(
             zone_query, zone_set, tool, roughing_params, stock, profile.mode, profile,
         )
 
-    # Step 6: Plan cleanup pass (staircase only — offset-contour's last pass IS the cleanup)
-    if roughing_params.strategy == RoughingStrategy.STAIRCASE:
-        cleanup_planner = CleanupPlanner()
-        cleanup_passes = cleanup_planner.plan(zone_query, tool, roughing_params, stock, profile.mode, profile)
-    else:
-        cleanup_passes = []
+    # Step 6: Plan cleanup pass
+    # Both strategies need a cleanup pass. For staircase, the cleanup removes
+    # the stair-step material left between DOC levels. For offset-contour,
+    # the innermost roughing pass is at fin_allowance + DOC from the profile,
+    # so the cleanup removes that last DOC of material, leaving only
+    # fin_allowance for the finish pass.
+    cleanup_planner = CleanupPlanner()
+    cleanup_passes = cleanup_planner.plan(zone_query, tool, roughing_params, stock, profile.mode, profile)
 
     # Step 7: Plan finish pass
     finish_planner = FinishPlanner()
