@@ -69,3 +69,32 @@
 1. `87e2d0e` — fix(contour-roughing): arc I/K positioning, stock OD re-cut, cleanup pass
 2. `250d6dd` — fix(retract): add 0.005in per-side clearance above stock surface
 3. `83379cb` — fix(sim): use sim-to-toolmoves mapping for toolpath reveal during playback
+
+
+### 11. Signed Radius Convention (feat: CW/CCW)
+- Replaced CW/CCW dropdown with signed radius: +R = CW on screen, -R = CCW on screen
+- Removed Dir column from segment table
+- Empirically verified cross product sign: CW = negative cross, CCW = positive cross
+- Updated preview renderer, finish planner, cleanup planner with consistent logic
+- Zone builder keeps `-target["radius"]` negation for Build123d compatibility
+
+### 12. Arc Auto-Compute Tooltips and Double-Click
+- `geometry/arc_helpers.py`: New module with `compute_min_radius`, `compute_max_z_for_radius`, `compute_max_x_for_radius`
+- Enhanced validation tooltip shows valid alternatives when radius is invalid
+- Hint tooltips on blank/default fields show computed suggestions
+- Double-click on arc cell auto-populates with the suggested value
+
+### OPEN ISSUE: Arc Center Overshoot at Z=0
+
+**Problem:** The finish planner's `_find_arc_center` computes a center that places the circle's peak above Z=0 when the arc starts at the face (X=0, Z=0). This causes the G-code arc (G02) to briefly travel into positive Z before curving down — visible in both the toolpath visualization and the actual G-code I/K values.
+
+**Root cause:** The two-center algorithm picks the "CW" center based on cross product, but doesn't constrain the result to keep the arc within the part envelope (Z ≤ 0 for the start face). The computed center at (0.0602r, -0.2426) has the circle peak at Z = -0.2426 + 0.25 = +0.0074, which overshoots Z=0.
+
+**Correct behavior:** For an arc starting at (0, 0) with R=0.25, the center should be at (0, -0.25) to be tangent to Z=0. The current algorithm doesn't enforce this tangency constraint.
+
+**Potential fixes to explore:**
+1. Add a post-check: if the computed arc crosses Z=0 (or X=0), reject that center and use the other one
+2. Constrain the center to keep the arc within the profile envelope
+3. Re-examine whether the user's Z=-0.4841 endpoint is geometrically compatible with a tangent-at-face arc at R=0.25 (it may not be — the auto-compute gives the max Z reach, not the tangent-preserving Z)
+
+**Key insight:** The auto-compute `max_z_for_radius` gives the maximum Z reach (semicircle case), but that endpoint doesn't produce a tangent arc at the start. A tangent arc at Z=0 starting from X=0 requires the center at (0, -R), which constrains the endpoint to a specific locus. The user may need to choose between "max reach" and "tangent at face."
