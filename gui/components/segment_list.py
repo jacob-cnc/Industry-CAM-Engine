@@ -418,7 +418,7 @@ class SegmentListWidget(QWidget):
 
         For ARC segments: radius >= chord_length / 2
         where chord = distance between this point and the previous point.
-        Invalid cells get a red background.
+        Invalid cells get a red background and a tooltip explaining the issue.
         """
         # Block signals during validation to prevent recursive cellChanged
         self._table.blockSignals(True)
@@ -440,39 +440,42 @@ class SegmentListWidget(QWidget):
             if not is_arc:
                 # LINE segments — no radius validation needed
                 r_item.setBackground(normal_bg)
+                r_item.setToolTip("")
                 continue
 
             # ARC validation: radius >= chord_length / 2
-            valid = self._validate_arc_radius(row)
+            valid, error_msg = self._validate_arc_radius(row)
             if valid:
                 r_item.setBackground(normal_bg)
+                r_item.setToolTip("")
             else:
                 r_item.setBackground(error_bg)
+                r_item.setToolTip(error_msg)
 
         self._table.blockSignals(False)
 
-    def _validate_arc_radius(self, row: int) -> bool:
+    def _validate_arc_radius(self, row: int) -> tuple:
         """Check if arc radius is valid for the given row.
 
-        Returns True if valid, False if radius < chord_length / 2.
+        Returns (True, "") if valid, (False, error_message) if invalid.
         Radius in the UI is always positive (unsigned).
         If this is the first row (no previous point), we use (0, 0) as the start.
         """
         try:
             radius = abs(float(self._table.item(row, COL_RADIUS).text()))
         except (ValueError, AttributeError):
-            return False
+            return (False, "Radius must be a number")
 
         if radius < 1e-9:
             # Zero radius for an arc is always invalid
-            return False
+            return (False, "Arc radius cannot be zero")
 
         # Get current endpoint
         try:
             x_end = float(self._table.item(row, COL_X).text())
             z_end = float(self._table.item(row, COL_Z).text())
         except (ValueError, AttributeError):
-            return False
+            return (False, "X and Z must be valid numbers")
 
         # Get previous endpoint (or origin if first segment)
         if row > 0:
@@ -491,10 +494,18 @@ class SegmentListWidget(QWidget):
 
         if chord_length < 1e-9:
             # Zero-length chord — any nonzero radius is technically valid
-            return True
+            return (True, "")
 
         # Validation: radius >= chord_length / 2
-        return radius >= chord_length / 2.0
+        min_radius = chord_length / 2.0
+        if radius >= min_radius:
+            return (True, "")
+        else:
+            return (False,
+                f"Radius {radius:.4f} is too small.\n"
+                f"Minimum for this chord: {min_radius:.4f}\n"
+                f"(chord = {chord_length:.4f} between endpoints)"
+            )
 
     # ------------------------------------------------------------------
     # Signal emission
