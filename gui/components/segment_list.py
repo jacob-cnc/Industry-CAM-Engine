@@ -464,8 +464,9 @@ class SegmentListWidget(QWidget):
                 if abs(r_val or 0) < 1e-9:
                     r_item.setBackground(hint_bg)
 
-        # Case 2: Z blank, X and Radius filled → suggest max Z
-        if z_is_blank and not x_is_blank and not r_is_blank:
+        # Case 2: Z needs hint — show when Z is blank OR equals start Z (no travel yet)
+        z_needs_hint = z_is_blank or (z_val is not None and abs(z_val - z_start) < 1e-9)
+        if z_needs_hint and not x_is_blank and not r_is_blank:
             x_end_r = x_val / 2.0
             max_z = compute_max_z_for_radius(x_start_r, z_start, x_end_r, abs(r_val))
             if max_z is not None:
@@ -480,12 +481,13 @@ class SegmentListWidget(QWidget):
                     f"No valid Z exists for R={abs(r_val):.4f} at X={x_val:.4f}."
                 )
                 z_item.setBackground(normal_bg)
-        elif not z_is_blank:
+        elif not z_needs_hint:
             z_item.setBackground(normal_bg)
             z_item.setToolTip("")
 
-        # Case 3: X blank, Z and Radius filled → suggest max X
-        if x_is_blank and not z_is_blank and not r_is_blank:
+        # Case 3: X needs hint — show when X is blank OR equals start X (no travel yet)
+        x_needs_hint = x_is_blank or (x_val is not None and abs(x_val - x_start) < 1e-9)
+        if x_needs_hint and not z_is_blank and not r_is_blank and z_val is not None:
             max_x_r = compute_max_x_for_radius(x_start_r, z_start, z_val, abs(r_val))
             if max_x_r is not None:
                 max_x_dia = max_x_r * 2.0
@@ -500,7 +502,7 @@ class SegmentListWidget(QWidget):
                     f"No valid X exists for R={abs(r_val):.4f} at Z={z_val:.4f}."
                 )
                 x_item.setBackground(normal_bg)
-        elif not x_is_blank:
+        elif not x_needs_hint:
             x_item.setBackground(normal_bg)
             x_item.setToolTip("")
 
