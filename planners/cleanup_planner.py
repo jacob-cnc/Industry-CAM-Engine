@@ -839,14 +839,12 @@ class CleanupPlanner:
 
     def _find_arc_center(
         self, x1_r: float, z1: float, x2_r: float, z2: float,
-        radius: float, is_ccw: bool
+        radius: float, is_major: bool
     ) -> tuple:
         """Find arc center given two endpoints and radius.
 
-        Uses sweep-direction test to pick the correct center from the two
-        candidates. CW/CCW is from the user's screen POV (inverted Y axis:
-        X increases downward). In data space, CW on screen = positive cross
-        product of (start-center) x (end-center).
+        Uses minor/major arc selection to pick the correct center from the two
+        candidates. is_major=True selects the major arc (>180 deg) center.
 
         Returns (center_x_radius, center_z) or None if no solution.
         """
@@ -876,24 +874,20 @@ class CleanupPlanner:
         c2_x = mx - h * px
         c2_z = mz - h * pz
 
-        # Pick center based on sweep direction.
-        # Graph: horizontal=Z, vertical=X_radius (inverted Y).
-        # CW on screen = positive cross product in data space.
-        # screen_cross = (x1-cx)*(z2-cz) - (z1-cz)*(x2-cx)
-        def _screen_cw(cx, cz):
-            cross = (x1_r - cx) * (z2 - cz) - (z1 - cz) * (x2_r - cx)
-            return cross > 0
+        # Determine which center gives the minor arc (sweep <= 180)
+        a_s = math.atan2(z1 - c1_z, x1_r - c1_x)
+        a_e = math.atan2(z2 - c1_z, x2_r - c1_x)
+        sweep = a_e - a_s
+        if sweep > math.pi:
+            sweep -= 2 * math.pi
+        elif sweep < -math.pi:
+            sweep += 2 * math.pi
+        c1_is_minor = abs(sweep) <= math.pi
 
-        if is_ccw:
-            if not _screen_cw(c1_x, c1_z):
-                return (c1_x, c1_z)
-            else:
-                return (c2_x, c2_z)
+        if is_major:
+            return (c2_x, c2_z) if c1_is_minor else (c1_x, c1_z)
         else:
-            if _screen_cw(c1_x, c1_z):
-                return (c1_x, c1_z)
-            else:
-                return (c2_x, c2_z)
+            return (c1_x, c1_z) if c1_is_minor else (c2_x, c2_z)
 
     def _plan_from_zone_boundary(
         self,

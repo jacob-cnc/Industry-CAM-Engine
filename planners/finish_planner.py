@@ -99,12 +99,8 @@ class FinishPlanner:
             seg = segments[i]
 
             if seg.segment_type == SegmentType.ARC and seg.radius != 0.0:
-                if seg.radius > 0:
-                    move_type = MoveType.ARC_CW
-                else:
-                    move_type = MoveType.ARC_CCW
-
                 # Compute arc center from endpoints and radius
+                # Signed radius: +R = minor arc, -R = major arc
                 center = self._find_arc_center(
                     prev_x_dia / 2.0, prev_z,
                     seg.x / 2.0, seg.z,
@@ -114,9 +110,23 @@ class FinishPlanner:
 
                 if center is not None:
                     center_x_r, center_z = center
+                    # Determine CW/CCW from cross product: (start-center) x (end-center)
+                    ax = prev_x_dia / 2.0 - center_x_r
+                    az = prev_z - center_z
+                    bx = seg.x / 2.0 - center_x_r
+                    bz = seg.z - center_z
+                    cross = ax * bz - az * bx
+                    # For minor arc: use the short sweep sign directly
+                    # For major arc: use the long sweep sign (opposite of short)
+                    is_major = seg.radius < 0
+                    if is_major:
+                        move_type = MoveType.ARC_CW if cross > 0 else MoveType.ARC_CCW
+                    else:
+                        move_type = MoveType.ARC_CW if cross < 0 else MoveType.ARC_CCW
                     center_i = (center_x_r - prev_x_dia / 2.0) * 2.0
                     center_k = center_z - prev_z
                 else:
+                    move_type = MoveType.ARC_CW if seg.radius > 0 else MoveType.ARC_CCW
                     center_i = 0.0
                     center_k = 0.0
 
@@ -163,14 +173,12 @@ class FinishPlanner:
 
     def _find_arc_center(
         self, x1_r: float, z1: float, x2_r: float, z2: float,
-        radius: float, is_ccw: bool
+        radius: float, is_major: bool
     ) -> tuple:
         """Find arc center given two endpoints and radius.
 
-        Uses sweep-direction test to pick the correct center from the two
-        candidates. CW/CCW is from the user's screen POV (inverted Y axis:
-        X increases downward). In data space, CW on screen = positive cross
-        product of (start-center) x (end-center).
+        Uses minor/major arc selection to pick the correct center from the two
+        candidates. is_major=True selects the major arc (>180 deg) center.
 
         Returns (center_x_radius, center_z) or None if no solution.
         """
@@ -200,22 +208,17 @@ class FinishPlanner:
         c2_x = mx - h * px
         c2_z = mz - h * pz
 
-        # Pick center based on sweep direction.
-        # Graph: horizontal=Z, vertical=X_radius (inverted Y).
-        # CW on screen = positive cross product in data space.
-        # screen_cross = (x1-cx)*(z2-cz) - (z1-cz)*(x2-cx)
-        def _screen_cw(cx, cz):
-            cross = (x1_r - cx) * (z2 - cz) - (z1 - cz) * (x2_r - cx)
-            return cross > 0
+        # Determine which center gives the minor arc (sweep <= 180)
+        a_s = math.atan2(z1 - c1_z, x1_r - c1_x)
+        a_e = math.atan2(z2 - c1_z, x2_r - c1_x)
+        sweep = a_e - a_s
+        if sweep > math.pi:
+            sweep -= 2 * math.pi
+        elif sweep < -math.pi:
+            sweep += 2 * math.pi
+        c1_is_minor = abs(sweep) <= math.pi
 
-        # is_ccw=True means CCW on screen = NOT screen_cw
-        if is_ccw:
-            if not _screen_cw(c1_x, c1_z):
-                return (c1_x, c1_z)
-            else:
-                return (c2_x, c2_z)
+        if is_major:
+            return (c2_x, c2_z) if c1_is_minor else (c1_x, c1_z)
         else:
-            if _screen_cw(c1_x, c1_z):
-                return (c1_x, c1_z)
-            else:
-                return (c2_x, c2_z)
+            return (c1_x, c1_z) if c1_is_minor else (c2_x, c2_z)

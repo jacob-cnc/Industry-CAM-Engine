@@ -262,8 +262,8 @@ def _build_face_from_coords(coords: List[dict], profile: ClosedProfile) -> objec
 
                 if target["type"] == SegmentType.ARC and target["radius"] != 0.0:
                     # Arc segment: convert profile radius to Build123d convention
-                    # Profile: +radius = CW (G02) → Build123d: NEGATIVE RadiusArc
-                    # Profile: -radius = CCW (G03) → Build123d: POSITIVE RadiusArc
+                    # Profile: +radius = minor arc, -radius = major arc
+                    # Build123d RadiusArc: -R = minor arc, +R = major arc (opposite)
                     b3d_radius = -target["radius"]
                     RadiusArc((cx, cz), (tx, tz), b3d_radius)
                 else:

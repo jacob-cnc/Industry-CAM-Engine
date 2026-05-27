@@ -1,28 +1,23 @@
 """Profile segment list widget for Industry CAM Engine.
 
 QTableWidget-based editor for building profile geometry segment by segment.
-Columns: Type (LINE/ARC dropdown), X (diameter), Z (inches), Radius (inches), Dir (CW/CCW).
+Columns: Type (LINE/ARC dropdown), X (diameter), Z (inches), Radius (inches).
 Emits segments_changed signal on any edit with List[dict] of segment data.
 
+Signed radius convention:
+- +R = minor arc (shorter path between endpoints, sweep <= 180 deg)
+- -R = major arc (longer path between endpoints, sweep > 180 deg)
+- G02/G03 direction is determined geometrically from the computed center
+  position relative to start/end points (cross product), NOT from the radius sign.
+
 Inline validation:
-- ARC segments: radius >= chord_length / 2
+- ARC segments: abs(radius) >= chord_length / 2
 - Invalid cells show red background
 
 Coordinates:
 - X values are in DIAMETER (inches) in user-facing fields
 - Z values are in inches (negative = into workpiece)
-- Radius is always positive in the UI; direction is set via the Dir column
-- Backend output combines radius + direction into signed radius:
-  UI "CW" (clockwise on screen, operator POV) → G03 → negative radius
-  UI "CCW" (counter-clockwise on screen, operator POV) → G02 → positive radius
-
-OD mode convention (what the operator sees on the graph):
-- CW (clockwise on screen): arc curves toward centerline (concave on OD part)
-- CCW (counter-clockwise on screen): arc curves away from centerline (convex on OD part)
-
-NOTE: The graph uses invertY for operator POV, which reverses the mathematical
-CW/CCW convention. The UI labels match what the operator SEES, not the G-code
-direction codes. The sign mapping handles the translation.
+- Radius is signed in the UI: positive = minor arc, negative = major arc
 """
 
 import math
@@ -45,22 +40,21 @@ COL_TYPE = 0
 COL_X = 1
 COL_Z = 2
 COL_RADIUS = 3
-COL_DIR = 4
 
-COLUMN_HEADERS = ["Type", "X (Dia)", "Z", "Radius", "Dir"]
+COLUMN_HEADERS = ["Type", "X (Dia)", "Z", "Radius"]
 
 
 class SegmentListWidget(QWidget):
     """Profile segment list editor.
 
     Allows the user to build a profile segment by segment using a table
-    with Type, X, Z, Radius, and Dir columns. Provides Add/Remove/Move buttons
+    with Type, X, Z, and Radius columns. Provides Add/Remove/Move buttons
     and inline validation for arc geometry.
 
     Signals:
         segments_changed(list): Emitted on any edit with List[dict] containing
             segment data: [{"type": "line"|"arc", "x": float, "z": float, "radius": float}, ...]
-            where radius is signed: positive=CW, negative=CCW.
+            where radius is signed: +R = minor arc, -R = major arc.
     """
 
     segments_changed = pyqtSignal(list)
@@ -78,7 +72,7 @@ class SegmentListWidget(QWidget):
         layout.setSpacing(4)
 
         # Table
-        self._table = QTableWidget(0, 5)
+        self._table = QTableWidget(0, 4)
         self._table.setHorizontalHeaderLabels(COLUMN_HEADERS)
         self._table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self._table.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -91,8 +85,6 @@ class SegmentListWidget(QWidget):
         header.setSectionResizeMode(COL_X, QHeaderView.Stretch)
         header.setSectionResizeMode(COL_Z, QHeaderView.Stretch)
         header.setSectionResizeMode(COL_RADIUS, QHeaderView.Stretch)
-        header.setSectionResizeMode(COL_DIR, QHeaderView.Fixed)
-        header.resizeSection(COL_DIR, 60)
 
         # Mono font for numeric cells
         self._mono_font = QFont(FONTS["mono_family"], FONTS["code_size"])
@@ -132,7 +124,7 @@ class SegmentListWidget(QWidget):
         """Return current segment data as a list of dicts.
 
         Each dict: {"type": "line"|"arc", "x": float, "z": float, "radius": float}
-        The radius is signed: positive for CW, negative for CCW.
+        Radius is signed: +R = minor arc (sweep <= 180), -R = major arc (sweep > 180).
         """
         segments = []
         for row in range(self._table.rowCount()):
@@ -146,30 +138,17 @@ class SegmentListWidget(QWidget):
 
         Args:
             segments: List of dicts with keys "type", "x", "z", "radius".
-                      Radius is signed: positive=CW, negative=CCW.
+                      Radius is signed: +R = minor arc, -R = major arc.
         """
         self._updating = True
         try:
             self._table.setRowCount(0)
             for seg in segments:
-                signed_radius = seg.get("radius", 0.0)
-                # Parse signed radius into unsigned radius + direction
-                # Backend: +radius = G02 (math CW), -radius = G03 (math CCW)
-                # Operator POV (inverted Y): G03 looks CW on screen, G02 looks CCW
-                # So: negative radius (G03) → display as "CW", positive (G02) → "CCW"
-                unsigned_radius = abs(signed_radius)
-                if signed_radius == 0:
-                    direction = "CW"
-                elif signed_radius < 0:
-                    direction = "CW"   # G03 (math CCW) looks CW to operator
-                else:
-                    direction = "CCW"  # G02 (math CW) looks CCW to operator
                 self._add_row(
                     seg_type=seg.get("type", "line"),
                     x=seg.get("x", 0.0),
                     z=seg.get("z", 0.0),
-                    radius=unsigned_radius,
-                    direction=direction,
+                    radius=seg.get("radius", 0.0),
                 )
         finally:
             self._updating = False
@@ -186,7 +165,7 @@ class SegmentListWidget(QWidget):
     # ------------------------------------------------------------------
 
     def _add_row(self, seg_type: str = "line", x: float = 0.0,
-                 z: float = 0.0, radius: float = 0.0, direction: str = "CW"):
+                 z: float = 0.0, radius: float = 0.0):
         """Insert a new row at the end of the table."""
         self._updating = True
         try:
@@ -212,20 +191,13 @@ class SegmentListWidget(QWidget):
             z_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self._table.setItem(row, COL_Z, z_item)
 
-            # Radius column (always positive in UI)
-            r_item = QTableWidgetItem(f"{abs(radius):.4f}")
+            # Radius column (signed: +R = minor arc, -R = major arc)
+            r_item = QTableWidgetItem(f"{radius:.4f}")
             r_item.setFont(self._mono_font)
             r_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self._table.setItem(row, COL_RADIUS, r_item)
 
-            # Dir column — combo box (CW/CCW)
-            dir_combo = QComboBox()
-            dir_combo.addItems(["CW", "CCW"])
-            dir_combo.setCurrentText(direction.upper())
-            dir_combo.currentTextChanged.connect(self._on_dir_changed)
-            self._table.setCellWidget(row, COL_DIR, dir_combo)
-
-            # Enable/disable radius and dir based on type
+            # Enable/disable radius based on type
             self._update_arc_fields_enabled(row)
         finally:
             self._updating = False
@@ -233,7 +205,7 @@ class SegmentListWidget(QWidget):
     def _read_row(self, row: int) -> Optional[dict]:
         """Read segment data from a table row. Returns None if parsing fails.
 
-        Combines the unsigned radius and direction into a signed radius value.
+        Radius is read directly from the cell (signed value).
         """
         combo = self._table.cellWidget(row, COL_TYPE)
         if combo is None:
@@ -252,23 +224,9 @@ class SegmentListWidget(QWidget):
             z = 0.0
 
         try:
-            radius_val = float(self._table.item(row, COL_RADIUS).text())
+            radius = float(self._table.item(row, COL_RADIUS).text())
         except (ValueError, AttributeError):
-            radius_val = 0.0
-
-        # Get direction from combo
-        dir_combo = self._table.cellWidget(row, COL_DIR)
-        if dir_combo is not None:
-            direction = dir_combo.currentText()
-        else:
-            direction = "CW"
-
-        # Combine into signed radius for the backend.
-        # IMPORTANT: The graph displays with invertY (operator POV), which
-        # visually reverses arc direction. To match what the operator SEES:
-        #   CW in the UI (clockwise on screen) → G03 → negative radius
-        #   CCW in the UI (counter-clockwise on screen) → G02 → positive radius
-        radius = -abs(radius_val) if direction == "CW" else abs(radius_val)
+            radius = 0.0
 
         return {"type": seg_type, "x": x, "z": z, "radius": radius}
 
@@ -278,7 +236,7 @@ class SegmentListWidget(QWidget):
 
     def _on_add(self):
         """Add a new LINE segment with default values."""
-        self._add_row(seg_type="line", x=0.0, z=0.0, radius=0.0, direction="CW")
+        self._add_row(seg_type="line", x=0.0, z=0.0, radius=0.0)
         self._validate_all()
         self._emit_changed()
 
@@ -316,18 +274,13 @@ class SegmentListWidget(QWidget):
             data_b = self._read_row(row_b)
             if data_a is None or data_b is None:
                 return
-            # Also capture direction for swap
-            dir_a = self._table.cellWidget(row_a, COL_DIR)
-            dir_b = self._table.cellWidget(row_b, COL_DIR)
-            dir_text_a = dir_a.currentText() if dir_a else "CW"
-            dir_text_b = dir_b.currentText() if dir_b else "CW"
 
-            self._set_row_data(row_a, data_b, dir_text_b)
-            self._set_row_data(row_b, data_a, dir_text_a)
+            self._set_row_data(row_a, data_b)
+            self._set_row_data(row_b, data_a)
         finally:
             self._updating = False
 
-    def _set_row_data(self, row: int, data: dict, direction: str = "CW"):
+    def _set_row_data(self, row: int, data: dict):
         """Write segment data into an existing row."""
         combo = self._table.cellWidget(row, COL_TYPE)
         if combo:
@@ -341,15 +294,10 @@ class SegmentListWidget(QWidget):
         if z_item:
             z_item.setText(f"{data['z']:.4f}")
 
-        # Radius in UI is always positive (unsigned)
+        # Radius is signed directly
         r_item = self._table.item(row, COL_RADIUS)
         if r_item:
-            r_item.setText(f"{abs(data['radius']):.4f}")
-
-        # Direction combo
-        dir_combo = self._table.cellWidget(row, COL_DIR)
-        if dir_combo:
-            dir_combo.setCurrentText(direction)
+            r_item.setText(f"{data['radius']:.4f}")
 
         self._update_arc_fields_enabled(row)
 
@@ -365,7 +313,7 @@ class SegmentListWidget(QWidget):
         self._emit_changed()
 
     def _on_type_changed(self, text: str):
-        """Handle type combo change — enable/disable radius+dir, validate, emit."""
+        """Handle type combo change — enable/disable radius, validate, emit."""
         if self._updating:
             return
         # Find which row this combo belongs to
@@ -377,18 +325,10 @@ class SegmentListWidget(QWidget):
         self._validate_all()
         self._emit_changed()
 
-    def _on_dir_changed(self, text: str):
-        """Handle direction combo change — emit signal."""
-        if self._updating:
-            return
-        self._validate_all()
-        self._emit_changed()
-
     def _update_arc_fields_enabled(self, row: int):
-        """Enable/disable radius and dir cells based on segment type."""
+        """Enable/disable radius cell based on segment type."""
         combo = self._table.cellWidget(row, COL_TYPE)
         r_item = self._table.item(row, COL_RADIUS)
-        dir_combo = self._table.cellWidget(row, COL_DIR)
         if combo is None or r_item is None:
             return
 
@@ -396,8 +336,6 @@ class SegmentListWidget(QWidget):
         if is_arc:
             r_item.setFlags(r_item.flags() | Qt.ItemIsEditable | Qt.ItemIsEnabled)
             r_item.setForeground(QColor(COLORS["text_primary"]))
-            if dir_combo:
-                dir_combo.setEnabled(True)
         else:
             r_item.setFlags(r_item.flags() & ~Qt.ItemIsEditable)
             r_item.setForeground(QColor(COLORS["text_disabled"]))
@@ -406,8 +344,6 @@ class SegmentListWidget(QWidget):
             self._updating = True
             r_item.setText("0.0000")
             self._updating = prev_updating
-            if dir_combo:
-                dir_combo.setEnabled(False)
 
     # ------------------------------------------------------------------
     # Validation
@@ -416,7 +352,7 @@ class SegmentListWidget(QWidget):
     def _validate_all(self):
         """Run inline validation on all rows.
 
-        For ARC segments: radius >= chord_length / 2
+        For ARC segments: abs(radius) >= chord_length / 2
         where chord = distance between this point and the previous point.
         Invalid cells get a red background and a tooltip explaining the issue.
         """
@@ -443,7 +379,7 @@ class SegmentListWidget(QWidget):
                 r_item.setToolTip("")
                 continue
 
-            # ARC validation: radius >= chord_length / 2
+            # ARC validation: abs(radius) >= chord_length / 2
             valid, error_msg = self._validate_arc_radius(row)
             if valid:
                 r_item.setBackground(normal_bg)
@@ -458,7 +394,8 @@ class SegmentListWidget(QWidget):
         """Check if arc radius is valid for the given row.
 
         Returns (True, "") if valid, (False, error_message) if invalid.
-        Radius in the UI is always positive (unsigned).
+        Radius can be positive (minor arc) or negative (major arc).
+        Validation uses abs(radius) for the chord check.
         If this is the first row (no previous point), we use (0, 0) as the start.
         """
         try:
@@ -496,7 +433,7 @@ class SegmentListWidget(QWidget):
             # Zero-length chord — any nonzero radius is technically valid
             return (True, "")
 
-        # Validation: radius >= chord_length / 2
+        # Validation: abs(radius) >= chord_length / 2
         min_radius = chord_length / 2.0
         if radius >= min_radius:
             return (True, "")

@@ -1138,8 +1138,9 @@ class ProgramTab(QWidget):
 
             if seg_type == "arc" and abs(radius) > 0.0001:
                 # Interpolate arc from prev to current
+                # Signed radius convention: +R = minor arc, -R = major arc
                 r_abs = abs(radius)
-                is_cw = radius > 0
+                is_minor = radius > 0
 
                 dx_r = x_r - prev_x_r
                 dz = z - prev_z
@@ -1162,32 +1163,41 @@ class ProgramTab(QWidget):
                     c2_x = mid_x_r - h * px
                     c2_z = mid_z - h * pz
 
-                    # Pick the center that produces the user-expected sweep direction.
-                    # Graph: horizontal=Z, vertical=X_radius (inverted Y).
-                    # CW on screen (with inverted Y) = positive cross product in data space.
-                    # screen_cross = (x1-cx)*(z2-cz) - (z1-cz)*(x2-cx)
-                    def _screen_cw(cx, cz):
-                        cross = (prev_x_r - cx) * (z - cz) - (prev_z - cz) * (x_r - cx)
-                        return cross > 0
+                    # Determine which center gives the minor arc (sweep <= 180)
+                    # by computing the angular sweep for c1
+                    a_start = math.atan2(prev_z - c1_z, prev_x_r - c1_x)
+                    a_end = math.atan2(z - c1_z, x_r - c1_x)
+                    sweep_c1 = a_end - a_start
+                    if sweep_c1 > math.pi:
+                        sweep_c1 -= 2 * math.pi
+                    elif sweep_c1 < -math.pi:
+                        sweep_c1 += 2 * math.pi
+                    # c1 gives minor arc if |sweep| <= pi
+                    c1_is_minor = abs(sweep_c1) <= math.pi
 
-                    if _screen_cw(c1_x, c1_z) == is_cw:
+                    if c1_is_minor == is_minor:
                         cx_r, cz_arc = c1_x, c1_z
+                        diff = sweep_c1
                     else:
                         cx_r, cz_arc = c2_x, c2_z
-
-                    angle_start = math.atan2(prev_z - cz_arc, prev_x_r - cx_r)
-                    angle_end = math.atan2(z - cz_arc, x_r - cx_r)
-                    r_display = math.sqrt((prev_x_r - cx_r) ** 2 + (prev_z - cz_arc) ** 2)
-
-                    diff = angle_end - angle_start
-                    # CW on screen = positive cross = positive angular sweep in data space
-                    # CCW on screen = negative cross = negative angular sweep in data space
-                    if is_cw:
-                        if diff < 0:
+                        # Compute sweep for c2
+                        a_start2 = math.atan2(prev_z - c2_z, prev_x_r - c2_x)
+                        a_end2 = math.atan2(z - c2_z, x_r - c2_x)
+                        diff = a_end2 - a_start2
+                        if diff > math.pi:
+                            diff -= 2 * math.pi
+                        elif diff < -math.pi:
                             diff += 2 * math.pi
-                    else:
+
+                    # For major arc, we need to go the long way
+                    if not is_minor:
                         if diff > 0:
                             diff -= 2 * math.pi
+                        else:
+                            diff += 2 * math.pi
+
+                    angle_start = math.atan2(prev_z - cz_arc, prev_x_r - cx_r)
+                    r_display = math.sqrt((prev_x_r - cx_r) ** 2 + (prev_z - cz_arc) ** 2)
 
                     n_pts = max(32, int(abs(diff) * r_display * 200))
                     # Ensure continuity: start from prev point if not already in path
