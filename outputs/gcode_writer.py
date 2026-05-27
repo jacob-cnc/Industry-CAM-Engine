@@ -46,9 +46,12 @@ class GCodeWriter:
         is_id = pr.mode.value == "id"
 
         # Safe boundary X: the side the tool approaches/retracts from
-        # OD: stock OD (large X, outside the part)
-        # ID: pilot hole (small X, inside the bore — no material)
-        safe_x = pr.stock.pilot_hole_dia if is_id else pr.stock.diameter
+        # OD: stock OD + 0.010" clearance (0.005" per side above stock surface)
+        # ID: pilot hole - 0.010" clearance (inside empty space, away from bore wall)
+        if is_id:
+            safe_x = max(0.0, pr.stock.pilot_hole_dia - 0.010)
+        else:
+            safe_x = pr.stock.diameter + 0.010
 
         # Header
         lines.append("; Industry CAM Engine — Generated Program")
@@ -140,8 +143,8 @@ class GCodeWriter:
 
                 # Track: next pass retracts to the MAX X this pass reached
                 # For arcs, the peak X may exceed the endpoint X values
-                # Cap at stock OD — no need to retract beyond stock boundary
-                prev_retract_x = min(self._compute_pass_max_x(p), pr.stock.diameter)
+                # Cap at safe_x — no need to retract beyond stock boundary + clearance
+                prev_retract_x = min(self._compute_pass_max_x(p), safe_x)
 
             lines.append("")
 
