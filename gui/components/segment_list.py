@@ -115,6 +115,7 @@ class SegmentListWidget(QWidget):
         self._btn_move_up.clicked.connect(self._on_move_up)
         self._btn_move_down.clicked.connect(self._on_move_down)
         self._table.cellChanged.connect(self._on_cell_changed)
+        self._table.cellDoubleClicked.connect(self._on_cell_double_clicked)
 
     # ------------------------------------------------------------------
     # Public API
@@ -311,6 +312,97 @@ class SegmentListWidget(QWidget):
             return
         self._validate_all()
         self._emit_changed()
+
+    def _on_cell_double_clicked(self, row: int, col: int):
+        """Double-click on a cell: populate with suggested value if available.
+
+        For ARC segments, if the cell has a computed suggestion (from the
+        auto-compute hint system), double-clicking fills it in automatically.
+        This saves the user from reading the tooltip and typing the value.
+        """
+        combo = self._table.cellWidget(row, COL_TYPE)
+        if combo is None or combo.currentText() != "ARC":
+            return  # Only works on ARC rows
+
+        if col not in (COL_X, COL_Z, COL_RADIUS):
+            return
+
+        # Compute the suggested value for this cell
+        suggested = self._compute_suggestion(row, col)
+        if suggested is None:
+            return  # No suggestion available, let normal edit proceed
+
+        # Populate the cell with the suggested value
+        item = self._table.item(row, col)
+        if item is not None:
+            self._updating = True
+            item.setText(f"{suggested:.4f}")
+            self._updating = False
+            self._validate_all()
+            self._emit_changed()
+
+    def _compute_suggestion(self, row: int, col: int) -> Optional[float]:
+        """Compute a suggested value for a cell on an ARC row.
+
+        Returns the suggested value, or None if no suggestion is possible.
+        """
+        from geometry.arc_helpers import (
+            compute_min_radius, compute_max_z_for_radius, compute_max_x_for_radius
+        )
+
+        # Get previous endpoint
+        if row > 0:
+            try:
+                x_start = float(self._table.item(row - 1, COL_X).text())
+                z_start = float(self._table.item(row - 1, COL_Z).text())
+            except (ValueError, AttributeError):
+                x_start, z_start = 0.0, 0.0
+        else:
+            x_start, z_start = 0.0, 0.0
+
+        # Parse current values
+        try:
+            x_val = float(self._table.item(row, COL_X).text())
+        except (ValueError, AttributeError):
+            x_val = None
+        try:
+            z_val = float(self._table.item(row, COL_Z).text())
+        except (ValueError, AttributeError):
+            z_val = None
+        try:
+            r_val = float(self._table.item(row, COL_RADIUS).text())
+        except (ValueError, AttributeError):
+            r_val = None
+
+        x_start_r = x_start / 2.0
+
+        if col == COL_RADIUS:
+            # Suggest minimum radius (with small margin for a comfortable arc)
+            if x_val is not None and z_val is not None:
+                x_end_r = x_val / 2.0
+                min_r = compute_min_radius(x_start_r, z_start, x_end_r, z_val)
+                if min_r > 1e-6:
+                    # Return minimum radius with 15% margin for a comfortable arc
+                    return min_r * 1.15
+            return None
+
+        elif col == COL_Z:
+            # Suggest max Z reach
+            if x_val is not None and r_val is not None and abs(r_val) > 1e-9:
+                x_end_r = x_val / 2.0
+                max_z = compute_max_z_for_radius(x_start_r, z_start, x_end_r, abs(r_val))
+                return max_z
+            return None
+
+        elif col == COL_X:
+            # Suggest max X reach
+            if z_val is not None and r_val is not None and abs(r_val) > 1e-9:
+                max_x_r = compute_max_x_for_radius(x_start_r, z_start, z_val, abs(r_val))
+                if max_x_r is not None:
+                    return max_x_r * 2.0  # Convert back to diameter
+            return None
+
+        return None
 
     def _on_type_changed(self, text: str):
         """Handle type combo change — enable/disable radius, validate, emit."""
