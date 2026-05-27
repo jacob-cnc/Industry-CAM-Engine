@@ -487,8 +487,8 @@ class SegmentListWidget(QWidget):
         else:
             x_start, z_start = 0.0, 0.0
 
-        # Compute chord length (using diameter values directly for distance)
-        dx = x_end - x_start
+        # Compute chord length (X is in diameter, convert to radius for distance)
+        dx = (x_end - x_start) / 2.0  # diameter to radius
         dz = z_end - z_start
         chord_length = math.sqrt(dx * dx + dz * dz)
 
