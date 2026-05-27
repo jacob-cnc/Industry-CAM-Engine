@@ -1173,7 +1173,7 @@ class ProgramTab(QWidget):
                     elif diff < -math.pi:
                         diff += 2 * math.pi
 
-                    n_pts = max(10, int(abs(diff) * r_display * 40))
+                    n_pts = max(32, int(abs(diff) * r_display * 200))
                     # Ensure continuity: start from prev point if not already in path
                     if not current_z:
                         current_x.append(prev_x_r)
