@@ -350,22 +350,30 @@ class SegmentListWidget(QWidget):
     # ------------------------------------------------------------------
 
     def _validate_all(self):
-        """Run inline validation on all rows.
+        """Run inline validation and auto-compute hints on all rows.
 
-        For ARC segments: abs(radius) >= chord_length / 2
-        where chord = distance between this point and the previous point.
-        Invalid cells get a red background and a tooltip explaining the issue.
+        For ARC segments:
+        - Validates abs(radius) >= chord_length / 2
+        - Shows auto-compute tooltips on blank/zero fields when the other
+          two fields are filled (tells user what value would complete the arc)
+
+        Invalid radius cells get a red background with fix suggestions.
+        Blank/zero cells on ARC rows get a hint tooltip with computed values.
         """
         # Block signals during validation to prevent recursive cellChanged
         self._table.blockSignals(True)
 
         error_bg = QColor(COLORS["status_error"])
         error_bg.setAlpha(80)
-        normal_bg = QColor(0, 0, 0, 0)  # Transparent (use table default)
+        hint_bg = QColor(COLORS.get("accent_blue", "#5b9bd5"))
+        hint_bg.setAlpha(40)
+        normal_bg = QColor(0, 0, 0, 0)
 
         for row in range(self._table.rowCount()):
             r_item = self._table.item(row, COL_RADIUS)
-            if r_item is None:
+            x_item = self._table.item(row, COL_X)
+            z_item = self._table.item(row, COL_Z)
+            if r_item is None or x_item is None or z_item is None:
                 continue
 
             combo = self._table.cellWidget(row, COL_TYPE)
@@ -374,9 +382,12 @@ class SegmentListWidget(QWidget):
 
             is_arc = combo.currentText() == "ARC"
             if not is_arc:
-                # LINE segments — no radius validation needed
                 r_item.setBackground(normal_bg)
                 r_item.setToolTip("")
+                x_item.setBackground(normal_bg)
+                x_item.setToolTip("")
+                z_item.setBackground(normal_bg)
+                z_item.setToolTip("")
                 continue
 
             # ARC validation: abs(radius) >= chord_length / 2
@@ -387,6 +398,111 @@ class SegmentListWidget(QWidget):
             else:
                 r_item.setBackground(error_bg)
                 r_item.setToolTip(error_msg)
+
+            # Auto-compute hints for blank/zero fields
+            self._show_arc_hints(row, x_item, z_item, r_item, hint_bg, normal_bg)
+
+        self._table.blockSignals(False)
+
+    def _show_arc_hints(self, row, x_item, z_item, r_item, hint_bg, normal_bg):
+        """Show auto-compute tooltips on ARC fields that are blank or zero.
+
+        When one field is empty/zero and the other two are filled, computes
+        what value would make a valid arc and shows it as a tooltip hint.
+
+        This helps users who know two of three values (from a drawing or
+        mental model) figure out the third without manual calculation.
+        """
+        from geometry.arc_helpers import (
+            compute_min_radius, compute_max_z_for_radius, compute_max_x_for_radius
+        )
+
+        # Get previous endpoint
+        if row > 0:
+            try:
+                x_start = float(self._table.item(row - 1, COL_X).text())
+                z_start = float(self._table.item(row - 1, COL_Z).text())
+            except (ValueError, AttributeError):
+                x_start, z_start = 0.0, 0.0
+        else:
+            x_start, z_start = 0.0, 0.0
+
+        # Parse current values (treat empty string as "blank")
+        try:
+            x_val = float(x_item.text())
+        except (ValueError, AttributeError):
+            x_val = None
+        try:
+            z_val = float(z_item.text())
+        except (ValueError, AttributeError):
+            z_val = None
+        try:
+            r_val = float(r_item.text())
+        except (ValueError, AttributeError):
+            r_val = None
+
+        # Convert "zero" to "blank" for X and Z on arc segments
+        # (a user entering 0 for X or Z on an arc likely means "I haven't filled this yet")
+        # But radius=0 is already caught by validation, so don't treat it as blank here
+        x_is_blank = x_val is None
+        z_is_blank = z_val is None
+        r_is_blank = r_val is None or abs(r_val) < 1e-9
+
+        x_start_r = x_start / 2.0  # Convert to radius for computation
+
+        # Case 1: Radius blank, X and Z filled → suggest minimum radius
+        if r_is_blank and not x_is_blank and not z_is_blank:
+            x_end_r = x_val / 2.0
+            min_r = compute_min_radius(x_start_r, z_start, x_end_r, z_val)
+            if min_r > 1e-6:
+                r_item.setToolTip(
+                    f"Suggested radius for these endpoints:\n"
+                    f"  Minimum (semicircle): {min_r:.4f}\n"
+                    f"  Comfortable (120° arc): {min_r * 1.15:.4f}"
+                )
+                # Don't override error background if validation already set it
+                if abs(r_val or 0) < 1e-9:
+                    r_item.setBackground(hint_bg)
+
+        # Case 2: Z blank, X and Radius filled → suggest max Z
+        if z_is_blank and not x_is_blank and not r_is_blank:
+            x_end_r = x_val / 2.0
+            max_z = compute_max_z_for_radius(x_start_r, z_start, x_end_r, abs(r_val))
+            if max_z is not None:
+                z_item.setToolTip(
+                    f"For R={abs(r_val):.4f} at X={x_val:.4f}:\n"
+                    f"  Max Z reach: {max_z:.4f}"
+                )
+                z_item.setBackground(hint_bg)
+            else:
+                z_item.setToolTip(
+                    f"X distance exceeds arc diameter.\n"
+                    f"No valid Z exists for R={abs(r_val):.4f} at X={x_val:.4f}."
+                )
+                z_item.setBackground(normal_bg)
+        elif not z_is_blank:
+            z_item.setBackground(normal_bg)
+            z_item.setToolTip("")
+
+        # Case 3: X blank, Z and Radius filled → suggest max X
+        if x_is_blank and not z_is_blank and not r_is_blank:
+            max_x_r = compute_max_x_for_radius(x_start_r, z_start, z_val, abs(r_val))
+            if max_x_r is not None:
+                max_x_dia = max_x_r * 2.0
+                x_item.setToolTip(
+                    f"For R={abs(r_val):.4f} at Z={z_val:.4f}:\n"
+                    f"  Max X reach: {max_x_dia:.4f} dia"
+                )
+                x_item.setBackground(hint_bg)
+            else:
+                x_item.setToolTip(
+                    f"Z distance exceeds arc diameter.\n"
+                    f"No valid X exists for R={abs(r_val):.4f} at Z={z_val:.4f}."
+                )
+                x_item.setBackground(normal_bg)
+        elif not x_is_blank:
+            x_item.setBackground(normal_bg)
+            x_item.setToolTip("")
 
         self._table.blockSignals(False)
 
