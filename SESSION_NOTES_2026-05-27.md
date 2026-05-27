@@ -84,17 +84,36 @@
 - Hint tooltips on blank/default fields show computed suggestions
 - Double-click on arc cell auto-populates with the suggested value
 
-### OPEN ISSUE: Arc Center Overshoot at Z=0
+### OPEN ISSUE: Arc Center Overshoot at Z=0 — RESOLVED
 
-**Problem:** The finish planner's `_find_arc_center` computes a center that places the circle's peak above Z=0 when the arc starts at the face (X=0, Z=0). This causes the G-code arc (G02) to briefly travel into positive Z before curving down — visible in both the toolpath visualization and the actual G-code I/K values.
+**Problem:** The finish planner's `_find_arc_center` computed a center that placed the circle's peak above Z=0 when the arc starts at the face (X=0, Z=0). This caused the G-code arc (G02) to briefly travel into positive Z before curving down.
 
-**Root cause:** The two-center algorithm picks the "CW" center based on cross product, but doesn't constrain the result to keep the arc within the part envelope (Z ≤ 0 for the start face). The computed center at (0.0602r, -0.2426) has the circle peak at Z = -0.2426 + 0.25 = +0.0074, which overshoots Z=0.
+**Root cause:** The `compute_max_z_for_radius` auto-compute function suggested Z=-0.4841 (semicircle max-reach), but that endpoint produces a center at (0.06, -0.243) whose circle peaks at Z=+0.007. The correct endpoint for a tangent-at-face arc is Z=-0.4665, which produces center (0, -0.25) with peak Z=0.000.
 
-**Correct behavior:** For an arc starting at (0, 0) with R=0.25, the center should be at (0, -0.25) to be tangent to Z=0. The current algorithm doesn't enforce this tangency constraint.
+**Fix:** Rewrote `compute_max_z_for_radius` to use tangent-preserving geometry. Instead of computing the unconstrained semicircle max-reach, it now assumes the center is directly below the start point at (x_start, z_start - R) and computes where that circle intersects the vertical line at x_end. This matches the CAD truth from the DXF exactly.
 
-**Potential fixes to explore:**
-1. Add a post-check: if the computed arc crosses Z=0 (or X=0), reject that center and use the other one
-2. Constrain the center to keep the arc within the profile envelope
-3. Re-examine whether the user's Z=-0.4841 endpoint is geometrically compatible with a tangent-at-face arc at R=0.25 (it may not be — the auto-compute gives the max Z reach, not the tangent-preserving Z)
+**Verification:** With Z=-0.4665, the pipeline produces `G02 X0.2500 Z-0.4665 I0.0000 K-0.2500` — center at (0, -0.25), peak Z=0.000000, no overshoot. Matches the DXF reference geometry.
 
-**Key insight:** The auto-compute `max_z_for_radius` gives the maximum Z reach (semicircle case), but that endpoint doesn't produce a tangent arc at the start. A tangent arc at Z=0 starting from X=0 requires the center at (0, -R), which constrains the endpoint to a specific locus. The user may need to choose between "max reach" and "tangent at face."
+
+## Full Commit History (branch: fix/contour-roughing-and-ui-improvements)
+
+1. `87e2d0e` — fix(contour-roughing): arc I/K positioning, stock OD re-cut, cleanup pass
+2. `250d6dd` — fix(retract): add 0.005in per-side clearance above stock surface
+3. `83379cb` — fix(sim): use sim-to-toolmoves mapping for toolpath reveal during playback
+4. `9f27f49` — docs: update session notes
+5. `aa7c9ca` — fix(ui): widen Program Tab left panel default from 220px to 600px
+6. `9b257a1` — fix(ui): add tooltip explaining why arc radius field is highlighted red
+7. `7c4cf53` — fix(validation): convert X from diameter to radius in arc chord calculation
+8. `4ed76c5` — fix(preview): eliminate lump at arc-to-arc junctions in profile preview
+9. `8961bb6` — fix(preview): draw all segments as one continuous polyline, no gaps between arcs
+10. `dab1370` — fix(ui): change default stock diameter to 1 inch
+11. `498fa16` — fix(preview): increase arc point density 5x (min 32 pts) for smooth display
+12. `f93b6a0` — fix(arc): use sweep-direction test for center selection
+13. `c599074` — feat(arc): replace CW/CCW direction with signed radius (+R CW, -R CCW)
+14. `60a9ca9` — feat(validation): enhanced arc tooltip with valid alternatives
+15. `54453e3` — fix(arc): correct CW/CCW center selection using empirically verified cross product sign
+16. `d87360a` — feat(ui): auto-compute tooltips on blank arc fields
+17. `245bccb` — fix(ui): show arc hints when field equals start value
+18. `ab447b5` — feat(ui): double-click arc cell to auto-populate with computed suggestion
+19. `13c217d` — docs: update session notes
+20. `7ecf558` — fix(arc): auto-compute uses tangent-preserving Z, not max-reach semicircle
