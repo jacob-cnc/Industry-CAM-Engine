@@ -53,3 +53,19 @@
 - S word + M3 enables encoder feedback — doesn't control spindle speed (manual)
 - If spindle isn't turning, axes won't move (0 RPM × F = 0 IPM) — safe stall, no error
 - RPM field kept in UI as operator reference for target speed setting
+
+### 9. Retract Clearance (`outputs/gcode_writer.py`, `transitions/transition_planner.py`)
+- Retract rapids now go to stock_dia + 0.010" (0.005" per side) instead of exactly stock_dia
+- Prevents tool from dragging along stock surface during retract moves
+- Applied in both the G-code writer (safe_x) and the transition planner
+
+### 10. Sim Playback Finish Pass Visibility (`gui/components/sim_viewer.py`)
+- **Bug:** Finish pass didn't display during sim playback (Play), but showed on "Show All"
+- **Cause:** `reveal_toolpath_up_to()` was called with `sim_moves` index (G-code lines) directly as index into `toolpath_items` (pipeline moves). Different list lengths meant finish pass segments were never reached.
+- **Fix:** Use the `_sim_to_toolmoves` mapping to translate sim playback position to the correct toolpath segment index. Falls back to highest mapped index for unmapped sim moves.
+
+## Commits (branch: fix/contour-roughing-and-ui-improvements)
+
+1. `87e2d0e` — fix(contour-roughing): arc I/K positioning, stock OD re-cut, cleanup pass
+2. `250d6dd` — fix(retract): add 0.005in per-side clearance above stock surface
+3. `83379cb` — fix(sim): use sim-to-toolmoves mapping for toolpath reveal during playback
