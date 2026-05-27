@@ -183,11 +183,11 @@ class ProgramTab(QWidget):
         self._right_panel = self._build_right_panel()
         self._splitter.addWidget(self._right_panel)
 
-        # Splitter proportions: left panel fixed ~220px, right gets the rest
-        self._splitter.setSizes([220, 780])
+        # Splitter proportions: left panel ~600px default, right gets the rest
+        self._splitter.setSizes([600, 400])
         self._splitter.setStretchFactor(0, 0)
         self._splitter.setStretchFactor(1, 1)
-        self._left_panel.setMinimumWidth(210)
+        self._left_panel.setMinimumWidth(400)
 
     def _build_left_panel(self) -> QWidget:
         """Build the left panel with collapsible accordion sections.
