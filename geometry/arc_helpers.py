@@ -50,33 +50,52 @@ def compute_max_z_for_radius(
     x_start_r: float, z_start: float,
     x_end_r: float, radius: float,
 ) -> Optional[float]:
-    """Compute the most negative Z reachable at a given X with a given radius.
+    """Compute the Z endpoint for a tangent-preserving arc at a given X.
 
-    Given a start point, an end X (in radius), and a radius, finds the Z
-    value where the chord equals 2*radius (the maximum reach — a semicircle).
+    Assumes the arc starts tangent to the face (horizontal at the start point),
+    meaning the center is directly below the start at (x_start, z_start - R).
+    This is the standard case for arcs beginning at the part face.
 
-    This answers: "If I want R=0.25 and end at X=0.125r, how far in Z can I go?"
+    Given that constraint, computes the Z where the circle intersects the
+    vertical line at x_end_r.
+
+    This answers: "If I want R=0.25 starting tangent at Z=0, and ending at
+    X=0.125r, what Z does the arc reach?"
 
     Args:
         x_start_r: Start X in radius
         z_start: Start Z in inches
         x_end_r: End X in radius
-        radius: Arc radius in inches
+        radius: Arc radius in inches (absolute value)
 
     Returns:
-        Most negative Z reachable, or None if X distance alone exceeds diameter.
+        Z endpoint for the tangent-preserving arc, or None if X distance
+        exceeds the radius (endpoint unreachable from this center).
     """
-    dx = x_end_r - x_start_r
-    # Maximum chord = 2 * radius (semicircle)
-    max_chord = 2.0 * radius
-    # chord² = dx² + dz² → dz² = max_chord² - dx²
-    dz_sq = max_chord * max_chord - dx * dx
+    # Center is directly below start for tangent-at-face constraint
+    cx = x_start_r
+    cz = z_start - radius
+
+    # Find where the circle (centered at cx, cz with radius R) intersects x = x_end_r
+    # Circle equation: (x - cx)² + (z - cz)² = R²
+    # At x = x_end_r: (x_end_r - cx)² + (z - cz)² = R²
+    # (z - cz)² = R² - (x_end_r - cx)²
+    dx = x_end_r - cx
+    dz_sq = radius * radius - dx * dx
     if dz_sq < 0:
-        # X distance alone exceeds the diameter — no valid Z exists
+        # X distance exceeds radius — endpoint unreachable
         return None
-    # Most negative Z = start_z - |dz| (arc goes in -Z direction)
-    max_dz = math.sqrt(dz_sq)
-    return z_start - max_dz
+
+    # Two solutions: z = cz ± sqrt(dz_sq)
+    # We want the one below the start (more negative Z)
+    dz = math.sqrt(dz_sq)
+    z_lower = cz - dz
+    z_upper = cz + dz
+
+    # Return the solution that's below z_start (the arc goes downward)
+    # z_upper = cz + dz = (z_start - R) + dz — this is the start point (or above)
+    # z_lower = cz - dz = (z_start - R) - dz — this is below
+    return z_lower
 
 
 def compute_max_x_for_radius(
