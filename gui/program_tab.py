@@ -1137,12 +1137,6 @@ class ProgramTab(QWidget):
             seg_type = seg.get("type", "line")
 
             if seg_type == "arc" and abs(radius) > 0.0001:
-                # End the current line sub-path only if it has actual line content
-                if len(current_z) > 1:
-                    segments_to_draw.append((list(current_z), list(current_x)))
-                current_z = []
-                current_x = []
-
                 # Interpolate arc from prev to current
                 r_abs = abs(radius)
                 is_cw = radius > 0
@@ -1150,9 +1144,6 @@ class ProgramTab(QWidget):
                 dx_r = x_r - prev_x_r
                 dz = z - prev_z
                 chord = math.sqrt(dx_r * dx_r + dz * dz)
-
-                arc_z: List[float] = []
-                arc_x: List[float] = []
 
                 if chord > 0.0001 and r_abs >= chord / 2.0 - 1e-9:
                     if r_abs < chord / 2.0:
@@ -1183,30 +1174,32 @@ class ProgramTab(QWidget):
                         diff += 2 * math.pi
 
                     n_pts = max(10, int(abs(diff) * r_display * 40))
-                    # Use exact start point, interpolate interior, use exact end point
-                    arc_x.append(prev_x_r)
-                    arc_z.append(prev_z)
+                    # Ensure continuity: start from prev point if not already in path
+                    if not current_z:
+                        current_x.append(prev_x_r)
+                        current_z.append(prev_z)
+                    # Interpolate interior points (skip first — already in path)
                     for i in range(1, n_pts):
                         t = i / float(n_pts)
                         angle = angle_start + diff * t
                         ax = cx_r + r_display * math.cos(angle)
                         az = cz_arc + r_display * math.sin(angle)
-                        arc_x.append(ax)
-                        arc_z.append(az)
-                    arc_x.append(x_r)
-                    arc_z.append(z)
+                        current_x.append(ax)
+                        current_z.append(az)
+                    # Use exact endpoint
+                    current_x.append(x_r)
+                    current_z.append(z)
+                    all_x.extend([x_r])
+                    all_z.extend([z])
                 else:
                     # Degenerate arc — draw as line from prev to endpoint
-                    arc_x = [prev_x_r, x_r]
-                    arc_z = [prev_z, z]
-
-                if arc_z:
-                    segments_to_draw.append((arc_z, arc_x))
-                    all_z.extend(arc_z)
-                    all_x.extend(arc_x)
-                    # Start next line sub-path from arc endpoint
-                    current_z = [arc_z[-1]]
-                    current_x = [arc_x[-1]]
+                    if not current_z:
+                        current_x.append(prev_x_r)
+                        current_z.append(prev_z)
+                    current_x.append(x_r)
+                    current_z.append(z)
+                    all_x.append(x_r)
+                    all_z.append(z)
             else:
                 # LINE segment — add endpoint to current sub-path
                 if not current_z:
