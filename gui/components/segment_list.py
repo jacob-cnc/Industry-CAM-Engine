@@ -394,17 +394,22 @@ class SegmentListWidget(QWidget):
         """Check if arc radius is valid for the given row.
 
         Returns (True, "") if valid, (False, error_message) if invalid.
+        When invalid, the error message includes actionable alternatives:
+        - Minimum radius for these endpoints
+        - Maximum Z reachable at this X with this radius
+        - Maximum X reachable at this Z with this radius
+
         Radius can be positive (minor arc) or negative (major arc).
         Validation uses abs(radius) for the chord check.
         If this is the first row (no previous point), we use (0, 0) as the start.
         """
         try:
-            radius = abs(float(self._table.item(row, COL_RADIUS).text()))
+            radius = float(self._table.item(row, COL_RADIUS).text())
         except (ValueError, AttributeError):
             return (False, "Radius must be a number")
 
-        if radius < 1e-9:
-            # Zero radius for an arc is always invalid
+        abs_radius = abs(radius)
+        if abs_radius < 1e-9:
             return (False, "Arc radius cannot be zero")
 
         # Get current endpoint
@@ -425,24 +430,22 @@ class SegmentListWidget(QWidget):
             x_start, z_start = 0.0, 0.0
 
         # Compute chord length (X is in diameter, convert to radius for distance)
-        dx = (x_end - x_start) / 2.0  # diameter to radius
+        dx = (x_end - x_start) / 2.0
         dz = z_end - z_start
         chord_length = math.sqrt(dx * dx + dz * dz)
 
         if chord_length < 1e-9:
-            # Zero-length chord — any nonzero radius is technically valid
             return (True, "")
 
         # Validation: abs(radius) >= chord_length / 2
         min_radius = chord_length / 2.0
-        if radius >= min_radius:
+        if abs_radius >= min_radius:
             return (True, "")
         else:
-            return (False,
-                f"Radius {radius:.4f} is too small.\n"
-                f"Minimum for this chord: {min_radius:.4f}\n"
-                f"(chord = {chord_length:.4f} between endpoints)"
-            )
+            # Generate detailed message with alternatives
+            from geometry.arc_helpers import format_validation_message
+            msg = format_validation_message(x_start, z_start, x_end, z_end, abs_radius)
+            return (False, msg)
 
     # ------------------------------------------------------------------
     # Signal emission
