@@ -666,7 +666,15 @@ class SimViewerWidget(QWidget):
             x_r, z, move_idx = self._path[min(self._sim_step, self._path_len - 1)]
             self._graph.set_tool_position(x_r, z)
             # Reveal toolpath segments up to current move
-            self._graph.reveal_toolpath_up_to(move_idx)
+            # Convert sim_moves index to tool_moves index (toolpath_segments align with tool_moves)
+            toolpath_idx = self._sim_to_toolmoves.get(move_idx, None)
+            if toolpath_idx is not None:
+                self._graph.reveal_toolpath_up_to(toolpath_idx)
+            else:
+                # No direct mapping — find the highest mapped index at or below move_idx
+                mapped = [tm for sm, tm in self._sim_to_toolmoves.items() if sm <= move_idx]
+                if mapped:
+                    self._graph.reveal_toolpath_up_to(max(mapped))
         else:
             self._graph.set_tool_position(0, 0)
 
