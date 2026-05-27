@@ -167,6 +167,11 @@ class FinishPlanner:
     ) -> tuple:
         """Find arc center given two endpoints and radius.
 
+        Uses sweep-direction test to pick the correct center from the two
+        candidates. CW/CCW is from the user's screen POV (inverted Y axis:
+        X increases downward). In data space, CW on screen = positive cross
+        product of (start-center) x (end-center).
+
         Returns (center_x_radius, center_z) or None if no solution.
         """
         import math
@@ -189,11 +194,28 @@ class FinishPlanner:
         px = -dz / d
         pz = dx / d
 
-        if is_ccw:
-            center_x = mx - h * px
-            center_z = mz - h * pz
-        else:
-            center_x = mx + h * px
-            center_z = mz + h * pz
+        # Two candidate centers
+        c1_x = mx + h * px
+        c1_z = mz + h * pz
+        c2_x = mx - h * px
+        c2_z = mz - h * pz
 
-        return (center_x, center_z)
+        # Pick center based on sweep direction.
+        # Graph: horizontal=Z, vertical=X_radius (inverted Y).
+        # CW on screen = positive cross product in data space.
+        # screen_cross = (x1-cx)*(z2-cz) - (z1-cz)*(x2-cx)
+        def _screen_cw(cx, cz):
+            cross = (x1_r - cx) * (z2 - cz) - (z1 - cz) * (x2_r - cx)
+            return cross > 0
+
+        # is_ccw=True means CCW on screen = NOT screen_cw
+        if is_ccw:
+            if not _screen_cw(c1_x, c1_z):
+                return (c1_x, c1_z)
+            else:
+                return (c2_x, c2_z)
+        else:
+            if _screen_cw(c1_x, c1_z):
+                return (c1_x, c1_z)
+            else:
+                return (c2_x, c2_z)

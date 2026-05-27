@@ -841,17 +841,20 @@ class CleanupPlanner:
         self, x1_r: float, z1: float, x2_r: float, z2: float,
         radius: float, is_ccw: bool
     ) -> tuple:
-        """Find arc center given two endpoints and radius using OCCT.
+        """Find arc center given two endpoints and radius.
+
+        Uses sweep-direction test to pick the correct center from the two
+        candidates. CW/CCW is from the user's screen POV (inverted Y axis:
+        X increases downward). In data space, CW on screen = positive cross
+        product of (start-center) x (end-center).
 
         Returns (center_x_radius, center_z) or None if no solution.
         """
         import math
 
-        # Midpoint
         mx = (x1_r + x2_r) / 2.0
         mz = (z1 + z2) / 2.0
 
-        # Distance between points
         dx = x2_r - x1_r
         dz = z2 - z1
         d = math.sqrt(dx**2 + dz**2)
@@ -859,25 +862,38 @@ class CleanupPlanner:
         if d < 1e-10:
             return None
 
-        # Distance from midpoint to center
         h_sq = radius**2 - (d / 2.0)**2
         if h_sq < 0:
             h_sq = 0
         h = math.sqrt(h_sq)
 
-        # Perpendicular direction
         px = -dz / d
         pz = dx / d
 
-        # Two possible centers — choose based on CW/CCW
-        if is_ccw:
-            center_x = mx - h * px
-            center_z = mz - h * pz
-        else:
-            center_x = mx + h * px
-            center_z = mz + h * pz
+        # Two candidate centers
+        c1_x = mx + h * px
+        c1_z = mz + h * pz
+        c2_x = mx - h * px
+        c2_z = mz - h * pz
 
-        return (center_x, center_z)
+        # Pick center based on sweep direction.
+        # Graph: horizontal=Z, vertical=X_radius (inverted Y).
+        # CW on screen = positive cross product in data space.
+        # screen_cross = (x1-cx)*(z2-cz) - (z1-cz)*(x2-cx)
+        def _screen_cw(cx, cz):
+            cross = (x1_r - cx) * (z2 - cz) - (z1 - cz) * (x2_r - cx)
+            return cross > 0
+
+        if is_ccw:
+            if not _screen_cw(c1_x, c1_z):
+                return (c1_x, c1_z)
+            else:
+                return (c2_x, c2_z)
+        else:
+            if _screen_cw(c1_x, c1_z):
+                return (c1_x, c1_z)
+            else:
+                return (c2_x, c2_z)
 
     def _plan_from_zone_boundary(
         self,

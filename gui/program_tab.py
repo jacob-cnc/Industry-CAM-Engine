@@ -1156,22 +1156,38 @@ class ProgramTab(QWidget):
                     px = -dz / chord
                     pz = dx_r / chord
 
-                    if is_cw:
-                        cx_r = mid_x_r + h * px
-                        cz_arc = mid_z + h * pz
+                    # Compute both candidate centers
+                    c1_x = mid_x_r + h * px
+                    c1_z = mid_z + h * pz
+                    c2_x = mid_x_r - h * px
+                    c2_z = mid_z - h * pz
+
+                    # Pick the center that produces the user-expected sweep direction.
+                    # Graph: horizontal=Z, vertical=X_radius (inverted Y).
+                    # CW on screen (with inverted Y) = positive cross product in data space.
+                    # screen_cross = (x1-cx)*(z2-cz) - (z1-cz)*(x2-cx)
+                    def _screen_cw(cx, cz):
+                        cross = (prev_x_r - cx) * (z - cz) - (prev_z - cz) * (x_r - cx)
+                        return cross > 0
+
+                    if _screen_cw(c1_x, c1_z) == is_cw:
+                        cx_r, cz_arc = c1_x, c1_z
                     else:
-                        cx_r = mid_x_r - h * px
-                        cz_arc = mid_z - h * pz
+                        cx_r, cz_arc = c2_x, c2_z
 
                     angle_start = math.atan2(prev_z - cz_arc, prev_x_r - cx_r)
                     angle_end = math.atan2(z - cz_arc, x_r - cx_r)
                     r_display = math.sqrt((prev_x_r - cx_r) ** 2 + (prev_z - cz_arc) ** 2)
 
                     diff = angle_end - angle_start
-                    if diff > math.pi:
-                        diff -= 2 * math.pi
-                    elif diff < -math.pi:
-                        diff += 2 * math.pi
+                    # CW on screen = positive cross = positive angular sweep in data space
+                    # CCW on screen = negative cross = negative angular sweep in data space
+                    if is_cw:
+                        if diff < 0:
+                            diff += 2 * math.pi
+                    else:
+                        if diff > 0:
+                            diff -= 2 * math.pi
 
                     n_pts = max(32, int(abs(diff) * r_display * 200))
                     # Ensure continuity: start from prev point if not already in path
