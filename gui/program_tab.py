@@ -1137,8 +1137,8 @@ class ProgramTab(QWidget):
             seg_type = seg.get("type", "line")
 
             if seg_type == "arc" and abs(radius) > 0.0001:
-                # End the current line sub-path (include prev point as arc start)
-                if current_z:
+                # End the current line sub-path only if it has actual line content
+                if len(current_z) > 1:
                     segments_to_draw.append((list(current_z), list(current_x)))
                 current_z = []
                 current_x = []
@@ -1183,13 +1183,18 @@ class ProgramTab(QWidget):
                         diff += 2 * math.pi
 
                     n_pts = max(10, int(abs(diff) * r_display * 40))
-                    for i in range(n_pts + 1):
+                    # Use exact start point, interpolate interior, use exact end point
+                    arc_x.append(prev_x_r)
+                    arc_z.append(prev_z)
+                    for i in range(1, n_pts):
                         t = i / float(n_pts)
                         angle = angle_start + diff * t
                         ax = cx_r + r_display * math.cos(angle)
                         az = cz_arc + r_display * math.sin(angle)
                         arc_x.append(ax)
                         arc_z.append(az)
+                    arc_x.append(x_r)
+                    arc_z.append(z)
                 else:
                     # Degenerate arc — draw as line from prev to endpoint
                     arc_x = [prev_x_r, x_r]
