@@ -5,19 +5,19 @@ Columns: Type (LINE/ARC dropdown), X (diameter), Z (inches), Radius (inches).
 Emits segments_changed signal on any edit with List[dict] of segment data.
 
 Signed radius convention:
-- +R = minor arc (shorter path between endpoints, sweep <= 180 deg)
-- -R = major arc (longer path between endpoints, sweep > 180 deg)
-- G02/G03 direction is determined geometrically from the computed center
-  position relative to start/end points (cross product), NOT from the radius sign.
+- +R = CW arc (clockwise direction of travel as seen on screen)
+- -R = CCW arc (counterclockwise direction of travel as seen on screen)
+- The sign determines which of the two possible arc paths to take between
+  the start and end points at the given radius.
 
 Inline validation:
 - ARC segments: abs(radius) >= chord_length / 2
-- Invalid cells show red background
+- Invalid cells show red background with tooltip showing valid alternatives
 
 Coordinates:
 - X values are in DIAMETER (inches) in user-facing fields
 - Z values are in inches (negative = into workpiece)
-- Radius is signed in the UI: positive = minor arc, negative = major arc
+- Radius is signed in the UI: positive = CW, negative = CCW
 """
 
 import math

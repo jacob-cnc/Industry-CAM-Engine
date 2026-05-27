@@ -1138,9 +1138,9 @@ class ProgramTab(QWidget):
 
             if seg_type == "arc" and abs(radius) > 0.0001:
                 # Interpolate arc from prev to current
-                # Signed radius convention: +R = minor arc, -R = major arc
+                # Signed radius: +R = CW on screen, -R = CCW on screen
                 r_abs = abs(radius)
-                is_minor = radius > 0
+                is_cw = radius > 0
 
                 dx_r = x_r - prev_x_r
                 dz = z - prev_z
@@ -1163,40 +1163,42 @@ class ProgramTab(QWidget):
                     c2_x = mid_x_r - h * px
                     c2_z = mid_z - h * pz
 
-                    # Determine which center gives the minor arc (sweep <= 180)
-                    # by computing the angular sweep for c1
-                    a_start = math.atan2(prev_z - c1_z, prev_x_r - c1_x)
-                    a_end = math.atan2(z - c1_z, x_r - c1_x)
-                    sweep_c1 = a_end - a_start
-                    if sweep_c1 > math.pi:
-                        sweep_c1 -= 2 * math.pi
-                    elif sweep_c1 < -math.pi:
-                        sweep_c1 += 2 * math.pi
-                    # c1 gives minor arc if |sweep| <= pi
-                    c1_is_minor = abs(sweep_c1) <= math.pi
+                    # Pick center based on CW/CCW direction on screen.
+                    # Empirically verified: CW on screen (inverted Y) =
+                    # center where cross product (start-center) x (end-center) < 0
+                    # Cross = ax*bz - az*bx where a=start-center, b=end-center
+                    def _cross(cx, cz):
+                        ax = prev_x_r - cx
+                        az = prev_z - cz
+                        bx = x_r - cx
+                        bz = z - cz
+                        return ax * bz - az * bx
 
-                    if c1_is_minor == is_minor:
-                        cx_r, cz_arc = c1_x, c1_z
-                        diff = sweep_c1
+                    cr1 = _cross(c1_x, c1_z)
+                    if is_cw:
+                        # CW -> negative cross
+                        cx_r, cz_arc = (c1_x, c1_z) if cr1 < 0 else (c2_x, c2_z)
                     else:
-                        cx_r, cz_arc = c2_x, c2_z
-                        # Compute sweep for c2
-                        a_start2 = math.atan2(prev_z - c2_z, prev_x_r - c2_x)
-                        a_end2 = math.atan2(z - c2_z, x_r - c2_x)
-                        diff = a_end2 - a_start2
-                        if diff > math.pi:
-                            diff -= 2 * math.pi
-                        elif diff < -math.pi:
-                            diff += 2 * math.pi
+                        # CCW -> positive cross
+                        cx_r, cz_arc = (c1_x, c1_z) if cr1 > 0 else (c2_x, c2_z)
 
-                    # For major arc, we need to go the long way
-                    if not is_minor:
+                    # Compute sweep angle
+                    angle_start = math.atan2(prev_z - cz_arc, prev_x_r - cx_r)
+                    angle_end = math.atan2(z - cz_arc, x_r - cx_r)
+                    diff = angle_end - angle_start
+
+                    # Normalize sweep to match direction:
+                    # CW on screen = negative sweep in data space
+                    # CCW on screen = positive sweep in data space
+                    if is_cw:
+                        # Want negative sweep
                         if diff > 0:
                             diff -= 2 * math.pi
-                        else:
+                    else:
+                        # Want positive sweep
+                        if diff < 0:
                             diff += 2 * math.pi
 
-                    angle_start = math.atan2(prev_z - cz_arc, prev_x_r - cx_r)
                     r_display = math.sqrt((prev_x_r - cx_r) ** 2 + (prev_z - cz_arc) ** 2)
 
                     n_pts = max(32, int(abs(diff) * r_display * 200))
