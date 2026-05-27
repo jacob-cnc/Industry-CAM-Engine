@@ -318,7 +318,7 @@ class ProgramTab(QWidget):
 
         self._stock_diameter = NumericField(NumericFieldConfig(
             min_value=0.01, max_value=20.0, decimals=4,
-            default_value=2.0, suffix="dia",
+            default_value=1.0, suffix="dia",
         ))
         form.addRow("Diameter:", self._stock_diameter)
 
