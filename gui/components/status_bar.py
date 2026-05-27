@@ -16,7 +16,7 @@ except ImportError:
 from PyQt5.QtWidgets import (
     QWidget, QHBoxLayout, QLabel, QFrame, QPushButton,
 )
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QFont
 
 from gui.colors import COLORS, FONTS
@@ -70,6 +70,10 @@ class StatusBar(QWidget):
         self._gcodes = "G90 G20 G40"
 
         self._setup_ui()
+
+        self._error_timer = QTimer(self)
+        self._error_timer.setSingleShot(True)
+        self._error_timer.timeout.connect(self.clear_error)
 
         if not HAS_LINUXCNC:
             self._show_offline()
@@ -200,6 +204,19 @@ class StatusBar(QWidget):
         )
         self._tool_display.setMinimumWidth(30)
         layout.addWidget(self._tool_display)
+
+        # --- Error message ---
+        self._error_label = QLabel("")
+        self._error_label.setFont(mono_font_small)
+        self._error_label.setStyleSheet(
+            f"color: {COLORS['text_primary']};"
+            f"background-color: {COLORS['status_error']};"
+            f"border: 1px solid {COLORS['border_error']};"
+            f"border-radius: 3px;"
+            f"padding: 2px 8px;"
+        )
+        self._error_label.setVisible(False)
+        layout.addWidget(self._error_label)
 
         # --- Spacer + Machine Control Buttons + E-Stop Button + Offline Badge ---
         layout.addStretch()
@@ -376,6 +393,21 @@ class StatusBar(QWidget):
         """
         self._gcodes = gcodes
         self._gcode_display.setText(gcodes)
+
+    def show_error(self, msg: str):
+        """Display an error message in the ribbon. Auto-clears after 8 seconds.
+
+        Args:
+            msg: Error text from LinuxCNC error channel.
+        """
+        self._error_label.setText(f"! {msg}")
+        self._error_label.setVisible(True)
+        self._error_timer.start(8000)
+
+    def clear_error(self):
+        """Hide the error message label."""
+        self._error_label.setVisible(False)
+        self._error_label.setText("")
 
     # --- Property accessors ---
 

@@ -59,6 +59,8 @@ class MainWindow(QMainWindow):
         self._setup_ui()
         self._wire_signals()
 
+        self._prev_estop = False
+
         # Status bar poll timer — updates position, RPM, feed, tool, gcodes
         from PyQt5.QtCore import QTimer
         self._status_timer = QTimer(self)
@@ -222,6 +224,12 @@ class MainWindow(QMainWindow):
 
     def _poll_status_bar(self):
         """Update the status bar with live machine data (runs at 5 Hz)."""
+        try:
+            self._poll_status_bar_inner()
+        except Exception:
+            logger.exception("_poll_status_bar raised unexpectedly")
+
+    def _poll_status_bar_inner(self):
         self._backend.poll()
         s = self._backend.state
 
@@ -259,6 +267,14 @@ class MainWindow(QMainWindow):
         # G-codes
         if s.active_gcodes:
             self._status_bar.update_gcodes(s.active_gcodes)
+
+        # Errors: prefer the error channel message; fall back to ESTOP transition
+        if s.error_message:
+            self._status_bar.show_error(s.error_message)
+        elif s.estop_active and not self._prev_estop:
+            self._status_bar.show_error("E-STOP")
+
+        self._prev_estop = s.estop_active
 
     # ------------------------------------------------------------------
     # Helpers

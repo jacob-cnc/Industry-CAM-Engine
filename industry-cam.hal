@@ -230,27 +230,27 @@ setp hm2_7i96s.0.encoder.02.filter 1
 # Jog scale — GUI-controlled via mux8 (5 modes: 2 position + 3 velocity)
 # Index 0: 0.0002" position mode
 # Index 1: 0.001"  position mode (default)
-# Index 2: Vel Slow (~0.1 in/s at moderate spin)
-# Index 3: Vel Med  (~0.3 in/s at moderate spin)
-# Index 4: Vel Fast (~0.6 in/s, capped by MAX_VEL)
+# Index 2: Vel Slow (~0.025 in/s at moderate spin)
+# Index 3: Vel Med  (~0.15 in/s at moderate spin)
+# Index 4: Vel Fast — X capped by AXIS_X=1.8, Z capped by AXIS_Z=0.75 in/s
 # Indices 5-7: fallback to Vel Fast scale (unused but safe)
 setp mux8.jogscale-x.in0  0.000025
 setp mux8.jogscale-x.in1  0.000125
-setp mux8.jogscale-x.in2  0.000125
-setp mux8.jogscale-x.in3  0.000375
-setp mux8.jogscale-x.in4  0.000750
-setp mux8.jogscale-x.in5  0.000750
-setp mux8.jogscale-x.in6  0.000750
-setp mux8.jogscale-x.in7  0.000750
+setp mux8.jogscale-x.in2  0.00003125
+setp mux8.jogscale-x.in3  0.0001875
+setp mux8.jogscale-x.in4  0.000351563
+setp mux8.jogscale-x.in5  0.000351563
+setp mux8.jogscale-x.in6  0.000351563
+setp mux8.jogscale-x.in7  0.000351563
 
-setp mux8.jogscale-z.in0  0.000025
-setp mux8.jogscale-z.in1  0.000125
-setp mux8.jogscale-z.in2  0.000125
-setp mux8.jogscale-z.in3  0.000375
-setp mux8.jogscale-z.in4  0.000750
-setp mux8.jogscale-z.in5  0.000750
-setp mux8.jogscale-z.in6  0.000750
-setp mux8.jogscale-z.in7  0.000750
+setp mux8.jogscale-z.in0  0.000050
+setp mux8.jogscale-z.in1  0.000250
+setp mux8.jogscale-z.in2  0.00003125
+setp mux8.jogscale-z.in3  0.0001875
+setp mux8.jogscale-z.in4  0.000263672
+setp mux8.jogscale-z.in5  0.000263672
+setp mux8.jogscale-z.in6  0.000263672
+setp mux8.jogscale-z.in7  0.000263672
 
 # sel0/sel1/sel2 are driven by compound-slide HAL pins via postgui.hal (GUI controls mode)
 

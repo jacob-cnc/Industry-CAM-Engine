@@ -112,6 +112,7 @@ FIELD_TO_INI = {
     'max_error': 'MAX_ERROR',
     'ferror': 'FERROR',
     'min_ferror': 'MIN_FERROR',
+    'backlash': 'BACKLASH',
 }
 
 
@@ -149,14 +150,29 @@ class AxisTuningPanel(QGroupBox):
 
         row = 0
 
+        # --- Axis Jog Limits (AXIS_X / AXIS_Z — the active teleop cap) ---
+        row = self._add_section(layout, row, "Axis Jog Limits (teleop cap)", section_style)
+        axis_fields = [
+            ("Axis Max Vel:", "axis_max_vel", "2.0",
+             "Active jog speed cap during normal operation (AXIS_N MAX_VELOCITY). "
+             "This — not the joint limit — is what actually limits your jog speed."),
+            ("Axis Max Accel:", "axis_max_accel", "10.0",
+             "Active jog acceleration cap during normal operation (AXIS_N MAX_ACCELERATION)."),
+        ]
+        for label, key, default, tip in axis_fields:
+            row = self._add_field(layout, row, label, key, default, tip,
+                                  lbl_style, val_style)
+
         # --- Stepper ---
-        row = self._add_section(layout, row, "Stepper Drive", section_style)
+        row = self._add_section(layout, row, "Stepper Drive (joint limits)", section_style)
         stepper_fields = [
             ("Step Scale:", "step_scale", "8000", "Steps/inch"),
-            ("Max Velocity:", "max_vel", "2.0", "in/sec"),
-            ("Max Accel:", "max_accel", "10.0", "in/sec²"),
-            ("Stepgen Max Vel:", "sg_maxvel", "2.4", "~120% of max vel"),
-            ("Stepgen Max Accel:", "sg_maxaccel", "12.5", "~125% of max accel"),
+            ("Joint Max Vel:", "max_vel", "2.0",
+             "Joint velocity limit — applies during homing/joint mode. "
+             "Must be >= Axis Max Vel. Hardware ceiling = 100kHz / step_scale."),
+            ("Joint Max Accel:", "max_accel", "10.0", "in/sec²"),
+            ("Stepgen Max Vel:", "sg_maxvel", "2.4", "~120% of joint max vel"),
+            ("Stepgen Max Accel:", "sg_maxaccel", "12.5", "~125% of joint max accel"),
         ]
         for label, key, default, tip in stepper_fields:
             row = self._add_field(layout, row, label, key, default, tip,
@@ -198,11 +214,22 @@ class AxisTuningPanel(QGroupBox):
             ("FERROR:", "ferror", str(FERROR),
              "Max error at full speed — faults if exceeded"),
             ("MIN_FERROR:", "min_ferror", str(MIN_FERROR),
-             "Max error at low speed"),
+             "Max error at low speed / direction reversal — must exceed leadscrew backlash"),
         ]
         for label, key, default, tip in ferr_fields:
             row = self._add_field(layout, row, label, key, default, tip,
                                   lbl_style, val_style)
+
+        # --- Backlash ---
+        row = self._add_section(layout, row, "Backlash Compensation", section_style)
+        row = self._add_field(
+            layout, row,
+            "Backlash:", "backlash", "0.0",
+            "Leadscrew backlash (inches). Extra steps injected on direction reversal. "
+            "Measure with a dial indicator: drive one direction until settled, reverse "
+            "until settled — difference is backlash. Requires restart to apply.",
+            lbl_style, val_style,
+        )
 
     def _add_section(self, layout, row, text, style):
         lbl = QLabel(text)
@@ -503,11 +530,23 @@ class TuningTab(QWidget):
         # X axis = JOINT_0
         j0 = load_ini_section(self._ini_path, 'JOINT_0')
         x_data = {fk: j0[ik] for fk, ik in FIELD_TO_INI.items() if ik in j0}
+        # Axis-level jog caps (AXIS_X section)
+        ax = load_ini_section(self._ini_path, 'AXIS_X')
+        if 'MAX_VELOCITY' in ax:
+            x_data['axis_max_vel'] = ax['MAX_VELOCITY']
+        if 'MAX_ACCELERATION' in ax:
+            x_data['axis_max_accel'] = ax['MAX_ACCELERATION']
         self._x_panel.set_values(x_data)
 
         # Z axis = JOINT_1
         j1 = load_ini_section(self._ini_path, 'JOINT_1')
         z_data = {fk: j1[ik] for fk, ik in FIELD_TO_INI.items() if ik in j1}
+        # Axis-level jog caps (AXIS_Z section)
+        az = load_ini_section(self._ini_path, 'AXIS_Z')
+        if 'MAX_VELOCITY' in az:
+            z_data['axis_max_vel'] = az['MAX_VELOCITY']
+        if 'MAX_ACCELERATION' in az:
+            z_data['axis_max_accel'] = az['MAX_ACCELERATION']
         self._z_panel.set_values(z_data)
 
         # Update FERROR limits on graph
@@ -539,12 +578,22 @@ class TuningTab(QWidget):
         for fk, ik in FIELD_TO_INI.items():
             if fk in x_vals and x_vals[fk]:
                 save_ini_value(self._ini_path, 'JOINT_0', ik, x_vals[fk])
+        # Save X axis jog caps (AXIS_X)
+        if x_vals.get('axis_max_vel'):
+            save_ini_value(self._ini_path, 'AXIS_X', 'MAX_VELOCITY', x_vals['axis_max_vel'])
+        if x_vals.get('axis_max_accel'):
+            save_ini_value(self._ini_path, 'AXIS_X', 'MAX_ACCELERATION', x_vals['axis_max_accel'])
 
         # Save Z (JOINT_1)
         z_vals = self._z_panel.get_values()
         for fk, ik in FIELD_TO_INI.items():
             if fk in z_vals and z_vals[fk]:
                 save_ini_value(self._ini_path, 'JOINT_1', ik, z_vals[fk])
+        # Save Z axis jog caps (AXIS_Z)
+        if z_vals.get('axis_max_vel'):
+            save_ini_value(self._ini_path, 'AXIS_Z', 'MAX_VELOCITY', z_vals['axis_max_vel'])
+        if z_vals.get('axis_max_accel'):
+            save_ini_value(self._ini_path, 'AXIS_Z', 'MAX_ACCELERATION', z_vals['axis_max_accel'])
 
         QMessageBox.information(self, "Saved",
                                 "Parameters saved. Restart LinuxCNC to apply.")

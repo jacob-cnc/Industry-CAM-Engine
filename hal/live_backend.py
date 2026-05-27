@@ -156,13 +156,16 @@ class LiveBackend(HALBackend):
 
         # Check error channel — drain all queued messages per cycle
         error_msg = ""
-        while True:
-            err = self._error.poll()
-            if not err:
-                break
-            kind, text = err
-            error_msg = text
-            logger.error("LinuxCNC error [%s]: %s", kind, text)
+        try:
+            while True:
+                err = self._error.poll()
+                if not err:
+                    break
+                kind, text = err
+                error_msg = text
+                logger.error("LinuxCNC error [%s]: %s", kind, text)
+        except Exception as e:
+            logger.warning("Error channel poll failed: %s", e)
 
         # Log state transitions to help diagnose unexpected E-STOP
         current_raw_state = self._stat.task_state
