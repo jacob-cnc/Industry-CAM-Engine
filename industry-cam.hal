@@ -207,15 +207,14 @@ net estop-loop  iocontrol.0.user-enable-out  =>  iocontrol.0.emc-enable-in
 
 # ============================================================================
 # 10. Cycle Start/Resume and Stop (7i96s TB3 P10–P11)
-#    NOT connected. Floating gpio.009 via .in_not = always HIGH = halui.program.run
-#    continuously asserted — dangerous. Do NOT connect until buttons are wired.
-#    Uncomment when wired.
+#    NO momentary buttons: 24V+ → button → input pin. Pressed = .in HIGH.
+#    Use .in (not .in_not) — .in_not would assert continuously when unpressed.
 # ============================================================================
 
-# net cycle-go-raw     hm2_7i96s.0.gpio.009.in_not => debounce.0.8.in
-# net cycle-stop-raw   hm2_7i96s.0.gpio.010.in_not => debounce.0.9.in
-# net cycle-go-btn     debounce.0.8.out => halui.program.run halui.program.resume
-# net cycle-stop       debounce.0.9.out => halui.program.stop
+net cycle-go-raw     hm2_7i96s.0.gpio.009.in => debounce.0.8.in
+net cycle-stop-raw   hm2_7i96s.0.gpio.010.in => debounce.0.9.in
+net cycle-go-btn     debounce.0.8.out => halui.program.run halui.program.resume
+net cycle-stop       debounce.0.9.out => halui.program.stop
 
 # ============================================================================
 # 11. MPG Handwheels (7i85s TB2=X, TB3=Z)

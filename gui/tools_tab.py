@@ -302,7 +302,7 @@ class Tools_Tab(QWidget):
         reply = QMessageBox.question(
             self,
             "Delete Tool",
-            f"Delete tool T{tool_number}? Remaining tools will be renumbered.",
+            f"Delete tool T{tool_number}?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
@@ -322,10 +322,6 @@ class Tools_Tab(QWidget):
 
         if card_to_remove is None:
             return
-
-        # Renumber all remaining tools sequentially from T1
-        for i, card in enumerate(self._cards):
-            card.set_tool_number(i + 1)
 
         # Update selection
         if self._selected_index >= len(self._cards):
@@ -408,11 +404,11 @@ class Tools_Tab(QWidget):
 
         Appends a new blank tool card with the next available tool number.
         """
-        # Determine next tool number
-        if self._cards:
-            next_number = len(self._cards) + 1
-        else:
-            next_number = 1
+        # Determine next tool number — first unused integer starting from 1
+        existing = {card.get_data().tool_number for card in self._cards}
+        next_number = 1
+        while next_number in existing:
+            next_number += 1
 
         # Create blank ToolCardData with defaults
         new_tool = ToolCardData(
@@ -452,8 +448,8 @@ class Tools_Tab(QWidget):
             return
 
         tool_number = selected_tool.tool_number
-        # G10 L1 P<tool> X<diameter_value>
-        command = f"G10 L1 P{tool_number} X{value:.6f}"
+        # G10 L20 P<tool> X<diameter>: sets offset so current position reads <value>
+        command = f"G10 L20 P{tool_number} X{value:.6f}"
         self._send_mdi_command(command)
 
     def _on_set_z_clicked(self, value: float) -> None:
@@ -473,8 +469,8 @@ class Tools_Tab(QWidget):
             return
 
         tool_number = selected_tool.tool_number
-        # G10 L1 P<tool> Z<value>
-        command = f"G10 L1 P{tool_number} Z{value:.6f}"
+        # G10 L20 P<tool> Z<value>: sets offset so current position reads <value>
+        command = f"G10 L20 P{tool_number} Z{value:.6f}"
         self._send_mdi_command(command)
 
     # ------------------------------------------------------------------
