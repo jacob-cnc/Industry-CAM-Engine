@@ -53,8 +53,12 @@ class GCodeWriter:
         else:
             safe_x = pr.stock.diameter + 0.010
 
-        # Header
-        lines.append("; Industry CAM Engine — Generated Program")
+        # RS274 file delimiter — required for LinuxCNC cutter-comp look-ahead
+        lines.append("%")
+        lines.append("")
+
+        # Header (ASCII only — LinuxCNC's C parser does not handle UTF-8)
+        lines.append("; Industry CAM Engine - Generated Program")
         lines.append(f"; Profile: {len(pr.profile.segments)} segments, Mode: {pr.mode.value.upper()}")
         lines.append(f"; Stock: {pr.stock.diameter:.4f} dia, Z {pr.stock.z_start:.4f} to {pr.stock.z_end:.4f}")
         lines.append(f"; DOC: {pr.roughing_params.doc_dia:.4f} dia, Rough Feed: {pr.roughing_params.feed:.4f}")
@@ -87,10 +91,7 @@ class GCodeWriter:
         # Tool call (LinuxCNC standard: Tn M6, then G43)
         lines.append(self._line(f"T{pr.tool.tool_number} M6", f"Load tool T{pr.tool.tool_number} - {pr.tool.description}"))
         lines.append(self._line("G43", "Tool length comp on"))
-
-        # Cutter compensation
-        comp_code = self._get_comp_code(pr.tool.direction)
-        lines.append(self._line(comp_code, "Cutter radius compensation on"))
+        lines.append(self._line("G40", "Cutter comp off - requires tool radius in tool table to enable"))
         lines.append("")
 
         # === FACE PASSES ===
@@ -175,7 +176,7 @@ class GCodeWriter:
                 lines.append(self._line("G40", "Comp off for tool change"))
                 lines.append(self._line(f"T{pr.tool.tool_number} M6", "Load finish tool"))
                 lines.append(self._line("G43", "Tool length comp on"))
-                lines.append(self._line(comp_code, "Cutter comp on"))
+                lines.append(self._line("G40", "Cutter comp off"))
             lines.append("")
 
         # === FINISH PASS ===
@@ -202,8 +203,9 @@ class GCodeWriter:
         lines.append(self._rapid(park_x, park_z, "Return to park"))
         lines.append(self._line("M5", "Spindle stop"))
         lines.append(self._line("M2", "Program end"))
+        lines.append("%")   # RS274 closing delimiter
 
-        return "\n".join(lines)
+        return "\n".join(lines) + "\n"
 
     def _emit_move(self, move: ToolMove, comment: str) -> str:
         """Emit a single G-code line — always includes both X and Z.
@@ -354,9 +356,9 @@ class GCodeWriter:
         return max_x
 
     def _line(self, content: str, comment: str = "") -> str:
-        """Format a G-code line with N-number and comment."""
+        """Format a G-code line with N-number and semicolon comment."""
         line = f"N{self._n} {content}"
         if comment:
-            line += f"  ({comment})"
+            line += f"  ; {comment}"
         self._n += 10
         return line

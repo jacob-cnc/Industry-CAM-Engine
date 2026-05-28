@@ -81,6 +81,7 @@ class MachiningGraphWidget(pg.PlotWidget):
         self._setup_plot()
         self._setup_crosshair()
         self._tool_dot = None
+        self._next_seg_item = None
         self._rapid_items = []
         self._graph_data: Optional[GraphData] = None
         self._material_fill_items: list = []
@@ -186,6 +187,7 @@ class MachiningGraphWidget(pg.PlotWidget):
         self.clear()
         self._setup_crosshair()
         self._tool_dot = None
+        self._next_seg_item = None
         self._material_fill_items = []
         self._graph_data = data
 
@@ -235,12 +237,35 @@ class MachiningGraphWidget(pg.PlotWidget):
         """Update animated tool dot position during playback."""
         if self._tool_dot is None:
             self._tool_dot = pg.ScatterPlotItem(
-                size=10, brush=pg.mkBrush(COLORS['graph_tool_dot']),
-                pen=pg.mkPen(None),
+                size=16,
+                brush=pg.mkBrush(COLORS['graph_tool_dot']),
+                pen=pg.mkPen('#00000099', width=2),
             )
+            self._tool_dot.setZValue(20)
             self.addItem(self._tool_dot)
 
         self._tool_dot.setData([z], [x_radius])
+
+    def highlight_next_segment(self, move_index: int):
+        """Show the upcoming segment as a dotted preview line (next move to be executed).
+
+        Call with move_index=-1 or out-of-range to clear the highlight.
+        """
+        if self._next_seg_item is None:
+            self._next_seg_item = self.plot(
+                [], [],
+                pen=pg.mkPen('#FFFFFF55', width=2, style=QtCore.Qt.DotLine),
+            )
+            self._next_seg_item.setZValue(15)
+
+        if (not self._graph_data or
+                move_index < 0 or
+                move_index >= len(self._graph_data.toolpath_segments)):
+            self._next_seg_item.setData([], [])
+            return
+
+        seg = self._graph_data.toolpath_segments[move_index]
+        self._next_seg_item.setData(seg.z_coords, seg.x_coords)
 
     def set_rapids_visible(self, visible: bool):
         """Show or hide all rapid move lines."""

@@ -79,29 +79,36 @@ class StatusBar(QWidget):
             self._show_offline()
 
     def _setup_ui(self):
-        """Build the status bar layout."""
-        self.setFixedHeight(48)
+        """Build the status bar layout.
+
+        Height is fixed at 54px (25% smaller than previous 72px). DRO font
+        fills the available space; all secondary elements are compact.
+        """
+        self.setFixedHeight(54)
         self.setStyleSheet(
             f"background-color: {COLORS['bg_status_bar']};"
         )
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 4, 12, 4)
-        layout.setSpacing(12)
+        layout.setContentsMargins(8, 0, 8, 0)   # zero vertical \u2014 DRO fills height
+        layout.setSpacing(8)
 
-        # Fonts
-        mono_font = QFont(FONTS["mono_family"], FONTS["dro_size"])
+        # Fonts \u2014 DRO as large as fits in 54px; secondary ~25% smaller than before
+        dro_font = QFont(FONTS["mono_family"], 34)   # fills the 54px ribbon
+        dro_font.setStyleHint(QFont.Monospace)
+        mono_font = QFont(FONTS["mono_family"], 16)  # was 24pt
         mono_font.setStyleHint(QFont.Monospace)
-        mono_font_small = QFont(FONTS["mono_family"], FONTS["code_size"])
+        mono_font_small = QFont(FONTS["mono_family"], 8)  # was 11pt
         mono_font_small.setStyleHint(QFont.Monospace)
-        label_font = QFont(FONTS["ui_family"], FONTS["small_size"])
+        label_font = QFont(FONTS["ui_family"], 7)   # was 9pt
+        dro_label_font = QFont(FONTS["ui_family"], 8, QFont.Bold)  # was 11pt
 
         # --- Machine State Indicator ---
-        self._state_dot = QLabel("\u25CF")  # Filled circle
-        self._state_dot.setFixedWidth(20)
+        self._state_dot = QLabel("\u25CF")
+        self._state_dot.setFixedWidth(14)
         self._state_dot.setAlignment(Qt.AlignCenter)
         self._state_dot.setStyleSheet(
-            f"color: {_STATE_COLORS['IDLE']}; font-size: 16px; border: none;"
+            f"color: {_STATE_COLORS['IDLE']}; font-size: 12px; border: none;"
         )
         layout.addWidget(self._state_dot)
 
@@ -110,36 +117,56 @@ class StatusBar(QWidget):
         self._state_label.setStyleSheet(
             f"color: {COLORS['text_primary']}; font-weight: bold; border: none;"
         )
-        self._state_label.setFixedWidth(50)
+        self._state_label.setFixedWidth(36)
         layout.addWidget(self._state_label)
 
-        # --- DRO: X (diameter) ---
+        # --- DRO: X and Z in a prominent bordered box ---
+        dro_box = QFrame()
+        dro_box.setStyleSheet(
+            f"QFrame {{"
+            f"  background-color: {COLORS['bg_panel']};"
+            f"  border: 1px solid {COLORS['border_normal']};"
+            f"  border-radius: 5px;"
+            f"}}"
+        )
+        dro_inner = QHBoxLayout(dro_box)
+        dro_inner.setContentsMargins(8, 0, 8, 0)   # zero vertical \u2014 font drives height
+        dro_inner.setSpacing(4)
+
+        _dro_axis_ss = (
+            f"font-family: '{FONTS['ui_family']}'; font-size: 8pt; font-weight: bold;"
+            f" color: {COLORS['status_info']}; border: none; background: transparent;"
+        )
+        _dro_val_ss = (
+            f"font-family: '{FONTS['mono_family']}'; font-size: 34pt;"
+            f" color: {COLORS['text_primary']}; border: none; background: transparent;"
+        )
+
         x_label = QLabel("X")
-        x_label.setFont(label_font)
-        x_label.setStyleSheet(f"color: {COLORS['text_secondary']}; border: none;")
-        layout.addWidget(x_label)
+        x_label.setStyleSheet(_dro_axis_ss)
+        dro_inner.addWidget(x_label)
 
         self._x_dro = QLabel("0.0000")
-        self._x_dro.setFont(mono_font)
-        self._x_dro.setStyleSheet(
-            f"color: {COLORS['text_primary']}; border: none;"
-        )
-        self._x_dro.setMinimumWidth(120)
-        layout.addWidget(self._x_dro)
+        self._x_dro.setStyleSheet(_dro_val_ss)
+        self._x_dro.setMinimumWidth(200)
+        dro_inner.addWidget(self._x_dro)
 
-        # --- DRO: Z (inches) ---
+        dro_sep = QFrame()
+        dro_sep.setFrameShape(QFrame.VLine)
+        dro_sep.setStyleSheet(f"color: {COLORS['border_normal']}; background: transparent;")
+        dro_sep.setFixedWidth(2)
+        dro_inner.addWidget(dro_sep)
+
         z_label = QLabel("Z")
-        z_label.setFont(label_font)
-        z_label.setStyleSheet(f"color: {COLORS['text_secondary']}; border: none;")
-        layout.addWidget(z_label)
+        z_label.setStyleSheet(_dro_axis_ss)
+        dro_inner.addWidget(z_label)
 
         self._z_dro = QLabel("0.0000")
-        self._z_dro.setFont(mono_font)
-        self._z_dro.setStyleSheet(
-            f"color: {COLORS['text_primary']}; border: none;"
-        )
-        self._z_dro.setMinimumWidth(120)
-        layout.addWidget(self._z_dro)
+        self._z_dro.setStyleSheet(_dro_val_ss)
+        self._z_dro.setMinimumWidth(200)
+        dro_inner.addWidget(self._z_dro)
+
+        layout.addWidget(dro_box)
 
         # --- Active G-codes ---
         gcode_label = QLabel("G")
@@ -154,7 +181,7 @@ class StatusBar(QWidget):
         )
         layout.addWidget(self._gcode_display)
 
-        # --- Spindle RPM (live from encoder) ---
+        # --- Spindle RPM ---
         rpm_label = QLabel("RPM")
         rpm_label.setFont(label_font)
         rpm_label.setStyleSheet(f"color: {COLORS['text_secondary']}; border: none;")
@@ -165,12 +192,12 @@ class StatusBar(QWidget):
         self._rpm_display.setStyleSheet(
             f"color: {COLORS['text_primary']}; border: none;"
         )
-        self._rpm_display.setMinimumWidth(60)
+        self._rpm_display.setMinimumWidth(44)
         layout.addWidget(self._rpm_display)
 
         self._spindle_dir_indicator = QLabel("")
         self._spindle_dir_indicator.setFont(label_font)
-        self._spindle_dir_indicator.setFixedWidth(30)
+        self._spindle_dir_indicator.setFixedWidth(20)
         self._spindle_dir_indicator.setAlignment(Qt.AlignCenter)
         self._spindle_dir_indicator.setStyleSheet(
             f"color: {COLORS['text_disabled']}; border: none;"
@@ -188,7 +215,7 @@ class StatusBar(QWidget):
         self._feed_display.setStyleSheet(
             f"color: {COLORS['text_primary']}; border: none;"
         )
-        self._feed_display.setMinimumWidth(60)
+        self._feed_display.setMinimumWidth(44)
         layout.addWidget(self._feed_display)
 
         # --- Tool Number ---
@@ -202,7 +229,7 @@ class StatusBar(QWidget):
         self._tool_display.setStyleSheet(
             f"color: {COLORS['text_primary']}; border: none;"
         )
-        self._tool_display.setMinimumWidth(30)
+        self._tool_display.setMinimumWidth(22)
         layout.addWidget(self._tool_display)
 
         # --- Error message ---
@@ -213,25 +240,19 @@ class StatusBar(QWidget):
             f"background-color: {COLORS['status_error']};"
             f"border: 1px solid {COLORS['border_error']};"
             f"border-radius: 3px;"
-            f"padding: 2px 8px;"
+            f"padding: 1px 6px;"
         )
         self._error_label.setVisible(False)
         layout.addWidget(self._error_label)
 
-        # --- Spacer + Machine Control Buttons + E-Stop Button + Offline Badge ---
+        # --- Spacer + Machine Control Buttons + E-Stop ---
         layout.addStretch()
-
-        # Machine control buttons (Reset, ON, OFF)
-        ctrl_btn_style = (
-            "QPushButton {{ font-size: 9pt; font-weight: bold; border-radius: 4px;"
-            " padding: 4px 10px; min-height: 28px; min-width: 44px; }}"
-        )
 
         self._btn_reset = QPushButton("Reset")
         self._btn_reset.setStyleSheet(
             f"QPushButton {{ background: {COLORS['status_warning']}; color: {COLORS['bg_base']}; "
-            f"font-size: 9pt; font-weight: bold; border-radius: 4px; padding: 4px 10px;"
-            f" min-height: 28px; }}"
+            f"font-size: 7pt; font-weight: bold; border-radius: 3px; padding: 2px 8px;"
+            f" min-height: 20px; }}"
             f"QPushButton:hover {{ background: #e6a817; }}"
         )
         self._btn_reset.setToolTip("Reset E-Stop")
@@ -240,8 +261,8 @@ class StatusBar(QWidget):
         self._btn_on = QPushButton("ON")
         self._btn_on.setStyleSheet(
             f"QPushButton {{ background: {COLORS['status_ok']}; color: {COLORS['bg_base']}; "
-            f"font-size: 9pt; font-weight: bold; border-radius: 4px; padding: 4px 10px;"
-            f" min-height: 28px; }}"
+            f"font-size: 7pt; font-weight: bold; border-radius: 3px; padding: 2px 8px;"
+            f" min-height: 20px; }}"
             f"QPushButton:hover {{ background: #6FB8A8; }}"
         )
         self._btn_on.setToolTip("Machine On")
@@ -250,8 +271,8 @@ class StatusBar(QWidget):
         self._btn_off = QPushButton("OFF")
         self._btn_off.setStyleSheet(
             f"QPushButton {{ background: {COLORS['bg_surface']}; color: {COLORS['text_primary']}; "
-            f"font-size: 9pt; font-weight: bold; border-radius: 4px; padding: 4px 10px;"
-            f" min-height: 28px; border: 1px solid {COLORS['border_normal']}; }}"
+            f"font-size: 7pt; font-weight: bold; border-radius: 3px; padding: 2px 8px;"
+            f" min-height: 20px; border: 1px solid {COLORS['border_normal']}; }}"
             f"QPushButton:hover {{ background: {COLORS['border_normal']}; }}"
         )
         self._btn_off.setToolTip("Machine Off")
@@ -263,9 +284,9 @@ class StatusBar(QWidget):
         self._btn_off.clicked.connect(self.machine_off_clicked.emit)
 
         self._estop_btn = QPushButton("E-STOP")
-        self._estop_btn.setFixedHeight(36)
-        self._estop_btn.setMinimumWidth(90)
-        self._estop_btn.setFont(QFont(FONTS["ui_family"], 11, QFont.Bold))
+        self._estop_btn.setFixedHeight(28)
+        self._estop_btn.setMinimumWidth(72)
+        self._estop_btn.setFont(QFont(FONTS["ui_family"], 9, QFont.Bold))
         self._estop_btn.setCursor(Qt.PointingHandCursor)
         self._estop_btn.setToolTip("Software E-Stop — immediately halt all motion")
         self._estop_btn.setStyleSheet(

@@ -390,6 +390,7 @@ class RunTab(QWidget):
         self._btn_open.setEnabled(True)
         self._btn_preview.setEnabled(has_file)
         self._btn_pause.setText("Pause")
+        self._sim_viewer._graph.highlight_next_segment(-1)
 
     # =================================================================
     # Polling — Live Updates During Execution
@@ -435,8 +436,8 @@ class RunTab(QWidget):
         elif state.interp_state == InterpState.READING:
             self._btn_pause.setText("Pause")
 
-        # Live tool position from machine state during execution
+        # Live tool position and toolpath reveal from machine state during execution
         if state.interp_state in (InterpState.READING, InterpState.PAUSED):
             x_r = state.x.position / 2.0  # diameter → radius
             z = state.z.position
-            self._sim_viewer._graph.set_tool_position(x_r, z)
+            self._sim_viewer.update_live_position(motion_line, x_r, z)

@@ -230,6 +230,8 @@ class SimViewerWidget(QWidget):
 
         # SimMove-to-tool_moves index mapping (built in load())
         self._sim_to_toolmoves: dict = {}
+        # G-code line_idx (0-based) → sim_move index (built in load())
+        self._line_to_sim_idx: dict = {}
 
         self._setup_ui()
 
@@ -247,6 +249,9 @@ class SimViewerWidget(QWidget):
             sim_moves, graph_data
         )
 
+        # Build G-code line_idx → sim_move index for live execution tracking
+        self._line_to_sim_idx = {sm.line_idx: i for i, sm in enumerate(sim_moves)}
+
         # Load graph
         self._graph.set_graph_data(graph_data)
 
@@ -263,6 +268,30 @@ class SimViewerWidget(QWidget):
         self._slider.setMaximum(self._path_len - 1 if self._path_len > 0 else 0)
         self._frame_label.setText(f"0 / {self._path_len}")
         self._info_label.setText("Ready")
+
+    def update_live_position(self, motion_line_1based: int, x_r: float, z: float):
+        """Update tool dot and toolpath reveal for live machine execution.
+
+        Called from the Run tab poll loop. Maps the LinuxCNC motion_line
+        (1-based G-code line number) to a toolpath segment index, reveals
+        all segments up to that point, and previews the next segment.
+        """
+        self._graph.set_tool_position(x_r, z)
+
+        if motion_line_1based <= 0 or not self._line_to_sim_idx:
+            return
+
+        line_0 = motion_line_1based - 1
+        sim_idx = self._line_to_sim_idx.get(line_0)
+        if sim_idx is None:
+            return
+
+        toolmoves_idx = self._sim_to_toolmoves.get(sim_idx)
+        if toolmoves_idx is None:
+            return
+
+        self._graph.reveal_toolpath_up_to(toolmoves_idx)
+        self._graph.highlight_next_segment(toolmoves_idx + 1)
 
     def _build_sim_to_toolmoves_mapping(
         self, sim_moves: List[SimMove], graph_data: GraphData
