@@ -104,41 +104,49 @@ class CleanupPlanner:
             return []
 
         # The offset edges from the kernel are the turning portion of the offset wire
-        # (clipped at Z0+fin, Z_end). They start at the first turning edge after the clip.
-        # We need to build the full move sequence:
-        #   1. Feed along face at Z0+fin from X_start+fin to the offset profile X
-        #   2. Feed straight down from Z0+fin to the first offset edge start Z (if gap exists)
-        #   3. Then the offset edges (arc + straight segments)
+        # (clipped at Z0+fin or Z=0, Z_end). They start at the first turning edge.
+        # Build the approach sequence to reach the first edge's start point.
 
-        # Determine the offset profile X (the X value of the turning edges)
-        # All turning edges should be at the same X for this profile type
         first_edge_start = offset_edges[0][0]
         offset_x_dia = first_edge_start[0]
         offset_start_z = first_edge_start[1]
 
         moves = []
 
-        # Move 1: Feed along face at Z0+fin from X_start+fin to offset X
-        if offset_x_dia - x_start_fin_dia > TOLERANCE:
-            moves.append(ToolMove(
-                move_type=MoveType.FEED,
-                x=offset_x_dia,
-                z=z0_fin,
-                feed=params.feed,
-                pass_type=PassType.CLEANUP,
-                pass_index=0,
-            ))
-
-        # Move 2: If the first offset edge doesn't start at Z0+fin, feed down to it
-        if abs(offset_start_z - z0_fin) > TOLERANCE:
-            moves.append(ToolMove(
-                move_type=MoveType.FEED,
-                x=offset_x_dia,
-                z=offset_start_z,
-                feed=params.feed,
-                pass_type=PassType.CLEANUP,
-                pass_index=0,
-            ))
+        # Approach: feed from (X_start+fin, z0_fin) to the first offset edge start.
+        # This may be a face-level feed (if first edge starts at Z≈0) or a
+        # two-step approach (feed along face, then down to edge start Z).
+        if abs(offset_start_z - z0_fin) < TOLERANCE:
+            # First edge starts at face level — single feed along face to it
+            if offset_x_dia - x_start_fin_dia > TOLERANCE:
+                moves.append(ToolMove(
+                    move_type=MoveType.FEED,
+                    x=offset_x_dia,
+                    z=z0_fin,
+                    feed=params.feed,
+                    pass_type=PassType.CLEANUP,
+                    pass_index=0,
+                ))
+        else:
+            # First edge starts below face level — feed along face to X, then down
+            if offset_x_dia - x_start_fin_dia > TOLERANCE:
+                moves.append(ToolMove(
+                    move_type=MoveType.FEED,
+                    x=offset_x_dia,
+                    z=z0_fin,
+                    feed=params.feed,
+                    pass_type=PassType.CLEANUP,
+                    pass_index=0,
+                ))
+            if abs(offset_start_z - z0_fin) > TOLERANCE:
+                moves.append(ToolMove(
+                    move_type=MoveType.FEED,
+                    x=offset_x_dia,
+                    z=offset_start_z,
+                    feed=params.feed,
+                    pass_type=PassType.CLEANUP,
+                    pass_index=0,
+                ))
 
         # Moves 3+: The offset wire edges
         wire_moves = self._build_moves_from_offset(offset_edges, params)
@@ -305,6 +313,15 @@ class CleanupPlanner:
             from OCP.BRepAlgoAPI import BRepAlgoAPI_Common
 
             z_top = z0_fin  # Use the same Z start as the cleanup pass itself
+            # If the profile has corner breaks near Z=0 (chamfer at face/turning
+            # junction), extend the clip to include that geometry.
+            # Check if any early corner break produces geometry at Z=0.
+            if profile is not None and profile.corner_breaks:
+                for cb in profile.corner_breaks:
+                    if cb is not None and cb.break_type.value != "none":
+                        # There's a corner break — extend clip to Z=0
+                        z_top = 0.0
+                        break
             # Z_end for clip: for ID mode, leave fin_allowance at the bottom for finish pass
             if mode == MachiningMode.ID:
                 z_bot = segments[-1].z + fin_allowance_radius
