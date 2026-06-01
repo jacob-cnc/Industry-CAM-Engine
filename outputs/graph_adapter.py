@@ -261,6 +261,9 @@ def _build_toolpath_segments(moves: List[ToolMove], data: GraphData) -> None:
                 radius = math.sqrt(
                     (prev_x_r - center_x_r)**2 + (prev_z - center_z)**2)
                 if radius > 0.0001:
+                    # Pure G-code interpretation: G02 = CW in G18 = negative
+                    # angular sweep in display coords. G03 = positive sweep.
+                    is_cw = (move.move_type == MoveType.ARC_CW)
                     points = adaptive_densify_arc(
                         start=(prev_x_r, prev_z),
                         end=(x_r, z),
@@ -268,6 +271,7 @@ def _build_toolpath_segments(moves: List[ToolMove], data: GraphData) -> None:
                         radius=radius,
                         cos_limit=DISPLAY_COS_LIMIT,
                         max_depth=MAX_DISPLAY_DEPTH,
+                        is_cw=is_cw,
                     )
                     x_coords = [p[0] for p in points]
                     z_coords = [p[1] for p in points]

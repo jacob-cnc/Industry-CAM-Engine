@@ -107,16 +107,11 @@ def validate_all_moves(
                     sub_segments = [LineString([(start_x_r, start_z), (end_x_r, end_z)])]
 
                 # Check each sub-segment vs finished_part
-                # Finish pass arcs trace the profile boundary by definition.
-                # The polygon boundary and the validator's arc are both densified
-                # independently from the same true arc — their inscribed chords
-                # sample at different parameter values, causing sub-segments to
-                # briefly dip across the polygon boundary (false positive).
-                # Use a small inward buffer for finish pass arc moves to allow
-                # this boundary-tracing tolerance (same pattern as cleanup vs
-                # finish_allowance below).
-                if (move.pass_type == PassType.FINISH and
-                        move.move_type in (MoveType.ARC_CW, MoveType.ARC_CCW)):
+                # Finish pass traces the profile boundary directly.
+                # Cleanup pass traces the offset boundary (fin_allowance outside
+                # the finished part). Both are derived from OCCT geometry.
+                # A small buffer handles densification sampling differences.
+                if move.pass_type in (PassType.FINISH, PassType.CLEANUP):
                     fp_check = finished_part.buffer(-0.001)
                     if fp_check.is_empty:
                         fp_check = finished_part

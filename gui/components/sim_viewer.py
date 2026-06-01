@@ -251,6 +251,8 @@ class SimViewerWidget(QWidget):
 
         # Build G-code line_idx → sim_move index for live execution tracking
         self._line_to_sim_idx = {sm.line_idx: i for i, sm in enumerate(sim_moves)}
+        # Sorted list of motion line indices for nearest-preceding lookup
+        self._sorted_motion_lines = sorted(self._line_to_sim_idx.keys())
 
         # Load graph
         self._graph.set_graph_data(graph_data)
@@ -275,7 +277,13 @@ class SimViewerWidget(QWidget):
         Called from the Run tab poll loop. Maps the LinuxCNC motion_line
         (1-based G-code line number) to a toolpath segment index, reveals
         all segments up to that point, and previews the next segment.
+
+        Uses nearest-preceding lookup when the exact motion_line doesn't
+        correspond to a parsed SimMove (e.g., LinuxCNC reports a non-motion
+        line, or the line number is between two motion lines).
         """
+        import bisect
+
         self._graph.set_tool_position(x_r, z)
 
         if motion_line_1based <= 0 or not self._line_to_sim_idx:
@@ -283,12 +291,25 @@ class SimViewerWidget(QWidget):
 
         line_0 = motion_line_1based - 1
         sim_idx = self._line_to_sim_idx.get(line_0)
+
+        # If no exact match, find the nearest preceding motion line via bisect
+        if sim_idx is None and self._sorted_motion_lines:
+            pos = bisect.bisect_right(self._sorted_motion_lines, line_0) - 1
+            if pos >= 0:
+                nearest_line = self._sorted_motion_lines[pos]
+                sim_idx = self._line_to_sim_idx.get(nearest_line)
+
         if sim_idx is None:
             return
 
         toolmoves_idx = self._sim_to_toolmoves.get(sim_idx)
         if toolmoves_idx is None:
-            return
+            # Find the highest mapped index at or below sim_idx
+            mapped = [tm for sm, tm in self._sim_to_toolmoves.items() if sm <= sim_idx]
+            if mapped:
+                toolmoves_idx = max(mapped)
+            else:
+                return
 
         self._graph.reveal_toolpath_up_to(toolmoves_idx)
         self._graph.highlight_next_segment(toolmoves_idx + 1)
@@ -464,6 +485,12 @@ class SimViewerWidget(QWidget):
         bar_layout.addWidget(self._btn_toggle_rapids)
         self._rapids_visible = True
 
+        self._btn_toggle_profile = QPushButton("Show Profile")
+        self._btn_toggle_profile.setStyleSheet(btn_style)
+        self._btn_toggle_profile.clicked.connect(self._toggle_profile)
+        bar_layout.addWidget(self._btn_toggle_profile)
+        self._profile_visible = False
+
         speed_label = QLabel("Speed:")
         speed_label.setStyleSheet(f"color: {COLORS['text_secondary']};")
         bar_layout.addWidget(speed_label)
@@ -528,6 +555,30 @@ class SimViewerWidget(QWidget):
             self._btn_toggle_rapids.setText("Hide Rapids")
             self._rapids_visible = True
 
+    def _toggle_profile(self):
+        """Toggle profile contour overlay on/off."""
+        if self._profile_visible:
+            self._graph.set_profile_visible(False)
+            self._btn_toggle_profile.setText("Show Profile")
+            self._profile_visible = False
+        else:
+            self._graph.set_profile_visible(True)
+            self._btn_toggle_profile.setText("Hide Profile")
+            self._profile_visible = True
+
+    def set_profile_overlay(self, segments: list):
+        """Set profile contour data for overlay display.
+
+        Args:
+            segments: List of (z_coords, x_coords) tuples from profile preview.
+        """
+        self._profile_segments = segments
+        self._graph.set_profile_overlay(segments)
+        # Start hidden — user toggles on if desired
+        self._graph.set_profile_visible(False)
+        self._profile_visible = False
+        self._btn_toggle_profile.setText("Show Profile")
+
     # --- Path interpolation (identical to proven _visual_test_arc.py) ---
 
     def _build_interpolated_path(self, sim_moves: List[SimMove]) -> List[tuple]:
@@ -557,10 +608,20 @@ class SimViewerWidget(QWidget):
                     angle_start = math.atan2(sz - cz, sx_r - cx_r)
                     angle_end = math.atan2(ez - cz, ex_r - cx_r)
                     diff = angle_end - angle_start
-                    if diff > math.pi:
-                        diff -= 2 * math.pi
-                    elif diff < -math.pi:
-                        diff += 2 * math.pi
+
+                    # Pure G-code interpretation: G02/G03 determines sweep direction.
+                    # In G18 (ZX plane), G02 = CW viewed from +Y = negative angular
+                    # sweep in our display coords (X-radius right, Z up).
+                    # G03 = CCW = positive angular sweep.
+                    if mv.move_type == "arc_cw":
+                        # G02: negative sweep (CW in display)
+                        if diff > 0:
+                            diff -= 2 * math.pi
+                    else:
+                        # G03: positive sweep (CCW in display)
+                        if diff < 0:
+                            diff += 2 * math.pi
+
                     arc_length = abs(diff) * radius
                     n_pts = max(MIN_POINTS, int(arc_length * density))
                     for j in range(n_pts):

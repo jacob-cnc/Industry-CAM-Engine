@@ -64,7 +64,7 @@ def build_zones(
 
     # Step 1: Build closed profile contour
     profile_coords = _profile_to_radius_coords(profile)
-    closure_coords = _compute_closure_coords(profile, stock)
+    closure_coords = _compute_closure_coords(profile, stock, profile_coords)
     all_coords = profile_coords + closure_coords
 
     # Build the finished part face from closed contour
@@ -165,35 +165,179 @@ def build_zones(
 def _profile_to_radius_coords(profile: ClosedProfile) -> List[dict]:
     """Convert profile segments to radius coordinates for Build123d.
 
+    Applies corner breaks (chamfers/fillets) at segment junctions by inserting
+    additional geometry between profile segments. This ensures the finished part
+    face has the correct shape including all corner breaks.
+
     Returns list of segment descriptors with coordinates in radius.
     """
+    import math
+
+    segments = profile.segments
+    corner_breaks = profile.corner_breaks
+
+    if not segments:
+        return []
+
+    # Pre-compute segment endpoints in radius for direction calculations
+    seg_endpoints = []
+    for seg in segments:
+        seg_endpoints.append((seg.x / 2.0, seg.z))
+
     coords = []
-    for seg in profile.segments:
+
+    for i, seg in enumerate(segments):
+        x_r = seg.x / 2.0
+        z = seg.z
+
+        # Check if there's a corner break AFTER this segment (at junction i → i+1)
+        cb = None
+        if corner_breaks and i < len(corner_breaks):
+            cb = corner_breaks[i]
+
+        if cb is not None and cb.break_type.value != "none" and i < len(segments) - 1:
+            # There's a corner break at the junction between segment[i] and segment[i+1]
+            # Compute arrival direction (toward this segment's endpoint)
+            if i == 0:
+                prev_x_r, prev_z = 0.0, 0.0  # implicit origin
+            else:
+                prev_x_r, prev_z = seg_endpoints[i - 1]
+
+            arr_dx = x_r - prev_x_r
+            arr_dz = z - prev_z
+            arr_len = math.sqrt(arr_dx * arr_dx + arr_dz * arr_dz)
+
+            # Departure direction (from junction toward next segment's endpoint)
+            next_x_r, next_z = seg_endpoints[i + 1]
+            dep_dx = next_x_r - x_r
+            dep_dz = next_z - z
+            dep_len = math.sqrt(dep_dx * dep_dx + dep_dz * dep_dz)
+
+            if arr_len > 1e-9 and dep_len > 1e-9:
+                arr_ux = arr_dx / arr_len
+                arr_uz = arr_dz / arr_len
+                dep_ux = dep_dx / dep_len
+                dep_uz = dep_dz / dep_len
+
+                from models.profile import CornerBreakType
+
+                if cb.break_type == CornerBreakType.CHAMFER:
+                    size = cb.size if cb.size > 0 else 0.015
+                    trim_back = min(size, arr_len * 0.4)
+                    trim_fwd = min(size, dep_len * 0.4)
+
+                    # Trim point on arriving segment (back from junction)
+                    p1_x = x_r - arr_ux * trim_back
+                    p1_z = z - arr_uz * trim_back
+                    # Trim point on departing segment (forward from junction)
+                    p2_x = x_r + dep_ux * trim_fwd
+                    p2_z = z + dep_uz * trim_fwd
+
+                    # Emit trimmed endpoint for this segment
+                    coords.append({
+                        "type": seg.segment_type,
+                        "x_radius": p1_x,
+                        "z": p1_z,
+                        "radius": seg.radius,
+                    })
+                    # Emit chamfer endpoint (line from p1 to p2)
+                    coords.append({
+                        "type": SegmentType.LINE,
+                        "x_radius": p2_x,
+                        "z": p2_z,
+                        "radius": 0.0,
+                    })
+                    continue  # Skip the normal append
+
+                elif cb.break_type == CornerBreakType.FILLET:
+                    fillet_r = cb.radius if cb.radius > 0 else 0.015
+
+                    # Half-angle between reversed arrival and departure
+                    dot = (-arr_ux) * dep_ux + (-arr_uz) * dep_uz
+                    dot = max(-1.0, min(1.0, dot))
+                    half_angle = math.acos(dot) / 2.0
+
+                    if half_angle > 1e-6:
+                        tan_dist = fillet_r / math.tan(half_angle)
+                        tan_dist_arr = min(tan_dist, arr_len * 0.4)
+                        tan_dist_dep = min(tan_dist, dep_len * 0.4)
+
+                        # Tangent points
+                        t1_x = x_r - arr_ux * tan_dist_arr
+                        t1_z = z - arr_uz * tan_dist_arr
+                        t2_x = x_r + dep_ux * tan_dist_dep
+                        t2_z = z + dep_uz * tan_dist_dep
+
+                        # Auto-detect corner type from cross product of
+                        # arrival × departure directions.
+                        # This determines which side the arc center is on,
+                        # expressed as a signed radius (same convention as
+                        # user-defined arc segments: +R = one side, -R = other).
+                        cross = arr_ux * dep_uz - arr_uz * dep_ux
+
+                        # Cross product sign → signed radius:
+                        # Positive cross (left turn / inside corner for OD):
+                        #   Center is on the left side → +R in our convention
+                        # Negative cross (right turn / outside corner for OD):
+                        #   Center is on the right side → -R in our convention
+                        if cross > 0:
+                            signed_fillet_r = fillet_r
+                        else:
+                            signed_fillet_r = -fillet_r
+
+                        # Emit trimmed endpoint for this segment
+                        coords.append({
+                            "type": seg.segment_type,
+                            "x_radius": t1_x,
+                            "z": t1_z,
+                            "radius": seg.radius,
+                        })
+                        # Emit fillet arc with signed radius (same as segment arcs)
+                        coords.append({
+                            "type": SegmentType.ARC,
+                            "x_radius": t2_x,
+                            "z": t2_z,
+                            "radius": signed_fillet_r,
+                        })
+                        continue  # Skip the normal append
+
+        # Normal case: no corner break, emit segment as-is
         coords.append({
             "type": seg.segment_type,
-            "x_radius": seg.x / 2.0,
-            "z": seg.z,
-            "radius": seg.radius,  # Already in radius (geometric radius)
+            "x_radius": x_r,
+            "z": z,
+            "radius": seg.radius,
         })
+
     return coords
 
 
-def _compute_closure_coords(profile: ClosedProfile, stock: StockDef) -> List[dict]:
+def _compute_closure_coords(profile: ClosedProfile, stock: StockDef,
+                            profile_coords: List[dict] = None) -> List[dict]:
     """Compute the 3 (or fewer) closure line segments.
 
     OD Mode: profile_end → (centerline, Z_end) → (centerline, Z=0) → profile_start
     ID Mode: profile_end → (stock_OD_radius, Z_end) → (stock_OD_radius, Z=0) → profile_start
+
+    Uses actual profile_coords endpoints (which may be trimmed by corner breaks)
+    to ensure the closure connects correctly.
 
     Returns segment descriptors in radius coordinates.
     """
     mode = profile.mode
     segments = profile.segments
 
-    # Profile start and end in radius
-    profile_start_x_r = segments[0].x / 2.0
-    profile_start_z = segments[0].z  # Should be 0.0 (or close to it)
-    profile_end_x_r = segments[-1].x / 2.0
-    profile_end_z = segments[-1].z  # Should be z_end
+    # Use actual profile coords endpoints if available (corner-break-aware)
+    if profile_coords and len(profile_coords) > 0:
+        profile_start_x_r = profile_coords[0]["x_radius"]
+        profile_start_z = profile_coords[0]["z"]
+        profile_end_x_r = profile_coords[-1]["x_radius"]
+        profile_end_z = profile_coords[-1]["z"]
+    else:
+        profile_start_x_r = segments[0].x / 2.0
+        profile_start_z = segments[0].z
+        profile_end_x_r = segments[-1].x / 2.0
+        profile_end_z = segments[-1].z
 
     closure = []
 
@@ -239,15 +383,17 @@ def _build_face_from_coords(coords: List[dict], profile: ClosedProfile) -> objec
     Uses BuildSketch + BuildLine + make_face pattern.
     The coords list contains segment endpoints. We draw lines/arcs between
     consecutive endpoints to form a closed wire.
+
+    Arc segments use RadiusArc with signed radius:
+      +R → Build123d -R → minor arc (center on one side)
+      -R → Build123d +R → major arc (center on other side)
+    This is the same convention used for user-defined arc segments.
     """
     with BuildSketch() as sketch:
         with BuildLine():
             if not coords:
                 raise ValueError("Empty coordinate list for face construction")
 
-            # The first coord is the first segment endpoint.
-            # For a closed profile, the last coord should connect back to the first.
-            # We draw from coord[i] to coord[i+1] for each pair.
             for i in range(len(coords)):
                 next_i = (i + 1) % len(coords)
                 current = coords[i]
@@ -260,10 +406,10 @@ def _build_face_from_coords(coords: List[dict], profile: ClosedProfile) -> objec
                 if abs(cx - tx) < 1e-10 and abs(cz - tz) < 1e-10:
                     continue
 
-                if target["type"] == SegmentType.ARC and target["radius"] != 0.0:
-                    # Arc segment: convert profile radius to Build123d convention
-                    # Profile: +radius = minor arc, -radius = major arc
-                    # Build123d RadiusArc: -R = minor arc, +R = major arc (opposite)
+                if target["type"] == SegmentType.ARC and target.get("radius", 0.0) != 0.0:
+                    # Arc segment: signed radius convention
+                    # Our convention: +R = minor arc, -R = major arc
+                    # Build123d RadiusArc: -R = minor arc, +R = major arc (inverted)
                     b3d_radius = -target["radius"]
                     RadiusArc((cx, cz), (tx, tz), b3d_radius)
                 else:

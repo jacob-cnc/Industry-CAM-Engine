@@ -22,6 +22,8 @@ from models.params import RoughingParams
 from models.stock import StockDef
 from models.profile import ClosedProfile, ProfileMove, SegmentType, MachiningMode
 from models.constants import TOLERANCE
+from geometry.arc_helpers import is_arc_within_x_bounds
+from geometry.zone_builder import _profile_to_radius_coords
 
 if TYPE_CHECKING:
     from geometry.zone_query import ZoneQueryAPI, EdgeData
@@ -94,9 +96,9 @@ class CleanupPlanner:
         # Compute the offset profile using the geometry kernel
         # Completely separate paths for OD and ID — no shared logic that could regress
         if mode == MachiningMode.OD:
-            offset_edges = self._compute_offset_profile(segments, fin_allowance_radius, mode, stock, z0_fin)
+            offset_edges = self._compute_offset_profile(segments, fin_allowance_radius, mode, stock, z0_fin, profile)
         else:
-            offset_edges = self._compute_offset_profile_id(segments, fin_allowance_radius, stock, z0_fin)
+            offset_edges = self._compute_offset_profile_id(segments, fin_allowance_radius, stock, z0_fin, profile)
 
         if not offset_edges:
             return []
@@ -179,6 +181,7 @@ class CleanupPlanner:
         mode: MachiningMode,
         stock: StockDef = None,
         z0_fin: float = 0.001,
+        profile: ClosedProfile = None,
     ) -> List[tuple]:
         """Compute the cleanup contour by offsetting the finished part face.
 
@@ -210,14 +213,18 @@ class CleanupPlanner:
 
         # Build closed profile contour (profile + closure)
         try:
-            coords = []
-            for seg in segments:
-                coords.append({
-                    "type": seg.segment_type,
-                    "x_radius": seg.x / 2.0,
-                    "z": seg.z,
-                    "radius": seg.radius,
-                })
+            # Use corner-break-aware coords if profile is available
+            if profile is not None:
+                coords = _profile_to_radius_coords(profile)
+            else:
+                coords = []
+                for seg in segments:
+                    coords.append({
+                        "type": seg.segment_type,
+                        "x_radius": seg.x / 2.0,
+                        "z": seg.z,
+                        "radius": seg.radius,
+                    })
 
             # Add closure segments
             last_seg = segments[-1]
@@ -231,11 +238,12 @@ class CleanupPlanner:
                     return []
                 closure_x = stock.diameter / 2.0
 
-            # Closure: last point → (closure_x, last_z) → (closure_x, 0) → first point
-            last_x_r = last_seg.x / 2.0
-            last_z = last_seg.z
-            first_x_r = first_seg.x / 2.0
-            first_z = first_seg.z
+            # Closure: last coord → (closure_x, last_z) → (closure_x, 0) → first coord
+            # Use actual coords endpoints (may be trimmed by corner breaks)
+            last_x_r = coords[-1]["x_radius"]
+            last_z = coords[-1]["z"]
+            first_x_r = coords[0]["x_radius"]
+            first_z = coords[0]["z"]
 
             if abs(last_x_r - closure_x) > 1e-10:
                 coords.append({"type": SegmentType.LINE, "x_radius": closure_x, "z": last_z, "radius": 0.0})
@@ -521,6 +529,7 @@ class CleanupPlanner:
         fin_allowance_radius: float,
         stock: StockDef,
         z0_fin: float,
+        profile: ClosedProfile = None,
     ) -> List[tuple]:
         """Compute the ID cleanup contour by offsetting the finished part face TOWARD centerline.
 
@@ -552,21 +561,25 @@ class CleanupPlanner:
 
         # Step 1: Build the finished part face (profile + closure to stock OD)
         try:
-            coords = []
-            for seg in segments:
-                coords.append({
-                    "type": seg.segment_type,
-                    "x_radius": seg.x / 2.0,
-                    "z": seg.z,
-                    "radius": seg.radius,
-                })
+            # Use corner-break-aware coords if profile is available
+            if profile is not None:
+                coords = _profile_to_radius_coords(profile)
+            else:
+                coords = []
+                for seg in segments:
+                    coords.append({
+                        "type": seg.segment_type,
+                        "x_radius": seg.x / 2.0,
+                        "z": seg.z,
+                        "radius": seg.radius,
+                    })
 
             # ID closure goes to stock OD
             closure_x = stock.diameter / 2.0
-            last_x_r = segments[-1].x / 2.0
-            last_z = segments[-1].z
-            first_x_r = segments[0].x / 2.0
-            first_z = segments[0].z
+            last_x_r = coords[-1]["x_radius"]
+            last_z = coords[-1]["z"]
+            first_x_r = coords[0]["x_radius"]
+            first_z = coords[0]["z"]
 
             if abs(last_x_r - closure_x) > 1e-10:
                 coords.append({"type": SegmentType.LINE, "x_radius": closure_x, "z": last_z, "radius": 0.0})
@@ -802,17 +815,28 @@ class CleanupPlanner:
                 ))
 
             elif edge_type == "ARC":
-                # Determine CW vs CCW from the cross product of vectors:
-                # start→center and start→end
-                # For a 2D plane (X=radius, Y=Z):
-                #   cross > 0 → CCW, cross < 0 → CW
-                dx_center = center[0] - start[0]
-                dz_center = center[1] - start[1]
-                dx_end = end[0] - start[0]
-                dz_end = end[1] - start[1]
-                cross = dx_center * dz_end - dz_center * dx_end
+                # Determine CW vs CCW from the sweep direction.
+                # The center is correct (from RadiusArc with proper signed radius).
+                # Compute sweep from start to end, normalize to [-π, π].
+                import math as _math
 
-                if cross < 0:
+                sx_r = start[0] / 2.0
+                sz = start[1]
+                ex_r = end[0] / 2.0
+                ez = end[1]
+                cx_r = center[0] / 2.0
+                cz = center[1]
+
+                angle_start = _math.atan2(sz - cz, sx_r - cx_r)
+                angle_end = _math.atan2(ez - cz, ex_r - cx_r)
+                sweep = angle_end - angle_start
+                if sweep > _math.pi:
+                    sweep -= 2 * _math.pi
+                elif sweep < -_math.pi:
+                    sweep += 2 * _math.pi
+
+                # Negative sweep = CW = G02, Positive sweep = CCW = G03
+                if sweep < 0:
                     move_type = MoveType.ARC_CW
                     radius_signed = radius
                 else:
@@ -886,9 +910,21 @@ class CleanupPlanner:
 
         # CW -> negative cross, CCW -> positive cross
         if is_cw:
-            return (c1_x, c1_z) if cr1 < 0 else (c2_x, c2_z)
+            cx, cz = (c1_x, c1_z) if cr1 < 0 else (c2_x, c2_z)
+            other_cx, other_cz = (c2_x, c2_z) if cr1 < 0 else (c1_x, c1_z)
         else:
-            return (c1_x, c1_z) if cr1 > 0 else (c2_x, c2_z)
+            cx, cz = (c1_x, c1_z) if cr1 > 0 else (c2_x, c2_z)
+            other_cx, other_cz = (c2_x, c2_z) if cr1 > 0 else (c1_x, c1_z)
+
+        # Bounds-aware center selection: if the cross-product choice produces
+        # an arc that exceeds X bounds, swap to the other candidate center.
+        if not is_arc_within_x_bounds(cx, cz, radius, x1_r, z1, x2_r, z2, is_cw):
+            # Check if the other center produces a bounded arc
+            if is_arc_within_x_bounds(other_cx, other_cz, radius, x1_r, z1, x2_r, z2, not is_cw):
+                cx, cz = other_cx, other_cz
+            # If both centers produce out-of-bounds arcs, keep original (degenerate case)
+
+        return (cx, cz)
 
     def _plan_from_zone_boundary(
         self,

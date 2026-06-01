@@ -23,6 +23,7 @@ from gui.colors import COLORS, FONTS
 from gui.components.numeric_field import NumericField, NumericFieldConfig
 from gui.components.segment_list import SegmentListWidget
 from gui.components.graph_widget import MachiningGraphWidget
+from gui.unit_state import unit_state
 
 # Pipeline imports
 from pipeline.pipeline import execute as pipeline_execute
@@ -33,6 +34,7 @@ from outputs.gcode_parser import parse as parse_gcode
 from outputs import material_sim
 from models.tool import ToolDef, ToolOrientation, ToolDirection, ToolType
 from models.validation import PipelineStatus
+from geometry.arc_helpers import is_arc_within_x_bounds
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +81,7 @@ class ProgramTab(QWidget):
         self._active_tool: Optional[ToolDef] = None
         self._program_file_path: Optional[str] = None
         self._last_gcode_text: str = ""  # Last generated G-code for saving
+        self._profile_contour_segments: list = []  # Profile overlay for toolpath display
         self._setup_ui()
         self._connect_signals()
         self._update_ui_for_state()
@@ -140,6 +143,10 @@ class ProgramTab(QWidget):
     def get_segments(self) -> list:
         """Return current profile segments from the segment list widget."""
         return self._segment_list.get_segments()
+
+    def get_corner_breaks(self) -> list:
+        """Return current corner break data from the segment list widget."""
+        return self._segment_list.get_corner_breaks()
 
     def get_block_type(self) -> str:
         """Return current block type selection."""
@@ -419,7 +426,7 @@ class ProgramTab(QWidget):
 
         self._rough_rpm = NumericField(NumericFieldConfig(
             min_value=50.0, max_value=5000.0, decimals=0,
-            default_value=1200.0, suffix="rpm",
+            default_value=1200.0, suffix="rpm", unit_aware=False,
         ))
         form.addRow("RPM:", self._rough_rpm)
 
@@ -442,7 +449,7 @@ class ProgramTab(QWidget):
 
         self._finish_passes = NumericField(NumericFieldConfig(
             min_value=1.0, max_value=10.0, decimals=0,
-            default_value=1.0, suffix="",
+            default_value=1.0, suffix="", unit_aware=False,
         ))
         form.addRow("Passes:", self._finish_passes)
 
@@ -460,7 +467,7 @@ class ProgramTab(QWidget):
 
         self._finish_rpm = NumericField(NumericFieldConfig(
             min_value=50.0, max_value=5000.0, decimals=0,
-            default_value=1200.0, suffix="rpm",
+            default_value=1200.0, suffix="rpm", unit_aware=False,
         ))
         form.addRow("RPM:", self._finish_rpm)
 
@@ -584,6 +591,7 @@ class ProgramTab(QWidget):
 
         # Segment list
         self._segment_list.segments_changed.connect(self._on_segments_changed)
+        self._segment_list.corner_breaks_changed.connect(self._on_field_changed)
 
         # Generate button
         self._generate_btn.clicked.connect(self._on_generate_clicked)
@@ -653,17 +661,22 @@ class ProgramTab(QWidget):
             finishing = self.get_finishing_values()
             segments = self.get_segments()
 
-            # 2. Default tool (T1, 0.016 TNR, 80° tip, 0.375 edge, OD_FRONT_RIGHT, RIGHT)
-            tool_def = self._active_tool if self._active_tool else ToolDef(
-                tool_number=1,
-                nose_radius=0.016,
-                tip_angle=80.0,
-                edge_length=0.375,
-                orientation=ToolOrientation.OD_FRONT_RIGHT,
-                direction=ToolDirection.RIGHT,
-                tool_type=ToolType.TURNING,
-                description="Default T1 CNMG",
-            )
+            # 2. Resolve tool from active selection or roughing tool number
+            #    Priority: _active_tool (set by Tools tab selection or startup)
+            #    Fallback: look up roughing tool_number from tool table via signal
+            tool_def = self._active_tool
+            if tool_def is None:
+                # No tool selected — use hardcoded default as last resort
+                tool_def = ToolDef(
+                    tool_number=roughing["tool_number"],
+                    nose_radius=0.016,
+                    tip_angle=80.0,
+                    edge_length=0.375,
+                    orientation=ToolOrientation.OD_FRONT_RIGHT,
+                    direction=ToolDirection.RIGHT,
+                    tool_type=ToolType.TURNING,
+                    description=f"Default T{roughing['tool_number']}",
+                )
 
             # 3. Build typed dataclasses from field values
             # x_start: Use the user's X Start value directly.
@@ -692,6 +705,7 @@ class ProgramTab(QWidget):
                 tool_def=tool_def,
                 x_park=stock["x_park"],
                 z_park=stock["z_park"],
+                corner_breaks=self.get_corner_breaks(),
             )
 
             # 4. Execute pipeline
@@ -740,13 +754,17 @@ class ProgramTab(QWidget):
 
             # 8. Generate G-code
             stage = "gcode_write"
-            gcode_text = GCodeWriter().write(plan_result)
+            gcode_text = GCodeWriter().write(plan_result, unit_mode=unit_state.mode.value)
 
             # 9. Parse for sim and load into SimViewerWidget
             stage = "sim_load"
             from gui.components.sim_viewer import parse_gcode_for_sim
             sim_moves = parse_gcode_for_sim(gcode_text)
             self._sim_viewer.load(graph_data, gcode_text, sim_moves)
+
+            # 9b. Pass profile contour for overlay toggle
+            if hasattr(self, '_profile_contour_segments') and self._profile_contour_segments:
+                self._sim_viewer.set_profile_overlay(self._profile_contour_segments)
 
             # 10. Emit signals
             self._last_gcode_text = gcode_text
@@ -989,6 +1007,7 @@ class ProgramTab(QWidget):
             "roughing": self.get_roughing_values(),
             "finishing": self.get_finishing_values(),
             "segments": self.get_segments(),
+            "corner_breaks": self.get_corner_breaks(),
         }
         try:
             with open(path, 'w', encoding='utf-8') as f:
@@ -1073,7 +1092,8 @@ class ProgramTab(QWidget):
         # Segments
         segments = data.get("segments", [])
         if segments:
-            self._segment_list.set_segments(segments)
+            corner_breaks = data.get("corner_breaks", None)
+            self._segment_list.set_segments(segments, corner_breaks=corner_breaks)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -1104,6 +1124,7 @@ class ProgramTab(QWidget):
 
         Pure Qt geometry, no kernel call. Target < 16ms.
         Only draws when in BUILDING or READY state (no toolpath loaded).
+        Renders corner breaks (chamfers/fillets) at segment junctions.
         """
         if self._state not in (ProgramState.BUILDING, ProgramState.READY):
             return
@@ -1116,6 +1137,8 @@ class ProgramTab(QWidget):
         import pyqtgraph as pg
         from pyqtgraph.Qt import QtCore as _QtCore
 
+        corner_breaks = self._segment_list.get_corner_breaks()
+
         # Build per-segment polylines for drawing (avoids pyqtgraph bounding-box
         # rendering artifacts that occur with a single large PlotCurveItem containing
         # many arc interpolation points).
@@ -1126,32 +1149,163 @@ class ProgramTab(QWidget):
         all_z: List[float] = []
         all_x: List[float] = []
 
+        # Pre-compute segment endpoints (radius coords) for corner break geometry
+        seg_endpoints = [(0.0, 0.0)]  # origin as implicit start
+        for seg in segments:
+            seg_endpoints.append((float(seg.get("x", 0.0)) / 2.0,
+                                  float(seg.get("z", 0.0))))
+
         prev_x_r = 0.0
         prev_z = 0.0
 
-        for seg in segments:
+        for seg_idx, seg in enumerate(segments):
             x_dia = float(seg.get("x", 0.0))
             z = float(seg.get("z", 0.0))
             x_r = x_dia / 2.0
             radius = float(seg.get("radius", 0.0))
             seg_type = seg.get("type", "line")
 
+            # Determine if there's a corner break BEFORE this segment
+            # (i.e., at the junction between seg_idx-1 and seg_idx)
+            cb_before = None
+            if seg_idx > 0 and corner_breaks and seg_idx - 1 < len(corner_breaks):
+                cb_before = corner_breaks[seg_idx - 1]
+
+            # Compute arrival point (may be trimmed by corner break)
+            # and departure point for this segment
+            trim_start_x = prev_x_r
+            trim_start_z = prev_z
+            trim_end_x = x_r
+            trim_end_z = z
+
+            # Apply corner break at the START of this segment (junction with previous)
+            if cb_before and cb_before.get("type", "none") != "none":
+                cb_type = cb_before["type"]
+                # Compute direction vectors at the junction point (prev_x_r, prev_z)
+                # Arrival direction: from previous segment's start toward junction
+                prev_seg_start_x, prev_seg_start_z = seg_endpoints[seg_idx - 1]
+                arr_dx = prev_x_r - prev_seg_start_x
+                arr_dz = prev_z - prev_seg_start_z
+                arr_len = math.sqrt(arr_dx * arr_dx + arr_dz * arr_dz)
+
+                # Departure direction: from junction toward this segment's end
+                dep_dx = x_r - prev_x_r
+                dep_dz = z - prev_z
+                dep_len = math.sqrt(dep_dx * dep_dx + dep_dz * dep_dz)
+
+                if arr_len > 1e-9 and dep_len > 1e-9:
+                    # Normalize
+                    arr_ux = arr_dx / arr_len
+                    arr_uz = arr_dz / arr_len
+                    dep_ux = dep_dx / dep_len
+                    dep_uz = dep_dz / dep_len
+
+                    if cb_type == "chamfer":
+                        size = float(cb_before.get("size", 0.015))
+                        # Trim point on arriving segment (back from junction)
+                        trim_back = min(size, arr_len * 0.4)
+                        trim_fwd = min(size, dep_len * 0.4)
+                        p1_x = prev_x_r - arr_ux * trim_back
+                        p1_z = prev_z - arr_uz * trim_back
+                        # Trim point on departing segment (forward from junction)
+                        p2_x = prev_x_r + dep_ux * trim_fwd
+                        p2_z = prev_z + dep_uz * trim_fwd
+
+                        # Truncate the current path at p1 (trim arriving segment)
+                        if current_z:
+                            # Replace last point with trimmed point
+                            current_x[-1] = p1_x
+                            current_z[-1] = p1_z
+                        else:
+                            current_x.append(p1_x)
+                            current_z.append(p1_z)
+                        # Draw chamfer line from p1 to p2
+                        current_x.append(p2_x)
+                        current_z.append(p2_z)
+                        all_x.append(p2_x)
+                        all_z.append(p2_z)
+                        # Update start of this segment to p2
+                        trim_start_x = p2_x
+                        trim_start_z = p2_z
+
+                    elif cb_type == "fillet":
+                        fillet_r = float(cb_before.get("radius", 0.015))
+                        # Compute fillet tangent points
+                        # Half-angle between the two directions (reversed arrival)
+                        dot = (-arr_ux) * dep_ux + (-arr_uz) * dep_uz
+                        dot = max(-1.0, min(1.0, dot))
+                        half_angle = math.acos(dot) / 2.0
+                        if half_angle > 1e-6:
+                            # Distance from junction to tangent point
+                            tan_dist = fillet_r / math.tan(half_angle)
+                            tan_dist_arr = min(tan_dist, arr_len * 0.4)
+                            tan_dist_dep = min(tan_dist, dep_len * 0.4)
+                            # Tangent points
+                            t1_x = prev_x_r - arr_ux * tan_dist_arr
+                            t1_z = prev_z - arr_uz * tan_dist_arr
+                            t2_x = prev_x_r + dep_ux * tan_dist_dep
+                            t2_z = prev_z + dep_uz * tan_dist_dep
+
+                            # Truncate arriving path at t1
+                            if current_z:
+                                current_x[-1] = t1_x
+                                current_z[-1] = t1_z
+                            else:
+                                current_x.append(t1_x)
+                                current_z.append(t1_z)
+
+                            # Interpolate fillet arc from t1 to t2
+                            # Find arc center (offset from junction along bisector)
+                            bis_x = (-arr_ux + dep_ux)
+                            bis_z = (-arr_uz + dep_uz)
+                            bis_len = math.sqrt(bis_x * bis_x + bis_z * bis_z)
+                            if bis_len > 1e-9:
+                                bis_x /= bis_len
+                                bis_z /= bis_len
+                                center_dist = fillet_r / math.sin(half_angle)
+                                fc_x = prev_x_r + bis_x * center_dist
+                                fc_z = prev_z + bis_z * center_dist
+
+                                a_start = math.atan2(t1_z - fc_z, t1_x - fc_x)
+                                a_end = math.atan2(t2_z - fc_z, t2_x - fc_x)
+                                sweep = a_end - a_start
+                                # Take the short arc (< pi)
+                                if sweep > math.pi:
+                                    sweep -= 2 * math.pi
+                                elif sweep < -math.pi:
+                                    sweep += 2 * math.pi
+
+                                n_fillet = max(16, int(abs(sweep) * fillet_r * 200))
+                                for fi in range(1, n_fillet):
+                                    t = fi / float(n_fillet)
+                                    a = a_start + sweep * t
+                                    current_x.append(fc_x + fillet_r * math.cos(a))
+                                    current_z.append(fc_z + fillet_r * math.sin(a))
+                                current_x.append(t2_x)
+                                current_z.append(t2_z)
+                                all_x.append(t2_x)
+                                all_z.append(t2_z)
+                            # Update start of this segment to t2
+                            trim_start_x = t2_x
+                            trim_start_z = t2_z
+                        # else: angle too small, skip fillet
+
             if seg_type == "arc" and abs(radius) > 0.0001:
-                # Interpolate arc from prev to current
+                # Interpolate arc from trim_start to current endpoint
                 # Signed radius: +R = CW on screen, -R = CCW on screen
                 r_abs = abs(radius)
                 is_cw = radius > 0
 
-                dx_r = x_r - prev_x_r
-                dz = z - prev_z
+                dx_r = x_r - trim_start_x
+                dz = z - trim_start_z
                 chord = math.sqrt(dx_r * dx_r + dz * dz)
 
                 if chord > 0.0001 and r_abs >= chord / 2.0 - 1e-9:
                     if r_abs < chord / 2.0:
                         r_abs = chord / 2.0
 
-                    mid_x_r = (prev_x_r + x_r) / 2.0
-                    mid_z = (prev_z + z) / 2.0
+                    mid_x_r = (trim_start_x + x_r) / 2.0
+                    mid_z = (trim_start_z + z) / 2.0
                     h = math.sqrt(max(0.0, r_abs * r_abs - (chord / 2.0) ** 2))
 
                     px = -dz / chord
@@ -1164,49 +1318,50 @@ class ProgramTab(QWidget):
                     c2_z = mid_z - h * pz
 
                     # Pick center based on CW/CCW direction on screen.
-                    # Empirically verified: CW on screen (inverted Y) =
-                    # center where cross product (start-center) x (end-center) < 0
-                    # Cross = ax*bz - az*bx where a=start-center, b=end-center
                     def _cross(cx, cz):
-                        ax = prev_x_r - cx
-                        az = prev_z - cz
+                        ax = trim_start_x - cx
+                        az = trim_start_z - cz
                         bx = x_r - cx
                         bz = z - cz
                         return ax * bz - az * bx
 
                     cr1 = _cross(c1_x, c1_z)
                     if is_cw:
-                        # CW -> negative cross
                         cx_r, cz_arc = (c1_x, c1_z) if cr1 < 0 else (c2_x, c2_z)
+                        other_cx, other_cz = (c2_x, c2_z) if cr1 < 0 else (c1_x, c1_z)
                     else:
-                        # CCW -> positive cross
                         cx_r, cz_arc = (c1_x, c1_z) if cr1 > 0 else (c2_x, c2_z)
+                        other_cx, other_cz = (c2_x, c2_z) if cr1 > 0 else (c1_x, c1_z)
+
+                    # Bounds-aware center selection
+                    if not is_arc_within_x_bounds(
+                        cx_r, cz_arc, r_abs,
+                        trim_start_x, trim_start_z, x_r, z, is_cw
+                    ):
+                        if is_arc_within_x_bounds(
+                            other_cx, other_cz, r_abs,
+                            trim_start_x, trim_start_z, x_r, z, is_cw
+                        ):
+                            cx_r, cz_arc = other_cx, other_cz
 
                     # Compute sweep angle
-                    angle_start = math.atan2(prev_z - cz_arc, prev_x_r - cx_r)
+                    angle_start = math.atan2(trim_start_z - cz_arc, trim_start_x - cx_r)
                     angle_end = math.atan2(z - cz_arc, x_r - cx_r)
                     diff = angle_end - angle_start
 
-                    # Normalize sweep to match direction:
-                    # CW on screen = negative sweep in data space
-                    # CCW on screen = positive sweep in data space
                     if is_cw:
-                        # Want negative sweep
                         if diff > 0:
                             diff -= 2 * math.pi
                     else:
-                        # Want positive sweep
                         if diff < 0:
                             diff += 2 * math.pi
 
-                    r_display = math.sqrt((prev_x_r - cx_r) ** 2 + (prev_z - cz_arc) ** 2)
+                    r_display = math.sqrt((trim_start_x - cx_r) ** 2 + (trim_start_z - cz_arc) ** 2)
 
                     n_pts = max(32, int(abs(diff) * r_display * 200))
-                    # Ensure continuity: start from prev point if not already in path
                     if not current_z:
-                        current_x.append(prev_x_r)
-                        current_z.append(prev_z)
-                    # Interpolate interior points (skip first — already in path)
+                        current_x.append(trim_start_x)
+                        current_z.append(trim_start_z)
                     for i in range(1, n_pts):
                         t = i / float(n_pts)
                         angle = angle_start + diff * t
@@ -1214,26 +1369,24 @@ class ProgramTab(QWidget):
                         az = cz_arc + r_display * math.sin(angle)
                         current_x.append(ax)
                         current_z.append(az)
-                    # Use exact endpoint
                     current_x.append(x_r)
                     current_z.append(z)
                     all_x.extend([x_r])
                     all_z.extend([z])
                 else:
-                    # Degenerate arc — draw as line from prev to endpoint
+                    # Degenerate arc — draw as line
                     if not current_z:
-                        current_x.append(prev_x_r)
-                        current_z.append(prev_z)
+                        current_x.append(trim_start_x)
+                        current_z.append(trim_start_z)
                     current_x.append(x_r)
                     current_z.append(z)
                     all_x.append(x_r)
                     all_z.append(z)
             else:
-                # LINE segment — add endpoint to current sub-path
+                # LINE segment — from trim_start to endpoint
                 if not current_z:
-                    # Start sub-path from previous point for continuity
-                    current_z.append(prev_z)
-                    current_x.append(prev_x_r)
+                    current_z.append(trim_start_z)
+                    current_x.append(trim_start_x)
                 current_z.append(z)
                 current_x.append(x_r)
                 all_z.append(z)
@@ -1245,6 +1398,9 @@ class ProgramTab(QWidget):
         # Flush remaining line sub-path
         if len(current_z) > 1:
             segments_to_draw.append((current_z, current_x))
+
+        # Store for profile overlay in toolpath display
+        self._profile_contour_segments = segments_to_draw
 
         if not all_z:
             return
