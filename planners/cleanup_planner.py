@@ -331,7 +331,10 @@ class CleanupPlanner:
             if mode == MachiningMode.OD:
                 # OD: clip to X > x_start+fin, keeping the outer (profile-side) boundary
                 x_min_r = fin_allowance_radius  # x_start(0) + fin_allowance in radius
-                x_max_r = 10.0  # Well beyond any stock
+                # Cap x_max_r at stock radius + margin (not arbitrary 10.0)
+                # This keeps tolerance calculations sane for small features like chamfers.
+                stock_r = stock.diameter / 2.0 if stock else 0.5
+                x_max_r = stock_r + 0.1  # Small margin beyond stock OD
             else:
                 # ID: clip to the bore region between pilot hole and roughing boundary
                 # The turning edge is at the max X of this clip (the roughing boundary)
@@ -432,11 +435,13 @@ class CleanupPlanner:
             # Clip boundary edges run along the clip rectangle boundaries.
             # Turning edges are everything else (they follow the offset profile shape).
             #
-            # Use a relative tolerance (0.1% of the clip dimension) to catch floating
-            # point drift from Build123d offset operations.
+            # Filter criteria: an edge is a clip boundary edge if BOTH endpoints are
+            # near a boundary value AND the edge runs ALONG that boundary (doesn't
+            # significantly span in the perpendicular direction). This prevents
+            # filtering diagonal edges (like chamfers) that merely terminate at a boundary.
             z_range = abs(z_top - z_bot)
             x_range = abs(x_max_r - x_min_r) * 2.0
-            tol = max(1e-3, z_range * 0.001, x_range * 0.001)
+            tol = max(1e-4, min(z_range * 0.001, x_range * 0.001))
             x_min_dia = x_min_r * 2.0
             x_max_dia = x_max_r * 2.0
             turning_edges = []
@@ -446,17 +451,28 @@ class CleanupPlanner:
                 ex, ez = end
 
                 # Skip edges along the clip boundary (X = x_min_dia)
+                # Must be nearly vertical at x_min (both X near x_min, Z span is the extent)
                 if abs(sx - x_min_dia) < tol and abs(ex - x_min_dia) < tol:
                     continue
                 # Skip edges along the clip boundary (X = x_max_dia)
                 if abs(sx - x_max_dia) < tol and abs(ex - x_max_dia) < tol:
                     continue
                 # Skip edges along Z = z_top (face level — handled by face passes)
+                # BOTH endpoints must be at z_top AND the edge must be essentially
+                # horizontal (X span >> Z span). A diagonal chamfer touching z_top
+                # will have significant Z span and should NOT be filtered.
                 if abs(sz - z_top) < tol and abs(ez - z_top) < tol:
-                    continue
+                    x_span = abs(sx - ex)
+                    z_span = abs(sz - ez)
+                    if x_span > z_span * 2.0 or x_span < tol:
+                        # Horizontal edge along z_top — filter it
+                        continue
                 # Skip edges along Z = z_bot
                 if abs(sz - z_bot) < tol and abs(ez - z_bot) < tol:
-                    continue
+                    x_span = abs(sx - ex)
+                    z_span = abs(sz - ez)
+                    if x_span > z_span * 2.0 or x_span < tol:
+                        continue
 
                 turning_edges.append(edge)
 
