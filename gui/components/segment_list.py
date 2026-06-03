@@ -292,6 +292,7 @@ class SegmentListWidget(QWidget):
 
     segments_changed = pyqtSignal(list)
     corner_breaks_changed = pyqtSignal(list)
+    selection_changed = pyqtSignal(int)  # Emits logical segment index (-1 if none)
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -357,6 +358,26 @@ class SegmentListWidget(QWidget):
         self._btn_move_down.clicked.connect(self._on_move_down)
         self._table.cellChanged.connect(self._on_cell_changed)
         self._table.cellDoubleClicked.connect(self._on_cell_double_clicked)
+        self._table.currentCellChanged.connect(self._on_selection_changed)
+
+    def _on_selection_changed(self, current_row: int, _col: int,
+                              _prev_row: int, _prev_col: int):
+        """Emit logical segment index when the table selection changes."""
+        if current_row < 0:
+            self.selection_changed.emit(-1)
+            return
+        seg_idx = self._table_row_to_segment_index(current_row)
+        if seg_idx is None:
+            # Corner break row selected — map to the segment before it
+            # Walk backwards to find the preceding segment row
+            for r in range(current_row - 1, -1, -1):
+                idx = self._table_row_to_segment_index(r)
+                if idx is not None:
+                    self.selection_changed.emit(idx)
+                    return
+            self.selection_changed.emit(-1)
+        else:
+            self.selection_changed.emit(seg_idx)
 
     # ------------------------------------------------------------------
     # Unit conversion
@@ -673,6 +694,8 @@ class SegmentListWidget(QWidget):
         or if the row is a corner break row.
 
         Radius is read directly from the cell (signed value).
+        Special value "Q" indicates a convex tangent-bounded quadrant arc.
+        Special value "-Q" indicates a concave tangent-bounded quadrant arc.
         Values are always returned in inches regardless of display mode.
         """
         if self._is_corner_break_row(row):
@@ -697,10 +720,19 @@ class SegmentListWidget(QWidget):
         except (ValueError, AttributeError):
             z = 0.0
 
-        try:
-            r = self._parse_display_value(self._table.item(row, COL_RADIUS).text())
-        except (ValueError, AttributeError):
-            r = 0.0
+        # Radius: check for "Q" or "-Q" (quadrant mode) before numeric parse
+        r_text = ""
+        r_item = self._table.item(row, COL_RADIUS)
+        if r_item is not None:
+            r_text = r_item.text().strip().upper()
+
+        if r_text == "Q" or r_text == "-Q":
+            r = r_text
+        else:
+            try:
+                r = self._parse_display_value(r_text)
+            except (ValueError, AttributeError):
+                r = 0.0
 
         return {"type": seg_type, "x": x, "z": z, "radius": r}
 
@@ -867,14 +899,21 @@ class SegmentListWidget(QWidget):
     def _compute_suggestion(self, row: int, col: int) -> Optional[float]:
         """Compute a suggested value for a cell on an ARC row.
 
+        Prefers tangent values (smooth blend) when available, falls back
+        to geometric limits (minimum radius, max reach).
+
         Returns the suggested value in inches, or None if no suggestion is possible.
         """
         from geometry.arc_helpers import (
-            compute_min_radius, compute_max_z_for_radius, compute_max_x_for_radius
+            compute_min_radius, compute_max_z_for_radius, compute_max_x_for_radius,
+            compute_tangent_radius, compute_tangent_z, compute_tangent_x,
         )
 
         # Get previous segment endpoint in inches (skip corner break rows)
         x_start, z_start = self._get_prev_segment_endpoint(row)
+
+        # Get previous segment direction for tangent computation
+        prev_dir = self._get_prev_segment_direction(row)
 
         # Parse current values (convert from display to inches)
         try:
@@ -893,25 +932,54 @@ class SegmentListWidget(QWidget):
         x_start_r = x_start / 2.0
 
         if col == COL_RADIUS:
-            # Suggest minimum radius (with small margin for a comfortable arc)
+            # Prefer tangent radius (smooth blend), fall back to 1.15x minimum
             if x_val is not None and z_val is not None:
                 x_end_r = x_val / 2.0
                 min_r = compute_min_radius(x_start_r, z_start, x_end_r, z_val)
+
+                # Try tangent radius first
+                if prev_dir is not None:
+                    tangent_r = compute_tangent_radius(
+                        x_start_r, z_start, x_end_r, z_val,
+                        prev_dir[0], prev_dir[1]
+                    )
+                    if tangent_r is not None and tangent_r >= min_r - 1e-9:
+                        return tangent_r
+
+                # Fall back to comfortable minimum
                 if min_r > 1e-6:
                     return min_r * 1.15
             return None
 
         elif col == COL_Z:
-            # Suggest max Z reach
+            # Prefer tangent Z (quadrant exit along Z), fall back to max reach
             if x_val is not None and r_val is not None and abs(r_val) > 1e-9:
                 x_end_r = x_val / 2.0
+
+                # Try tangent Z first (exit horizontal — standard lathe direction)
+                tangent_z = compute_tangent_z(
+                    x_start_r, z_start, x_end_r, abs(r_val),
+                    exit_horizontal=True
+                )
+                if tangent_z is not None and abs(tangent_z - z_start) > 1e-9:
+                    return tangent_z
+
+                # Fall back to max Z reach
                 max_z = compute_max_z_for_radius(x_start_r, z_start, x_end_r, abs(r_val))
                 return max_z
             return None
 
         elif col == COL_X:
-            # Suggest max X reach
+            # Prefer tangent X (quadrant exit along X), fall back to max reach
             if z_val is not None and r_val is not None and abs(r_val) > 1e-9:
+                # Try tangent X first (exit vertical — standard lathe direction)
+                tangent_x_r = compute_tangent_x(
+                    x_start_r, z_start, z_val, abs(r_val)
+                )
+                if tangent_x_r is not None and abs(tangent_x_r - x_start_r) > 1e-9:
+                    return tangent_x_r * 2.0  # Convert back to diameter
+
+                # Fall back to max X reach
                 max_x_r = compute_max_x_for_radius(x_start_r, z_start, z_val, abs(r_val))
                 if max_x_r is not None:
                     return max_x_r * 2.0  # Convert back to diameter
@@ -974,6 +1042,94 @@ class SegmentListWidget(QWidget):
                 except (ValueError, AttributeError):
                     return (0.0, 0.0)
         return (0.0, 0.0)
+
+    def _get_prev_segment_direction(self, row: int) -> Optional[tuple]:
+        """Get the direction vector of the previous segment at its endpoint.
+
+        For LINE segments: direction is from its start to its end.
+        For ARC segments: direction is the tangent at the endpoint (perpendicular
+        to the radius vector from center to endpoint, matching CW/CCW).
+
+        Returns (dir_x_r, dir_z) in radius units, or None if direction
+        cannot be determined (first segment or invalid data).
+        The direction vector is unnormalized.
+        """
+        # Find the previous segment row
+        prev_row = None
+        for r in range(row - 1, -1, -1):
+            if not self._is_corner_break_row(r):
+                prev_row = r
+                break
+        if prev_row is None:
+            return None
+
+        # Get the previous segment's start point (the one before it)
+        prev_start_x, prev_start_z = self._get_prev_segment_endpoint(prev_row)
+
+        # Get the previous segment's endpoint
+        try:
+            prev_end_x = self._parse_display_value(
+                self._table.item(prev_row, COL_X).text())
+            prev_end_z = self._parse_display_value(
+                self._table.item(prev_row, COL_Z).text())
+        except (ValueError, AttributeError):
+            return None
+
+        combo = self._table.cellWidget(prev_row, COL_TYPE)
+        if combo is None or isinstance(combo, CornerBreakRow):
+            return None
+
+        seg_type = combo.currentText()
+
+        if seg_type == "LINE":
+            # Direction is simply end - start (in radius for X)
+            dir_x = (prev_end_x - prev_start_x) / 2.0  # Convert diameter to radius
+            dir_z = prev_end_z - prev_start_z
+            if abs(dir_x) < 1e-10 and abs(dir_z) < 1e-10:
+                return None
+            return (dir_x, dir_z)
+        elif seg_type == "ARC":
+            # For an arc, the tangent at the endpoint is perpendicular to the
+            # radius vector (from center to endpoint), rotated by CW/CCW direction.
+            # We need the arc's center to compute this.
+            try:
+                radius_val = self._parse_display_value(
+                    self._table.item(prev_row, COL_RADIUS).text())
+            except (ValueError, AttributeError):
+                return None
+
+            if abs(radius_val) < 1e-9:
+                return None
+
+            from geometry.arc_helpers import _select_center
+            is_cw = radius_val > 0
+            abs_r = abs(radius_val)
+            x1_r = prev_start_x / 2.0
+            x2_r = prev_end_x / 2.0
+            center = _select_center(x1_r, prev_start_z, x2_r, prev_end_z, abs_r, is_cw)
+            if center is None:
+                return None
+
+            cx, cz = center
+            # Radius vector from center to endpoint
+            rv_x = x2_r - cx
+            rv_z = prev_end_z - cz
+
+            # Tangent is perpendicular to radius vector.
+            # CW: tangent = (rv_z, -rv_x) — rotated -90°
+            # CCW: tangent = (-rv_z, rv_x) — rotated +90°
+            if is_cw:
+                dir_x = rv_z
+                dir_z = -rv_x
+            else:
+                dir_x = -rv_z
+                dir_z = rv_x
+
+            if abs(dir_x) < 1e-10 and abs(dir_z) < 1e-10:
+                return None
+            return (dir_x, dir_z)
+
+        return None
 
     # ------------------------------------------------------------------
     # Validation
@@ -1042,15 +1198,20 @@ class SegmentListWidget(QWidget):
 
         When one field is empty/zero and the other two are filled, computes
         what value would make a valid arc and shows it as a tooltip hint.
+        Suggests both minimum and tangent values where applicable.
         All geometry calculations are done in inches; tooltip values are
         displayed in the current unit mode.
         """
         from geometry.arc_helpers import (
-            compute_min_radius, compute_max_z_for_radius, compute_max_x_for_radius
+            compute_min_radius, compute_max_z_for_radius, compute_max_x_for_radius,
+            compute_tangent_radius, compute_tangent_z, compute_tangent_x,
         )
 
         # Get previous segment endpoint in inches (skip corner break rows)
         x_start, z_start = self._get_prev_segment_endpoint(row)
+
+        # Get previous segment direction for tangent computation
+        prev_dir = self._get_prev_segment_direction(row)
 
         # Parse current values (convert from display to inches)
         try:
@@ -1073,19 +1234,37 @@ class SegmentListWidget(QWidget):
         x_start_r = x_start / 2.0
         decimals = unit_state.decimals
 
-        # Case 1: Radius blank, X and Z filled → suggest minimum radius
+        # Case 1: Radius blank, X and Z filled → suggest minimum and tangent radius
         if r_is_blank and not x_is_blank and not z_is_blank:
             x_end_r = x_val / 2.0
             min_r = compute_min_radius(x_start_r, z_start, x_end_r, z_val)
             if min_r > 1e-6:
                 # Display suggested values in current unit mode
                 min_r_disp = unit_state.to_display(min_r)
-                comfortable_disp = unit_state.to_display(min_r * 1.15)
-                r_item.setToolTip(
-                    f"Suggested radius for these endpoints:\n"
-                    f"  Minimum (semicircle): {min_r_disp:.{decimals}f}\n"
-                    f"  Comfortable (120° arc): {comfortable_disp:.{decimals}f}"
-                )
+                lines = [
+                    "Suggested radius for these endpoints:",
+                    f"  Minimum (semicircle): {min_r_disp:.{decimals}f}",
+                ]
+
+                # Compute tangent radius if previous segment direction is known
+                if prev_dir is not None:
+                    tangent_r = compute_tangent_radius(
+                        x_start_r, z_start, x_end_r, z_val,
+                        prev_dir[0], prev_dir[1]
+                    )
+                    if tangent_r is not None and tangent_r >= min_r - 1e-9:
+                        tangent_r_disp = unit_state.to_display(tangent_r)
+                        lines.append(
+                            f"  Tangent (smooth blend): {tangent_r_disp:.{decimals}f}"
+                        )
+
+                # Quadrant arc suggestion (tangent-bounded)
+                delta_x = abs(x_end_r - x_start_r)
+                delta_z = abs(z_val - z_start)
+                if delta_x > 1e-9 and delta_z > 1e-9:
+                    lines.append(f"  Quadrant blend: enter Q (convex) or -Q (concave)")
+
+                r_item.setToolTip("\n".join(lines))
                 if abs(r_val or 0) < 1e-9:
                     r_item.setBackground(hint_bg)
 
@@ -1094,15 +1273,32 @@ class SegmentListWidget(QWidget):
         if z_needs_hint and not x_is_blank and not r_is_blank:
             x_end_r = x_val / 2.0
             max_z = compute_max_z_for_radius(x_start_r, z_start, x_end_r, abs(r_val))
+
+            lines = []
+            has_suggestion = False
+
             if max_z is not None:
-                # Display in current unit mode
                 r_disp = unit_state.to_display(abs(r_val))
                 x_disp = unit_state.to_display(x_val)
                 max_z_disp = unit_state.to_display(max_z)
-                z_item.setToolTip(
-                    f"For R={r_disp:.{decimals}f} at X={x_disp:.{decimals}f}:\n"
-                    f"  Max Z reach: {max_z_disp:.{decimals}f}"
-                )
+                lines.append(f"For R={r_disp:.{decimals}f} at X={x_disp:.{decimals}f}:")
+                lines.append(f"  Max Z reach: {max_z_disp:.{decimals}f}")
+                has_suggestion = True
+
+            # Tangent Z: where arc exits horizontal (standard lathe direction)
+            tangent_z = compute_tangent_z(
+                x_start_r, z_start, x_end_r, abs(r_val),
+                exit_horizontal=True
+            )
+            if tangent_z is not None and abs(tangent_z - z_start) > 1e-9:
+                tangent_z_disp = unit_state.to_display(tangent_z)
+                if lines:
+                    lines.append("")
+                lines.append(f"  Tangent exit (along Z): {tangent_z_disp:.{decimals}f}")
+                has_suggestion = True
+
+            if has_suggestion:
+                z_item.setToolTip("\n".join(lines))
                 z_item.setBackground(hint_bg)
             else:
                 r_disp = unit_state.to_display(abs(r_val))
@@ -1120,16 +1316,33 @@ class SegmentListWidget(QWidget):
         x_needs_hint = x_is_blank or (x_val is not None and abs(x_val - x_start) < 1e-9)
         if x_needs_hint and not z_is_blank and not r_is_blank and z_val is not None:
             max_x_r = compute_max_x_for_radius(x_start_r, z_start, z_val, abs(r_val))
+
+            lines = []
+            has_suggestion = False
+
             if max_x_r is not None:
                 max_x_dia = max_x_r * 2.0
-                # Display in current unit mode
                 r_disp = unit_state.to_display(abs(r_val))
                 z_disp = unit_state.to_display(z_val)
                 max_x_dia_disp = unit_state.to_display(max_x_dia)
-                x_item.setToolTip(
-                    f"For R={r_disp:.{decimals}f} at Z={z_disp:.{decimals}f}:\n"
-                    f"  Max X reach: {max_x_dia_disp:.{decimals}f} dia"
-                )
+                lines.append(f"For R={r_disp:.{decimals}f} at Z={z_disp:.{decimals}f}:")
+                lines.append(f"  Max X reach: {max_x_dia_disp:.{decimals}f} dia")
+                has_suggestion = True
+
+            # Tangent X: where arc exits vertical (standard lathe direction)
+            tangent_x_r = compute_tangent_x(
+                x_start_r, z_start, z_val, abs(r_val)
+            )
+            if tangent_x_r is not None and abs(tangent_x_r - x_start_r) > 1e-9:
+                tangent_x_dia = tangent_x_r * 2.0
+                tangent_x_disp = unit_state.to_display(tangent_x_dia)
+                if lines:
+                    lines.append("")
+                lines.append(f"  Tangent exit (along X): {tangent_x_disp:.{decimals}f} dia")
+                has_suggestion = True
+
+            if has_suggestion:
+                x_item.setToolTip("\n".join(lines))
                 x_item.setBackground(hint_bg)
             else:
                 r_disp = unit_state.to_display(abs(r_val))
@@ -1149,14 +1362,25 @@ class SegmentListWidget(QWidget):
         Returns (True, "") if valid, (False, error_message) if invalid.
         When invalid, the error message includes actionable alternatives.
 
-        Radius can be positive (minor arc) or negative (major arc).
+        Radius can be positive (minor arc), negative (major arc), "Q" (convex quadrant),
+        or "-Q" (concave quadrant).
         Validation uses abs(radius) for the chord check.
         All geometry calculations are done in inches.
         """
+        r_item = self._table.item(row, COL_RADIUS)
+        if r_item is None:
+            return (False, "Radius must be a number, Q, or -Q")
+
+        r_text = r_item.text().strip().upper()
+
+        # "Q" and "-Q" are always valid (tangent-bounded quadrant arc)
+        if r_text in ("Q", "-Q"):
+            return (True, "")
+
         try:
-            radius = self._parse_display_value(self._table.item(row, COL_RADIUS).text())
+            radius = self._parse_display_value(r_text)
         except (ValueError, AttributeError):
-            return (False, "Radius must be a number")
+            return (False, "Radius must be a number, Q, or -Q")
 
         abs_radius = abs(radius)
         if abs_radius < 1e-9:

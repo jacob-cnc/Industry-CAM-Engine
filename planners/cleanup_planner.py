@@ -273,7 +273,47 @@ class CleanupPlanner:
                         if abs(cx - tx) < 1e-10 and abs(cz - tz) < 1e-10:
                             continue
 
-                        if target["type"] == SegmentType.ARC and target["radius"] != 0.0:
+                        if target.get("quadrant", False):
+                            # Quadrant arc: polyline ellipse approximation
+                            import math as _math
+                            from models.constants import TOLERANCE as _TOL
+                            quadrant_sign = target.get("quadrant_sign", 1)
+                            _dx = tx - cx
+                            _dz = tz - cz
+                            _same_x = abs(_dx) < _TOL
+                            _same_z = abs(_dz) < _TOL
+
+                            if _same_x or _same_z:
+                                _arc_r = abs(_dz) if _same_x else abs(_dx)
+                                _signed_r = -_arc_r * quadrant_sign
+                                RadiusArc((cx, cz), (tx, tz), _signed_r)
+                            else:
+                                _b, _a = abs(_dx), abs(_dz)
+                                if quadrant_sign == 1:
+                                    _ecx, _ecz = cx, tz
+                                    _sx = 1.0 if _dx > 0 else -1.0
+                                    _sz = -1.0 if _dz > 0 else 1.0
+                                else:
+                                    _ecx, _ecz = tx, cz
+                                    _sx = -1.0 if _dx > 0 else 1.0
+                                    _sz = 1.0 if _dz > 0 else -1.0
+                                _npts = 64
+                                for _j in range(_npts):
+                                    _t0 = (_math.pi / 2.0) * _j / _npts
+                                    _t1 = (_math.pi / 2.0) * (_j + 1) / _npts
+                                    if quadrant_sign == 1:
+                                        _x0 = _ecx + _sx * _b * _math.sin(_t0)
+                                        _z0 = _ecz + _sz * _a * _math.cos(_t0)
+                                        _x1 = _ecx + _sx * _b * _math.sin(_t1)
+                                        _z1 = _ecz + _sz * _a * _math.cos(_t1)
+                                    else:
+                                        _x0 = _ecx + _sx * _b * _math.cos(_t0)
+                                        _z0 = _ecz + _sz * _a * _math.sin(_t0)
+                                        _x1 = _ecx + _sx * _b * _math.cos(_t1)
+                                        _z1 = _ecz + _sz * _a * _math.sin(_t1)
+                                    if abs(_x0 - _x1) > 1e-10 or abs(_z0 - _z1) > 1e-10:
+                                        Line((_x0, _z0), (_x1, _z1))
+                        elif target["type"] == SegmentType.ARC and target["radius"] != 0.0:
                             b3d_radius = -target["radius"]
                             RadiusArc((cx, cz), (tx, tz), b3d_radius)
                         else:

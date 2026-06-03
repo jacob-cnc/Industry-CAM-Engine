@@ -20,7 +20,10 @@ from OCP.TopAbs import TopAbs_EDGE, TopAbs_VERTEX
 from OCP.TopoDS import TopoDS
 from OCP.gp import gp_Pnt, gp_Dir, gp_Lin, gp_Ax1
 from OCP.BRepAdaptor import BRepAdaptor_Curve
-from OCP.GeomAbs import GeomAbs_Line, GeomAbs_Circle
+from OCP.GeomAbs import (
+    GeomAbs_Line, GeomAbs_Circle, GeomAbs_Ellipse,
+    GeomAbs_BSplineCurve, GeomAbs_BezierCurve, GeomAbs_OtherCurve,
+)
 from OCP.BRepTools import BRepTools
 from OCP.BRepClass import BRepClass_FaceClassifier
 from OCP.TopLoc import TopLoc_Location
@@ -37,13 +40,15 @@ class EdgeData:
 
     def __init__(self, edge_type: str, start: Tuple[float, float],
                  end: Tuple[float, float], center: Optional[Tuple[float, float]] = None,
-                 radius: float = 0.0, direction: str = "cw"):
-        self.edge_type = edge_type  # "LINE" or "ARC"
+                 radius: float = 0.0, direction: str = "cw",
+                 ocp_edge=None):
+        self.edge_type = edge_type  # "LINE", "ARC", or "CURVE"
         self.start = start          # (x_dia, z)
         self.end = end              # (x_dia, z)
         self.center = center        # (x_dia, z) for arcs
         self.radius = radius        # Arc radius (positive)
         self.direction = direction  # "cw" or "ccw"
+        self.ocp_edge = ocp_edge    # Raw OCP edge for non-circular curve decomposition
 
 
 class ZoneQueryAPI:
@@ -280,6 +285,15 @@ class ZoneQueryAPI:
                     center=(center_x_dia, center_z),
                     radius=radius,
                     direction="cw",
+                ))
+            else:
+                # Non-circular curve (ellipse, BSpline, Bezier, etc.)
+                # Store the raw OCP edge for parametric decomposition by finish planner
+                raw_edges.append(EdgeData(
+                    edge_type="CURVE",
+                    start=(start_x_dia, start_z),
+                    end=(end_x_dia, end_z),
+                    ocp_edge=edge,
                 ))
 
             wire_explorer.Next()

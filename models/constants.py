@@ -33,3 +33,7 @@ MAX_DENSIFICATION_DEPTH: int = 12
 
 # Display densification max depth
 MAX_DISPLAY_DEPTH: int = 10
+
+# Quadrant arc edge decomposition chord error tolerance (inches)
+# Used by finish planner when decomposing elliptical/spline edges into G2/G3 arcs
+QUADRANT_CHORD_ERROR: float = 0.0001  # 0.1 thou

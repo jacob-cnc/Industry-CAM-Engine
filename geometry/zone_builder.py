@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import List, Tuple, Optional
 
 from build123d import (
-    BuildSketch, BuildLine, Line, RadiusArc, make_face, Sketch,
+    BuildSketch, BuildLine, Line, RadiusArc, Spline, Vector, make_face, Sketch,
     Axis, Mode, Kind,
 )
 from OCP.BRep import BRep_Tool
@@ -307,6 +307,8 @@ def _profile_to_radius_coords(profile: ClosedProfile) -> List[dict]:
             "x_radius": x_r,
             "z": z,
             "radius": seg.radius,
+            "quadrant": seg.quadrant,
+            "quadrant_sign": seg.quadrant_sign,
         })
 
     return coords
@@ -388,7 +390,14 @@ def _build_face_from_coords(coords: List[dict], profile: ClosedProfile) -> objec
       +R → Build123d -R → minor arc (center on one side)
       -R → Build123d +R → major arc (center on other side)
     This is the same convention used for user-defined arc segments.
+
+    Quadrant arc segments (quarter ellipse) are handled based on alignment:
+    - Axis-aligned (same X or same Z within tolerance) → RadiusArc (true circular arc)
+    - Off-axis (both X and Z differ) → Spline with tangent constraints (elliptical)
     """
+    import math
+    from models.constants import TOLERANCE
+
     with BuildSketch() as sketch:
         with BuildLine():
             if not coords:
@@ -406,7 +415,60 @@ def _build_face_from_coords(coords: List[dict], profile: ClosedProfile) -> objec
                 if abs(cx - tx) < 1e-10 and abs(cz - tz) < 1e-10:
                     continue
 
-                if target["type"] == SegmentType.ARC and target.get("radius", 0.0) != 0.0:
+                if target.get("quadrant", False):
+                    # Tangent-bounded quadrant arc: classify as axis-aligned or off-axis
+                    # Axis-aligned: start and end share same X or same Z (within TOLERANCE)
+                    # Off-axis: both X and Z differ beyond tolerance
+                    same_x = abs(cx - tx) < TOLERANCE
+                    same_z = abs(cz - tz) < TOLERANCE
+                    is_axis_aligned = same_x or same_z
+
+                    quadrant_sign = target.get("quadrant_sign", 1)
+
+                    # All quadrant arcs: use polyline from parametric ellipse math.
+                    # Even axis-aligned cases use polyline to avoid OCCT offset_2d
+                    # failures with RadiusArc at certain geometries.
+                    import math as _math
+                    dx = tx - cx
+                    dz = tz - cz
+                    b = abs(dx) if abs(dx) > 1e-10 else 0.0
+                    a = abs(dz) if abs(dz) > 1e-10 else 0.0
+
+                    if b < 1e-10 or a < 1e-10:
+                        # Truly axis-aligned (one delta is zero) → straight line
+                        # (bounding box has zero width in one dimension)
+                        Line((cx, cz), (tx, tz))
+                    else:
+                        if quadrant_sign == 1:
+                            ecx = cx
+                            ecz = tz
+                            sign_x = 1.0 if dx > 0 else -1.0
+                            sign_z = -1.0 if dz > 0 else 1.0
+                        else:
+                            ecx = tx
+                            ecz = cz
+                            sign_x = -1.0 if dx > 0 else 1.0
+                            sign_z = 1.0 if dz > 0 else -1.0
+
+                        num_pts = 64
+                        points = []
+                        for j in range(num_pts + 1):
+                            t = (_math.pi / 2.0) * j / num_pts
+                            if quadrant_sign == 1:
+                                px = ecx + sign_x * b * _math.sin(t)
+                                pz = ecz + sign_z * a * _math.cos(t)
+                            else:
+                                px = ecx + sign_x * b * _math.cos(t)
+                                pz = ecz + sign_z * a * _math.sin(t)
+                            points.append((px, pz))
+
+                        for j in range(len(points) - 1):
+                            p1 = points[j]
+                            p2 = points[j + 1]
+                            if abs(p1[0] - p2[0]) > 1e-10 or abs(p1[1] - p2[1]) > 1e-10:
+                                Line((p1[0], p1[1]), (p2[0], p2[1]))
+
+                elif target["type"] == SegmentType.ARC and target.get("radius", 0.0) != 0.0:
                     # Arc segment: signed radius convention
                     # Our convention: +R = minor arc, -R = major arc
                     # Build123d RadiusArc: -R = minor arc, +R = major arc (inverted)

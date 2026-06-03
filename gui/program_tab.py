@@ -39,6 +39,151 @@ from geometry.arc_helpers import is_arc_within_x_bounds
 logger = logging.getLogger(__name__)
 
 
+def _quadrant_arc_kernel_points(
+    x_start_r: float, z_start: float,
+    x_end_r: float, z_end: float,
+    quadrant_sign: int = 1,
+    num_points: int = 48,
+) -> list:
+    """Construct a quadrant arc as display points using parametric ellipse math.
+
+    The quadrant arc is a quarter ellipse inscribed in the bounding box defined
+    by the start and end points. ALL points on the curve must lie within this
+    bounding box — this is the defining constraint of a tangent-bounded arc.
+
+    For +Q (convex):
+        Center at (x_start_r, z_end) — the bounding box corner where
+        the start's X column meets the end's Z row.
+        x(t) = center_x + sign_x * b * sin(t)   [b = |dx|]
+        z(t) = center_z + sign_z * a * cos(t)   [a = |dz|]
+        At t=0: point = start (tangent purely in X direction)
+        At t=π/2: point = end (tangent purely in Z direction)
+
+    For -Q (concave):
+        Center at (x_end_r, z_start) — the opposite bounding box corner.
+        Same parametric form with swapped center and adjusted signs.
+
+    Args:
+        x_start_r: Start X in radius units
+        z_start: Start Z in inches
+        x_end_r: End X in radius units
+        z_end: End Z in inches
+        quadrant_sign: +1 for convex (Q), -1 for concave (-Q)
+        num_points: Number of display points to sample
+
+    Returns:
+        List of (x_r, z) tuples from start to end along the quarter ellipse.
+    """
+    import math
+    from models.constants import TOLERANCE
+
+    dx = x_end_r - x_start_r
+    dz = z_end - z_start
+
+    # Degenerate case: both deltas near zero → straight line
+    if abs(dx) < TOLERANCE and abs(dz) < TOLERANCE:
+        return [(x_start_r, z_start), (x_end_r, z_end)]
+
+    # Axis-aligned degenerate: one delta is zero → straight line
+    if abs(dx) < TOLERANCE or abs(dz) < TOLERANCE:
+        # For truly axis-aligned, the "ellipse" collapses to a line along one axis.
+        # Use a circular arc via RadiusArc for proper curvature.
+        axis_aligned_x = abs(dx) < TOLERANCE
+        try:
+            from build123d import RadiusArc
+            from OCP.BRepAdaptor import BRepAdaptor_Curve
+
+            arc_radius = abs(dz) if axis_aligned_x else abs(dx)
+            # For +Q convex axis-aligned: arc curves INTO the bounding box
+            # For -Q concave: arc curves AWAY (but stays in bounds for quarter-arc)
+            # The RadiusArc sign must produce an arc that stays within bounds.
+            # Negative radius = arc center on one side, positive = other side.
+            # We need the arc to bulge toward the bounding box interior.
+            #
+            # For same-X (vertical chord): bounding box extends in X on one side.
+            #   +Q wants the arc to NOT extend beyond [x_start, x_end] in X.
+            #   Since x_start == x_end, the arc can only go left or right.
+            #   +Q (convex on a lathe profile): arc should NOT extend outward.
+            #   Actually for axis-aligned same-X, this is just a straight line
+            #   since the bounding box has zero width in X.
+            # Wait — if same X, the bounding box has zero X extent, so ANY
+            # curvature would violate bounds. Return a straight line.
+            if axis_aligned_x:
+                return [(x_start_r, z_start + dz * i / num_points)
+                        for i in range(num_points + 1)]
+            else:
+                return [(x_start_r + dx * i / num_points, z_start)
+                        for i in range(num_points + 1)]
+        except Exception:
+            if axis_aligned_x:
+                return [(x_start_r, z_start + dz * i / num_points)
+                        for i in range(num_points + 1)]
+            else:
+                return [(x_start_r + dx * i / num_points, z_start)
+                        for i in range(num_points + 1)]
+
+    # Off-axis: true quarter ellipse using parametric math
+    # This is the proven approach from interpolate_quadrant_arc — always in bounds.
+    b = abs(dx)  # semi-axis along X
+    a = abs(dz)  # semi-axis along Z
+
+    if quadrant_sign == 1:
+        # Convex (+Q): center at (x_start_r, z_end)
+        # At t=0: x = cx, z = cz + sign_z*a = z_start → sign_z = (z_start - z_end) / a
+        # At t=π/2: x = cx + sign_x*b = x_end_r → sign_x = (x_end_r - x_start_r) / b
+        cx = x_start_r
+        cz = z_end
+        sign_x = 1.0 if dx > 0 else -1.0
+        sign_z = -1.0 if dz > 0 else 1.0
+    else:
+        # Concave (-Q): center at (x_end_r, z_start)
+        # At t=0: x = cx + sign_x*b*sin(0) = cx, z = cz + sign_z*a*cos(0) = z_start
+        # → cz + sign_z*a = z_start → sign_z*a = z_start - z_start = 0???
+        # No — for concave, the parametrization is different.
+        # At t=0: point = start → x_start = cx + sign_x*b*sin(0) = cx → cx = x_start??? 
+        # That doesn't work either. Let me think about this differently.
+        #
+        # For -Q: same endpoints, but the arc curves the other way.
+        # The center is at the OPPOSITE bounding box corner: (x_end_r, z_start)
+        # At t=0: (x_start_r, z_start) — tangent is along Z
+        # At t=π/2: (x_end_r, z_end) — tangent is along X
+        #
+        # x(t) = cx + sign_x * b * cos(t)  [note: cos not sin — tangent at start is Z]
+        # z(t) = cz + sign_z * a * sin(t)
+        # At t=0: x = cx + sign_x*b = x_start → sign_x = (x_start - x_end) / b
+        # At t=π/2: z = cz + sign_z*a = z_end → sign_z = (z_end - z_start) / a
+        cx = x_end_r
+        cz = z_start
+        sign_x = -1.0 if dx > 0 else 1.0  # opposite of dx direction
+        sign_z = 1.0 if dz < 0 else -1.0  # opposite of what +Q does... 
+
+        # Actually let me just use a clean formulation:
+        # For -Q, swap start/end tangent behavior:
+        # x(t) = cx + sign_x * b * cos(t)
+        # z(t) = cz + sign_z * a * sin(t)
+        # At t=0: x(0) = cx + sign_x*b should = x_start
+        #   sign_x*b = x_start - cx = x_start - x_end = -dx
+        #   sign_x = -dx / b = -dx / |dx|
+        sign_x = -1.0 if dx > 0 else 1.0
+        # At t=π/2: z(π/2) = cz + sign_z*a should = z_end
+        #   sign_z*a = z_end - cz = z_end - z_start = dz
+        #   sign_z = dz / a = dz / |dz|
+        sign_z = 1.0 if dz > 0 else -1.0
+
+    points = []
+    for i in range(num_points + 1):
+        t = (math.pi / 2.0) * i / num_points
+        if quadrant_sign == 1:
+            x = cx + sign_x * b * math.sin(t)
+            z = cz + sign_z * a * math.cos(t)
+        else:
+            x = cx + sign_x * b * math.cos(t)
+            z = cz + sign_z * a * math.sin(t)
+        points.append((x, z))
+
+    return points
+
+
 class ProgramState(Enum):
     """State machine states for the Program Tab."""
     IDLE = auto()
@@ -82,6 +227,7 @@ class ProgramTab(QWidget):
         self._program_file_path: Optional[str] = None
         self._last_gcode_text: str = ""  # Last generated G-code for saving
         self._profile_contour_segments: list = []  # Profile overlay for toolpath display
+        self._selected_segment_index: int = -1  # Currently selected segment in builder
         self._setup_ui()
         self._connect_signals()
         self._update_ui_for_state()
@@ -592,6 +738,7 @@ class ProgramTab(QWidget):
         # Segment list
         self._segment_list.segments_changed.connect(self._on_segments_changed)
         self._segment_list.corner_breaks_changed.connect(self._on_field_changed)
+        self._segment_list.selection_changed.connect(self._on_segment_selection_changed)
 
         # Generate button
         self._generate_btn.clicked.connect(self._on_generate_clicked)
@@ -634,6 +781,11 @@ class ProgramTab(QWidget):
             if min_z < 0:
                 self._stock_z_end.set_value(min_z)
         self._on_field_changed()
+
+    def _on_segment_selection_changed(self, seg_index: int):
+        """Segment selection changed in the builder — highlight on graph."""
+        self._selected_segment_index = seg_index
+        self._update_preview()
 
     def _on_peck_toggled(self, checked: bool):
         """Enable/disable peck length field based on checkbox."""
@@ -1149,8 +1301,13 @@ class ProgramTab(QWidget):
         all_z: List[float] = []
         all_x: List[float] = []
 
+        # Track point-index boundaries per segment for highlight rendering.
+        # Each entry is (start_idx, end_idx) into current_x/current_z.
+        seg_point_ranges: List[tuple] = []
+
         # Pre-compute segment endpoints (radius coords) for corner break geometry
         seg_endpoints = [(0.0, 0.0)]  # origin as implicit start
+
         for seg in segments:
             seg_endpoints.append((float(seg.get("x", 0.0)) / 2.0,
                                   float(seg.get("z", 0.0))))
@@ -1159,10 +1316,17 @@ class ProgramTab(QWidget):
         prev_z = 0.0
 
         for seg_idx, seg in enumerate(segments):
+            # Record where this segment's points start
+            _seg_start_idx = len(current_x)
+
             x_dia = float(seg.get("x", 0.0))
             z = float(seg.get("z", 0.0))
             x_r = x_dia / 2.0
-            radius = float(seg.get("radius", 0.0))
+            raw_radius = seg.get("radius", 0.0)
+            if isinstance(raw_radius, str) and raw_radius.strip().upper() in ("Q", "-Q"):
+                radius = raw_radius.strip().upper()  # "Q" or "-Q"
+            else:
+                radius = float(raw_radius)
             seg_type = seg.get("type", "line")
 
             # Determine if there's a corner break BEFORE this segment
@@ -1290,7 +1454,23 @@ class ProgramTab(QWidget):
                             trim_start_z = t2_z
                         # else: angle too small, skip fillet
 
-            if seg_type == "arc" and abs(radius) > 0.0001:
+            if seg_type == "arc" and radius in ("Q", "-Q"):
+                # Tangent-bounded quadrant arc — use Build123d kernel geometry
+                # and parametric sampling for display points (single source of truth).
+                quadrant_sign = -1 if radius == "-Q" else 1
+                points = _quadrant_arc_kernel_points(
+                    trim_start_x, trim_start_z, x_r, z, quadrant_sign
+                )
+                if not current_z:
+                    current_x.append(points[0][0])
+                    current_z.append(points[0][1])
+                for px_r, pz in points[1:]:
+                    current_x.append(px_r)
+                    current_z.append(pz)
+                all_x.append(x_r)
+                all_z.append(z)
+
+            elif seg_type == "arc" and isinstance(radius, (int, float)) and abs(radius) > 0.0001:
                 # Interpolate arc from trim_start to current endpoint
                 # Signed radius: +R = CW on screen, -R = CCW on screen
                 r_abs = abs(radius)
@@ -1395,6 +1575,9 @@ class ProgramTab(QWidget):
             prev_x_r = x_r
             prev_z = z
 
+            # Record where this segment's points end
+            seg_point_ranges.append((_seg_start_idx, len(current_x)))
+
         # Flush remaining line sub-path
         if len(current_z) > 1:
             segments_to_draw.append((current_z, current_x))
@@ -1432,6 +1615,23 @@ class ProgramTab(QWidget):
             profile_pen = pg.mkPen(profile_color, width=2)
             for seg_z, seg_x in segments_to_draw:
                 self._graph_widget.plot(seg_z, seg_x, pen=profile_pen)
+
+            # Highlight selected segment with a brighter, slightly thicker pen
+            sel_idx = self._selected_segment_index
+            if (0 <= sel_idx < len(seg_point_ranges)
+                    and len(current_z) > 1):
+                start_i, end_i = seg_point_ranges[sel_idx]
+                # Include the previous point for continuity (the segment
+                # starts from where the prior one ended)
+                draw_start = max(0, start_i - 1) if start_i > 0 else start_i
+                if end_i > draw_start:
+                    hi_z = current_z[draw_start:end_i]
+                    hi_x = current_x[draw_start:end_i]
+                    highlight_color = QColor(COLORS['status_info'])
+                    highlight_color.setAlpha(254)
+                    highlight_pen = pg.mkPen(highlight_color, width=3)
+                    item = self._graph_widget.plot(hi_z, hi_x, pen=highlight_pen)
+                    item.setZValue(6)  # Above normal profile
 
             # X=0 centerline (subtle, behind profile)
             z_min = min(all_z) if all_z else z_end

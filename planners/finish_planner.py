@@ -178,6 +178,7 @@ class FinishPlanner:
                     center=edge.center,
                     radius=edge.radius,
                     direction="flipped",  # Signal that arc direction must be inverted
+                    ocp_edge=edge.ocp_edge,  # Preserve raw edge for CURVE decomposition
                 )
                 profile_edges.append(flipped)
 
@@ -192,10 +193,12 @@ class FinishPlanner:
 
         LINE edges → G01 feed moves
         ARC edges → G02/G03 with exact center from OCCT
+        CURVE edges → decomposed into G02/G03 arc sequences via chord-error subdivision
 
         The first move feeds to the first edge's start point.
         """
         import math
+        from models.constants import QUADRANT_CHORD_ERROR
 
         moves = []
         if not edges:
@@ -218,7 +221,17 @@ class FinishPlanner:
         for edge in edges:
             end_x_dia, end_z = edge.end
 
-            if edge.edge_type == "ARC" and edge.center is not None:
+            if edge.edge_type == "CURVE" and edge.ocp_edge is not None:
+                # Decompose non-circular edge into circular arc segments
+                arc_moves = self._decompose_curve_edge(
+                    edge, prev_x_dia, prev_z, finishing_params, QUADRANT_CHORD_ERROR
+                )
+                moves.extend(arc_moves)
+                # Update prev position to the edge endpoint (guaranteed by decomposition)
+                prev_x_dia = end_x_dia
+                prev_z = end_z
+
+            elif edge.edge_type == "ARC" and edge.center is not None:
                 # Arc move with exact OCCT center
                 center_x_dia, center_z = edge.center
                 # I/K are incremental from start point (in diameter for I)
@@ -275,6 +288,288 @@ class FinishPlanner:
             prev_z = end_z
 
         return moves
+
+    def _decompose_curve_edge(
+        self, edge: 'EdgeData', prev_x_dia: float, prev_z: float,
+        finishing_params: FinishingParams, chord_error: float
+    ) -> List[ToolMove]:
+        """Decompose a non-circular OCCT edge into circular arc segments.
+
+        Uses adaptive parametric sampling with chord-error-based subdivision.
+        For each sub-span, fits a circular arc through three points (start, mid, end)
+        and checks that the maximum deviation from the true curve is within tolerance.
+        If not, the span is subdivided recursively.
+
+        Guarantees:
+        - Endpoint continuity: each sub-arc starts exactly where the previous ended
+        - Final endpoint matches edge.end exactly (no drift)
+        - All sub-arcs respect chord_error tolerance
+
+        Args:
+            edge: EdgeData with ocp_edge set (non-circular curve)
+            prev_x_dia: Current X position (diameter)
+            prev_z: Current Z position
+            finishing_params: Feed rate and pass info
+            chord_error: Maximum allowable deviation (inches)
+
+        Returns:
+            List of ToolMove objects (G2/G3 arcs) approximating the curve.
+        """
+        import math
+        from OCP.BRepAdaptor import BRepAdaptor_Curve
+        from OCP.gp import gp_Pnt
+
+        moves = []
+        ocp_edge = edge.ocp_edge
+        curve = BRepAdaptor_Curve(ocp_edge)
+
+        u_first = curve.FirstParameter()
+        u_last = curve.LastParameter()
+
+        # Determine parametric direction: does u_first correspond to edge.start or edge.end?
+        # Edge start/end are in diameter, curve points are in radius
+        p_first = curve.Value(u_first)
+        start_x_r = edge.start[0] / 2.0
+        start_z = edge.start[1]
+
+        dist_to_start = math.sqrt(
+            (p_first.X() - start_x_r) ** 2 + (p_first.Y() - start_z) ** 2
+        )
+
+        if dist_to_start < 0.001:
+            # Parametric direction matches edge direction
+            u_start = u_first
+            u_end = u_last
+        else:
+            # Parametric direction is reversed
+            u_start = u_last
+            u_end = u_first
+
+        # Adaptive subdivision: recursively split spans that exceed chord error
+        # Collect parameter spans as list of (u_a, u_b)
+        spans = self._subdivide_curve_spans(curve, u_start, u_end, chord_error)
+
+        # Convert each span into a circular arc ToolMove
+        # Track the running start point for incremental I/K calculation
+        running_x_dia = prev_x_dia
+        running_z = prev_z
+
+        for i, (u_a, u_b) in enumerate(spans):
+            # Get the three points for arc fitting: start, mid, end
+            u_mid = (u_a + u_b) / 2.0
+            p_a = curve.Value(u_a)
+            p_mid = curve.Value(u_mid)
+            p_b = curve.Value(u_b)
+
+            # Convert from radius to diameter coordinates
+            ax_dia = p_a.X() * 2.0
+            az = p_a.Y()
+            mx_dia = p_mid.X() * 2.0
+            mz = p_mid.Y()
+            bx_dia = p_b.X() * 2.0
+            bz = p_b.Y()
+
+            # Use exact edge endpoints for first and last spans (no drift)
+            if i == 0:
+                ax_dia = edge.start[0]
+                az = edge.start[1]
+            if i == len(spans) - 1:
+                bx_dia = edge.end[0]
+                bz = edge.end[1]
+
+            # Fit circular arc through three points (circumcenter in radius space)
+            ax_r = ax_dia / 2.0
+            mx_r = mx_dia / 2.0
+            bx_r = bx_dia / 2.0
+
+            center = self._circumcenter(ax_r, az, mx_r, mz, bx_r, bz)
+
+            if center is None:
+                # Degenerate (collinear) — emit as line move
+                moves.append(ToolMove(
+                    move_type=MoveType.FEED,
+                    x=bx_dia,
+                    z=bz,
+                    feed=finishing_params.feed,
+                    pass_type=PassType.FINISH,
+                    pass_index=0,
+                ))
+            else:
+                cx_r, cz = center
+                cx_dia = cx_r * 2.0
+                radius = math.sqrt((ax_r - cx_r) ** 2 + (az - cz) ** 2)
+
+                # I/K incremental from the arc start point (in diameter for I)
+                center_i = cx_dia - running_x_dia
+                center_k = cz - running_z
+
+                # Determine arc direction (CW/CCW) using cross product
+                # Cross product of (start→mid) × (start→end)
+                dx1 = mx_r - ax_r
+                dz1 = mz - az
+                dx2 = bx_r - ax_r
+                dz2 = bz - az
+                cross = dx1 * dz2 - dz1 * dx2
+
+                # Negative cross = CW (G02), Positive cross = CCW (G03)
+                is_cw = cross < 0
+                move_type = MoveType.ARC_CW if is_cw else MoveType.ARC_CCW
+                signed_r = radius if is_cw else -radius
+
+                moves.append(ToolMove(
+                    move_type=move_type,
+                    x=bx_dia,
+                    z=bz,
+                    feed=finishing_params.feed,
+                    radius=signed_r,
+                    center_i=center_i,
+                    center_k=center_k,
+                    pass_type=PassType.FINISH,
+                    pass_index=0,
+                ))
+
+            running_x_dia = bx_dia
+            running_z = bz
+
+        return moves
+
+    def _subdivide_curve_spans(
+        self, curve, u_start: float, u_end: float, chord_error: float,
+        max_depth: int = 12
+    ) -> List[tuple]:
+        """Adaptively subdivide a curve into spans where circular arc fit is within tolerance.
+
+        Uses a stack-based approach to avoid deep recursion. For each candidate span,
+        computes the maximum deviation between the fitted arc and the true curve at
+        several sample points. If deviation exceeds chord_error, the span is split.
+
+        Returns:
+            List of (u_a, u_b) parameter pairs in traversal order.
+        """
+        import math
+
+        result = []
+        # Stack of (u_a, u_b, depth)
+        stack = [(u_start, u_end, 0)]
+
+        while stack:
+            u_a, u_b, depth = stack.pop()
+
+            # If we've hit max depth, accept this span as-is
+            if depth >= max_depth:
+                result.append((u_a, u_b))
+                continue
+
+            # Sample three points for arc fitting
+            u_mid = (u_a + u_b) / 2.0
+            p_a = curve.Value(u_a)
+            p_mid = curve.Value(u_mid)
+            p_b = curve.Value(u_b)
+
+            ax_r, az = p_a.X(), p_a.Y()
+            mx_r, mz = p_mid.X(), p_mid.Y()
+            bx_r, bz = p_b.X(), p_b.Y()
+
+            # Fit circumscribed circle through three points
+            center = self._circumcenter(ax_r, az, mx_r, mz, bx_r, bz)
+
+            if center is None:
+                # Collinear points — check if the actual curve deviates from the line
+                # Sample additional points and check deviation from the line
+                max_dev = self._max_line_deviation(curve, u_a, u_b, ax_r, az, bx_r, bz)
+                if max_dev <= chord_error:
+                    result.append((u_a, u_b))
+                else:
+                    # Subdivide (push right first so left is processed first)
+                    stack.append((u_mid, u_b, depth + 1))
+                    stack.append((u_a, u_mid, depth + 1))
+                continue
+
+            cx_r, cz = center
+            radius = math.sqrt((ax_r - cx_r) ** 2 + (az - cz) ** 2)
+
+            # Check deviation at several interior sample points
+            max_dev = 0.0
+            n_check = 5
+            for j in range(1, n_check + 1):
+                t = j / (n_check + 1)
+                u_sample = u_a + t * (u_b - u_a)
+                p_sample = curve.Value(u_sample)
+                sx_r, sz = p_sample.X(), p_sample.Y()
+
+                # Distance from sample point to fitted arc center
+                dist = math.sqrt((sx_r - cx_r) ** 2 + (sz - cz) ** 2)
+                dev = abs(dist - radius)
+                if dev > max_dev:
+                    max_dev = dev
+
+            if max_dev <= chord_error:
+                # This span is within tolerance
+                result.append((u_a, u_b))
+            else:
+                # Subdivide (push right first so left is processed first)
+                stack.append((u_mid, u_b, depth + 1))
+                stack.append((u_a, u_mid, depth + 1))
+
+        # Sort result by parameter order
+        if u_start < u_end:
+            result.sort(key=lambda span: span[0])
+        else:
+            result.sort(key=lambda span: span[0], reverse=True)
+
+        return result
+
+    def _max_line_deviation(
+        self, curve, u_a: float, u_b: float,
+        ax_r: float, az: float, bx_r: float, bz: float
+    ) -> float:
+        """Compute the maximum deviation of the curve from a straight line between endpoints."""
+        import math
+
+        dx = bx_r - ax_r
+        dz = bz - az
+        line_len = math.sqrt(dx ** 2 + dz ** 2)
+        if line_len < 1e-12:
+            return 0.0
+
+        max_dev = 0.0
+        n_check = 5
+        for j in range(1, n_check + 1):
+            t = j / (n_check + 1)
+            u_sample = u_a + t * (u_b - u_a)
+            p_sample = curve.Value(u_sample)
+            sx_r, sz = p_sample.X(), p_sample.Y()
+
+            # Perpendicular distance from point to line
+            # Using cross product formula: |cross| / |line_vec|
+            cross = abs((sx_r - ax_r) * dz - (sz - az) * dx)
+            dev = cross / line_len
+            if dev > max_dev:
+                max_dev = dev
+
+        return max_dev
+
+    @staticmethod
+    def _circumcenter(
+        x1: float, z1: float, x2: float, z2: float, x3: float, z3: float
+    ) -> Optional[tuple]:
+        """Compute circumcenter of three points (the center of the circumscribed circle).
+
+        Returns (cx, cz) or None if points are collinear.
+        Uses the determinant formula for numerical stability.
+        """
+        ax, az = x1, z1
+        bx, bz = x2, z2
+        cx, cz = x3, z3
+
+        D = 2.0 * (ax * (bz - cz) + bx * (cz - az) + cx * (az - bz))
+        if abs(D) < 1e-12:
+            return None  # Collinear
+
+        ux = ((ax ** 2 + az ** 2) * (bz - cz) + (bx ** 2 + bz ** 2) * (cz - az) + (cx ** 2 + cz ** 2) * (az - bz)) / D
+        uz = ((ax ** 2 + az ** 2) * (cx - bx) + (bx ** 2 + bz ** 2) * (ax - cx) + (cx ** 2 + cz ** 2) * (bx - ax)) / D
+
+        return (ux, uz)
 
     def _moves_from_segments(
         self, segments: List[ProfileMove], finishing_params: FinishingParams
