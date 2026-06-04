@@ -254,9 +254,11 @@ setp mux8.jogscale-z.in7  0.000263672
 # sel0/sel1/sel2 are driven by compound-slide HAL pins via postgui.hal (GUI controls mode)
 
 # MPG connections
-net mpg-x-counts   hm2_7i96s.0.encoder.03.count  =>  joint.0.jog-counts  axis.x.jog-counts
+# NOTE: mpg-x/z-counts signals are created here (source = encoder) but routed
+# to joint jog-counts via mux2 in postgui.hal (supports compound slide muxing).
+net mpg-x-counts   hm2_7i96s.0.encoder.03.count
 net mpg-x-scale    mux8.jogscale-x.out            =>  joint.0.jog-scale   axis.x.jog-scale
-net mpg-z-counts   hm2_7i96s.0.encoder.02.count  =>  joint.1.jog-counts  axis.z.jog-counts
+net mpg-z-counts   hm2_7i96s.0.encoder.02.count
 net mpg-z-scale    mux8.jogscale-z.out            =>  joint.1.jog-scale   axis.z.jog-scale
 
 # Jog enable — machine must be ON for MPG to move axes

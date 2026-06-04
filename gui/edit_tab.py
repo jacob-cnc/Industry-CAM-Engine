@@ -763,6 +763,7 @@ class EditTab(QWidget):
             from pipeline.model_builder import build_from_fields
             from outputs.gcode_writer import GCodeWriter
             from models.tool import ToolDef, ToolOrientation, ToolDirection, ToolType
+            from gui.unit_state import unit_state
 
             stock = data.get("stock", {})
             roughing = data.get("roughing", {})
@@ -818,7 +819,7 @@ class EditTab(QWidget):
                 )
                 return
 
-            gcode_text = GCodeWriter().write(result.plan_result)
+            gcode_text = GCodeWriter().write(result.plan_result, unit_mode=unit_state.mode.value)
             self._editor.setPlainText(gcode_text)
             self._current_file_path = path
             self._update_file_label()

@@ -271,6 +271,9 @@ class SimViewerWidget(QWidget):
         self._frame_label.setText(f"0 / {self._path_len}")
         self._info_label.setText("Ready")
 
+        # Show all toolpath by default after generating
+        self._sim_show_all()
+
     def update_live_position(self, motion_line_1based: int, x_r: float, z: float):
         """Update tool dot and toolpath reveal for live machine execution.
 
@@ -485,11 +488,11 @@ class SimViewerWidget(QWidget):
         bar_layout.addWidget(self._btn_toggle_rapids)
         self._rapids_visible = True
 
-        self._btn_toggle_profile = QPushButton("Show Profile")
+        self._btn_toggle_profile = QPushButton("Hide Profile")
         self._btn_toggle_profile.setStyleSheet(btn_style)
         self._btn_toggle_profile.clicked.connect(self._toggle_profile)
         bar_layout.addWidget(self._btn_toggle_profile)
-        self._profile_visible = False
+        self._profile_visible = True
 
         speed_label = QLabel("Speed:")
         speed_label.setStyleSheet(f"color: {COLORS['text_secondary']};")
@@ -574,10 +577,10 @@ class SimViewerWidget(QWidget):
         """
         self._profile_segments = segments
         self._graph.set_profile_overlay(segments)
-        # Start hidden — user toggles on if desired
-        self._graph.set_profile_visible(False)
-        self._profile_visible = False
-        self._btn_toggle_profile.setText("Show Profile")
+        # Show profile by default — user can toggle off
+        self._graph.set_profile_visible(True)
+        self._profile_visible = True
+        self._btn_toggle_profile.setText("Hide Profile")
 
     # --- Path interpolation (identical to proven _visual_test_arc.py) ---
 
@@ -653,6 +656,12 @@ class SimViewerWidget(QWidget):
             self._sim_timer.stop()
             self._btn_play.setText("Play")
         else:
+            # If already at the end, auto-reset to beginning before playing
+            if self._sim_step >= self._path_len - 1:
+                self._sim_step = 0
+                self._graph.hide_all_toolpath()
+                if self._material_enabled:
+                    self._graph.set_material_to_stock()
             self._sim_timer.start(self._sim_speed)
             self._btn_play.setText("Pause")
 

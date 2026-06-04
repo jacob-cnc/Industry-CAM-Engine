@@ -900,13 +900,20 @@ class ProgramTab(QWidget):
             #    Falls back to raster zone shading instead.
             sim_data = None
 
-            # 7. Convert to graph data
-            stage = "graph_convert"
-            graph_data = graph_convert(plan_result, material_sim_data=sim_data)
-
-            # 8. Generate G-code
+            # 7. Generate G-code (before graph data — graph uses parsed G-code)
             stage = "gcode_write"
             gcode_text = GCodeWriter().write(plan_result, unit_mode=unit_state.mode.value)
+
+            # 8. Convert to graph data by parsing the generated G-code.
+            # This ensures the viewer shows ALL moves including approach/retract
+            # rapids that the G-code writer synthesizes (not in tool_moves).
+            stage = "graph_convert"
+            from outputs.graph_adapter import convert_from_moves
+            parsed_moves = parse_gcode(gcode_text)
+            if parsed_moves:
+                graph_data = convert_from_moves(parsed_moves)
+            else:
+                graph_data = graph_convert(plan_result, material_sim_data=sim_data)
 
             # 9. Parse for sim and load into SimViewerWidget
             stage = "sim_load"

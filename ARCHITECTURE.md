@@ -17,12 +17,14 @@ The system runs in two modes:
 │                    Industry CAM Engine                           │
 ├─────────────────────────────────────────────────────────────────┤
 │  GUI (PyQt5 + PyQtGraph)                                        │
-│    ├── Program Tab — conversational part definition              │
-│    ├── Edit Tab — G-code viewer/editor                          │
+│    ├── Manual Tab — jog, MPG, DRO, real-time position graph     │
 │    ├── Tools Tab — tool table management                        │
+│    ├── Run Tab — G-code execution with live toolpath tracking   │
+│    ├── Program Tab — conversational part definition + sim       │
+│    ├── Edit Tab — G-code editor + sim preview                   │
 │    ├── Debug Tab — plan result inspection                       │
-│    ├── Manual Tab — jog, MPG, DRO                               │
-│    └── Setup Tab — HAL monitor, PID tuning, commissioning       │
+│    ├── Setup Tab — HAL monitor, PID tuning, commissioning       │
+│    └── Help Tab — searchable docs + G-code reference            │
 ├─────────────────────────────────────────────────────────────────┤
 │  Pipeline (orchestration)                                       │
 │    execute() wires all modules together in sequence             │
@@ -186,23 +188,23 @@ All other modules receive geometric answers as plain numbers (floats, lists of c
 
 ## GUI Architecture
 
-### Tab Structure
+### Tab Structure (Operator-Priority Order)
 
 ```
 MainWindow (QMainWindow)
 ├── StatusBar (top, 48px)
 └── QTabWidget
-    ├── ProgramTab — profile editor, parameter fields, generate button, graph
-    ├── EditTab — G-code text editor with syntax highlighting
-    ├── ToolsTab — tool table (QTableWidget), touch-off controls
-    ├── DebugTab — plan result panels, zone data, validation status
-    ├── (Run placeholder)
-    ├── ManualTab — jog controls, MPG settings, DRO
+    ├── ManualTab — position graph (left) + DRO + jog/MPG/homing/MDI (right)
+    ├── ToolsTab — card-based tool editor, touch-off controls
+    ├── RunTab — SimViewerWidget + machine execution controls
+    ├── ProgramTab — profile editor + parameter fields (left) + SimViewerWidget (right)
+    ├── EditTab — GCodeEditor (left) + SimViewerWidget[no gcode panel] (right)
+    ├── DebugTab — text sub-panels (Fibers, Swept, Heatmap, Diagnostic, Round-Trip, Export)
     ├── SetupTab — commissioning sub-tabs:
     │   ├── HALMonitorTab — pin browser, signal tracing, watch list
     │   ├── TuningTab — PID tuning, following error graph
     │   └── CommissioningTab — guided 9-step checklist
-    └── (Help placeholder)
+    └── HelpTab — topic tree + content browser + searchable G-code reference table
 ```
 
 ### Signal Flow Between Tabs
@@ -214,17 +216,80 @@ ProgramTab.state_changed → StatusBar.update_state
 ToolsTab.tool_changed → MainWindow._on_tool_changed
 ToolsTab.tool_selected → ProgramTab.set_active_tool
 TabWidget.currentChanged → SetupTab.set_active (timer management)
+TabWidget.currentChanged → RunTab.set_active (poll timer management)
 ```
 
-### Graph Widget (gui/components/graph_widget.py)
+### Viewer Components
 
-Uses PyQtGraph for interactive visualization:
-- **Aspect locked 1:1** (lathe parts aren't square, but we lock for accuracy)
+The GUI uses two distinct graph widgets for different purposes:
+
+#### MachiningGraphWidget (gui/components/graph_widget.py)
+
+Low-level PyQtGraph PlotWidget for toolpath visualization:
+- **Aspect locked 1:1** (arcs display as true circles, geometry is accurate)
 - **Y-axis inverted** (`invertY(True)`) — operator POV: X+ is down (toward centerline)
 - **DiameterAxisItem** — Y-axis labels show diameter while plotting in radius
-- **Zone shadings** — rasterized as ImageItem overlay (avoids pyqtgraph fill bugs)
 - **Toolpath traces** — PlotCurveItem per segment, color-coded by move type
-- **Playback** — animated tool dot with progressive toolpath reveal
+- **Progressive reveal** — segments start hidden, revealed during playback
+- **Tool dot** — animated ScatterPlotItem for current tool position
+- **Crosshair** — coordinate readout with idle-timeout overlay (radius + diameter)
+- **Stock boundary** — dashed rectangle
+- **Centerline** — dash-dot line at X=0
+- **Double-click** — auto-fit view to full part
+
+#### SimViewerWidget (gui/components/sim_viewer.py)
+
+The primary visualization component — wraps MachiningGraphWidget with playback infrastructure. Used by **three tabs** (Program, Edit, Run):
+
+- **Graph** — embedded MachiningGraphWidget
+- **G-code panel** — optional GCodePanel with line highlighting (toggle via `show_gcode_panel` constructor arg)
+- **Playback controls** — Play/Pause, Step Forward, Reset, Show All, speed selector (1×–16×)
+- **Frame slider** — scrub through interpolated path
+- **Timer-driven animation** — pre-computed dense interpolated path (80 pts/inch feed, 20 pts/inch rapid)
+- **SimMove tracking** — maps each interpolated frame back to source G-code line
+- **Live execution** — `update_live_position(motion_line, x_r, z)` for real-time machine tracking
+
+```python
+# Usage pattern:
+viewer = SimViewerWidget(show_gcode_panel=True)   # Program, Run tabs
+viewer = SimViewerWidget(show_gcode_panel=False)  # Edit tab (has its own editor)
+viewer.load(graph_data, gcode_text, sim_moves)
+```
+
+#### PositionGraphWidget (gui/components/position_graph.py)
+
+Real-time position tracking graph for the Manual tab. Separate from the machining/toolpath viewer — shows live axis positions over time from HAL polling.
+
+### Viewer Usage by Tab
+
+| Tab | Viewer | G-code Panel | Sim Playback | Live Machine | Notes |
+|-----|--------|:---:|:---:|:---:|-------|
+| Manual | PositionGraphWidget | — | — | Position | Real-time X/Z position trace |
+| Tools | None | — | — | — | Card-based tool editor |
+| Run | SimViewerWidget(gcode=True) | Built-in | ✓ | Execution | Live tool dot + toolpath reveal during program run |
+| Program | SimViewerWidget(gcode=True) | Built-in (starts hidden) | ✓ | — | G-code panel expands after Generate/Open |
+| Edit | SimViewerWidget(gcode=False) | External (GCodeEditor) | ✓ | — | Editor on left, graph on right via QSplitter |
+| Debug | None | — | — | — | Text-only sub-panels |
+| Setup | None | — | — | — | HAL/PID/commissioning |
+| Help | None | — | — | — | Documentation browser |
+
+### Data Flow to Viewers
+
+```
+Pipeline path (Program tab):
+  pipeline.execute() → PlanResult
+    → outputs.gcode_writer.write() → gcode_text
+    → outputs.graph_adapter.convert() → GraphData
+    → parse_gcode_for_sim(gcode_text) → List[SimMove]
+    → SimViewerWidget.load(graph_data, gcode_text, sim_moves)
+
+File path (Run tab, Edit tab):
+  Open file → gcode_text
+    → outputs.gcode_parser.parse() → List[ToolMove]
+    → outputs.graph_adapter.convert_from_moves() → GraphData
+    → parse_gcode_for_sim(gcode_text) → List[SimMove]
+    → SimViewerWidget.load(graph_data, gcode_text, sim_moves)
+```
 
 ### Arc Direction Convention (UI ↔ Backend)
 
@@ -413,7 +478,7 @@ except Exception:
 
 7. **No pyqtgraph imports outside gui/.** The `outputs/graph_adapter.py` produces plain arrays. Only `gui/components/graph_widget.py` imports pyqtgraph.
 
-8. **Timer management in Setup tab.** All polling stops when the tab isn't visible. Use `set_active(bool)`. Never leave timers running in background.
+8. **Timer management in Setup and Run tabs.** All polling stops when the tab isn't visible. Use `set_active(bool)`. Never leave timers running in background. Run tab polls at 10Hz for live execution tracking.
 
 9. **INI file I/O uses regex, not configparser.** LinuxCNC INI files have quirks (inline comments, specific formatting) that configparser breaks. Use `gui/commissioning/ini_io.py`.
 

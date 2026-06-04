@@ -188,6 +188,7 @@ class MachiningGraphWidget(pg.PlotWidget):
         self._setup_crosshair()
         self._tool_dot = None
         self._next_seg_item = None
+        self._profile_overlay_items = []
         self._material_fill_items = []
         self._graph_data = data
 
@@ -303,6 +304,36 @@ class MachiningGraphWidget(pg.PlotWidget):
         """Hide all toolpath segments (Reset button)."""
         for item in self._toolpath_items:
             item.setVisible(False)
+
+    def set_profile_overlay(self, segments: list):
+        """Draw profile contour overlay on the graph.
+
+        Args:
+            segments: List of (z_coords, x_coords) tuples, each a sub-path
+                      in radius/inches coordinates (same format as preview).
+        """
+        import pyqtgraph as pg
+        from PyQt5.QtGui import QColor
+        from pyqtgraph.Qt import QtCore as _QtCore
+
+        # Remove any existing overlay items
+        for item in getattr(self, '_profile_overlay_items', []):
+            self.removeItem(item)
+        self._profile_overlay_items = []
+
+        profile_color = QColor(COLORS['graph_profile'])
+        profile_color.setAlpha(180)
+        profile_pen = pg.mkPen(profile_color, width=2, style=_QtCore.Qt.SolidLine)
+
+        for seg_z, seg_x in segments:
+            item = self.plot(seg_z, seg_x, pen=profile_pen)
+            item.setZValue(5)  # Above zones, below tool dot
+            self._profile_overlay_items.append(item)
+
+    def set_profile_visible(self, visible: bool):
+        """Show or hide the profile contour overlay."""
+        for item in getattr(self, '_profile_overlay_items', []):
+            item.setVisible(visible)
 
     def clear_toolpath(self):
         """Clear toolpath display (return to preview mode)."""

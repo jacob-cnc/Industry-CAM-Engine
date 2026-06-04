@@ -28,6 +28,7 @@ from PyQt5.QtWidgets import (
 from gui.colors import COLORS
 from gui.components.top_button_bar import TopButtonBar
 from gui.components.tool_geometry_row import ToolGeometryRow
+from gui.unit_state import unit_state
 from pipeline.tool_card_data import ToolCardData
 from pipeline.tool_table_io import load_tool_table, save_tool_table, create_backup
 
@@ -86,6 +87,9 @@ class Tools_Tab(QWidget):
         self._setup_ui()
         self._connect_button_bar_signals()
         self._setup_offline_mode()
+
+        # Subscribe to unit mode changes to refresh displayed tool geometry
+        unit_state.unit_changed.connect(self._on_unit_changed)
 
         # Load settings and auto-load last table
         self._load_settings_and_auto_load()
@@ -148,6 +152,24 @@ class Tools_Tab(QWidget):
                 self._button_bar._current_tool_label.setText("Offline")
         else:
             self._button_bar._current_tool_label.setText("Offline")
+
+    # ------------------------------------------------------------------
+    # Unit Mode Change
+    # ------------------------------------------------------------------
+
+    def _on_unit_changed(self, mode: str) -> None:
+        """Refresh all displayed tool geometry values on unit mode change.
+
+        The NumericField widgets in each ToolGeometryRow handle their own
+        display conversion (nose radius, X offset, Z offset are unit_aware).
+        This method ensures any additional tab-level displays are refreshed.
+
+        Stored tool data is never modified — only the display is updated.
+        """
+        # NumericField widgets already re-display via their own unit_changed
+        # subscription. Force a repaint of all cards to ensure visual consistency.
+        for card in self._cards:
+            card.update()
 
     # ------------------------------------------------------------------
     # Card Management

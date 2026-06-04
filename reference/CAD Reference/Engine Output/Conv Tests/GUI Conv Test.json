@@ -6,22 +6,28 @@
     "x_start": 0.0,
     "z_start": 0.1,
     "z_end": -1.0,
+    "x_park": 2.0,
+    "z_park": 2.0,
     "pilot_hole_dia": 0.0,
     "mode": "od"
   },
   "roughing": {
+    "tool_number": 1,
     "doc_dia": 0.05,
     "feed": 0.008,
-    "strategy": "staircase",
+    "strategy": "offset_contour",
     "fin_allowance": 0.005,
     "peck_enabled": false,
     "peck_length": null,
     "spindle_rpm": 1200.0
   },
   "finishing": {
+    "tool_number": 1,
     "passes": 1,
     "doc_dia": 0.002,
-    "feed": 0.003
+    "feed": 0.003,
+    "spindle_rpm": 1200.0,
+    "spring_pass": false
   },
   "segments": [
     {

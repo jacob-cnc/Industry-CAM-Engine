@@ -94,17 +94,16 @@ class StaircasePlanner:
 
             # Each interval becomes one pass
             for (interval_z_begin, interval_z_terminate) in intervals:
-                # The pass starts at the LESS positive Z of:
-                # - z_begin: where the tool enters (Z_start for ID, fin_allowance for OD)
-                # - interval_z_begin: where the MTR zone starts at this X level
-                # For OD: z_begin=0.001, interval=0.001 → start at 0.001
-                # For ID (no TFZ): z_begin=0.050, interval=0.001 → start at 0.001
-                #   BUT the tool enters at Z_start=0.050, so it should start there.
-                # Correct logic: pass starts at z_begin (tool entry), cuts to z_terminate.
-                # If interval_z_begin < z_begin, the zone extends above where the tool
-                # enters — that material was already cleared by face passes (OD) or
-                # doesn't exist (ID with no TFZ, zone boundary is just the clip edge).
-                clipped_z_begin = z_begin
+                # The pass starts at the interval's own z_begin (where material
+                # actually exists at this X level). This is critical for profiles
+                # with concave features that create multiple separate material
+                # regions at a single X level.
+                #
+                # Cap at z_begin: if the interval extends above z_begin (into the
+                # face zone that was already cleared), clip to z_begin.
+                # z_begin is the most-positive Z (e.g., 0.0025 = fin_allowance).
+                # interval_z_begin is always <= z_begin (intervals are inside MTR zone).
+                clipped_z_begin = min(z_begin, interval_z_begin)
                 z_terminate = interval_z_terminate
 
                 # Skip if no material to cut at this level

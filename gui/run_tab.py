@@ -437,7 +437,7 @@ class RunTab(QWidget):
             self._btn_pause.setText("Pause")
 
         # Live tool position and toolpath reveal from machine state during execution
-        if state.interp_state in (InterpState.READING, InterpState.PAUSED):
+        if state.interp_state in (InterpState.READING, InterpState.PAUSED, InterpState.WAITING):
             x_r = state.x.position / 2.0  # diameter → radius
             z = state.z.position
             self._sim_viewer.update_live_position(motion_line, x_r, z)

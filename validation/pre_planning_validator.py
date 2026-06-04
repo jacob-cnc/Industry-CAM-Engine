@@ -13,6 +13,62 @@ from models.profile import ClosedProfile, ProfileMove, SegmentType, MachiningMod
 from models.stock import StockDef
 from models.validation import ValidationResult, Severity
 from models.constants import TOLERANCE
+from geometry.arc_helpers import compute_arc_x_extremum, is_arc_within_x_bounds
+
+
+def _compute_arc_center(
+    x1_r: float, z1: float, x2_r: float, z2: float,
+    radius: float, is_cw: bool
+) -> tuple:
+    """Compute arc center using cross-product selection (same logic as planners).
+
+    Uses the same center selection algorithm as finish_planner._find_arc_center()
+    to ensure consistent behavior between validation and planning.
+
+    Args:
+        x1_r, z1: Start point (radius, inches)
+        x2_r, z2: End point (radius, inches)
+        radius: Arc radius (absolute value)
+        is_cw: True for CW on screen (+R), False for CCW (-R)
+
+    Returns:
+        (center_x_radius, center_z) or None if no solution.
+    """
+    mx = (x1_r + x2_r) / 2.0
+    mz = (z1 + z2) / 2.0
+
+    dx = x2_r - x1_r
+    dz = z2 - z1
+    d = math.sqrt(dx**2 + dz**2)
+
+    if d < 1e-10:
+        return None
+
+    h_sq = radius**2 - (d / 2.0)**2
+    if h_sq < 0:
+        h_sq = 0
+    h = math.sqrt(h_sq)
+
+    px = -dz / d
+    pz = dx / d
+
+    c1_x = mx + h * px
+    c1_z = mz + h * pz
+    c2_x = mx - h * px
+    c2_z = mz - h * pz
+
+    # Cross product: (start-center) x (end-center)
+    ax = x1_r - c1_x
+    az = z1 - c1_z
+    bx = x2_r - c1_x
+    bz = z2 - c1_z
+    cr1 = ax * bz - az * bx
+
+    # CW -> negative cross, CCW -> positive cross
+    if is_cw:
+        return (c1_x, c1_z) if cr1 < 0 else (c2_x, c2_z)
+    else:
+        return (c1_x, c1_z) if cr1 > 0 else (c2_x, c2_z)
 
 
 def validate_profile(profile: ClosedProfile, stock: StockDef) -> List[ValidationResult]:
@@ -99,6 +155,46 @@ def validate_profile(profile: ClosedProfile, stock: StockDef) -> List[Validation
                     recommendation=f"Increase radius to at least {min_radius + TOLERANCE:.5f}\" or adjust endpoints.",
                     location=(seg.x, seg.z),
                 ))
+            elif abs_radius >= min_radius - TOLERANCE:
+                # Radius is valid — check if the arc exceeds X bounds
+                # Compute arc center using cross-product selection (same as planners)
+                x1_r = prev_x / 2.0  # Convert diameter to radius
+                x2_r = seg.x / 2.0
+                is_cw = seg.radius > 0
+
+                center = _compute_arc_center(x1_r, prev_z, x2_r, seg.z, abs_radius, is_cw)
+                if center is not None:
+                    cx, cz = center
+                    if not is_arc_within_x_bounds(cx, cz, abs_radius, x1_r, prev_z, x2_r, seg.z, is_cw, TOLERANCE):
+                        # Compute the actual extremum for the error message
+                        x_min_arc, x_max_arc = compute_arc_x_extremum(
+                            cx, cz, abs_radius, x1_r, prev_z, x2_r, seg.z, is_cw
+                        )
+                        x_min_bound = min(x1_r, x2_r)
+                        x_max_bound = max(x1_r, x2_r)
+
+                        # Determine which bound is violated
+                        if x_max_arc > x_max_bound + TOLERANCE:
+                            extremum = x_max_arc
+                        else:
+                            extremum = x_min_arc
+
+                        results.append(ValidationResult(
+                            severity=Severity.ERROR,
+                            category="geometry",
+                            message=(
+                                f"Segment {i+1} (Arc): Arc from X={prev_x:.4f}\" to X={seg.x:.4f}\" "
+                                f"with radius={abs_radius:.5f}\" exceeds X bounds. "
+                                f"The arc path reaches X={extremum * 2:.4f}\" (dia) which is outside "
+                                f"[{x_min_bound * 2:.4f}\", {x_max_bound * 2:.4f}\"] (dia). "
+                                f"Consider using a larger radius or splitting into two segments."
+                            ),
+                            recommendation=(
+                                f"Increase radius to reduce arc bulge, adjust endpoints, "
+                                f"or split into two segments."
+                            ),
+                            location=(seg.x, seg.z),
+                        ))
 
         # OD mode: profile X should not exceed stock diameter
         if profile.mode == MachiningMode.OD:

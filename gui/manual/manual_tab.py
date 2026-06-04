@@ -26,6 +26,7 @@ from gui.manual.sections import (
     build_homing_section,
     build_compound_section,
 )
+from gui.unit_state import unit_state
 from hal import get_backend, HALBackend
 from hal.interface import TaskState, HomingState
 from hal.constants import JOG_MODES, DEFAULT_JOG_MODE_INDEX, JOG_INCREMENTS, DEFAULT_JOG_VELOCITY
@@ -234,8 +235,8 @@ class ManualTab(QWidget):
         self._jog["btn_clear_trail"].clicked.connect(self._graph.clear_trail)
 
         # Tool
-        self._tool["btn_change"].clicked.connect(
-            lambda: self._backend.tool_change(self._tool["tool_number_spin"].value()))
+        self._tool["btn_change"].clicked.connect(self._on_tool_change)
+        self._tool["tool_number_input"].returnPressed.connect(self._on_tool_change)
 
         # Touch-off
         self._touchoff["btn_touchoff"].clicked.connect(self._on_touchoff)
@@ -270,6 +271,9 @@ class ManualTab(QWidget):
             angle_val = CompoundLinearLogic.PRESETS[label]
             btn.clicked.connect(self._make_preset_handler(angle_val))
 
+        # Unit mode toggle — update DRO, touch-off, and jog velocity displays
+        unit_state.unit_changed.connect(self._on_unit_changed)
+
     # ==================================================================
     # Polling
     # ==================================================================
@@ -285,9 +289,12 @@ class ManualTab(QWidget):
         self._backend.poll()
         s = self._backend.state
 
-        # DRO
-        self._dro_x.setText(f"{s.x.position:+.4f}")
-        self._dro_z.setText(f"{s.z.position:+.4f}")
+        # DRO — apply unit conversion for display
+        dp = unit_state.decimals
+        x_display = unit_state.to_display(s.x.position)
+        z_display = unit_state.to_display(s.z.position)
+        self._dro_x.setText(f"{x_display:+.{dp}f}")
+        self._dro_z.setText(f"{z_display:+.{dp}f}")
 
         # Graph
         self._graph.update_position(s.x.position, s.z.position)
@@ -323,8 +330,12 @@ class ManualTab(QWidget):
         self._backend.jog_stop(axis)
 
     def _on_jog_vel_changed(self, value: float):
-        """Update pushbutton jog velocity (mirrors analog pot / 6-pos knob)."""
-        self._jog_velocity = value
+        """Update pushbutton jog velocity (mirrors analog pot / 6-pos knob).
+
+        The spinbox displays in the current unit system (in/s or mm/s).
+        Convert to inches/sec for the backend.
+        """
+        self._jog_velocity = unit_state.from_display(value)
 
     def _on_jog_inc_changed(self, index: int):
         """Update MPG mode selection — updates both GUI state and HAL mux8."""
@@ -332,13 +343,69 @@ class ManualTab(QWidget):
         if hasattr(self._backend, 'set_mpg_scale_index'):
             self._backend.set_mpg_scale_index(index)
 
+    def _on_tool_change(self):
+        """Validate tool number input and execute tool change if valid."""
+        text = self._tool["tool_number_input"].text().strip().upper()
+        # Strip leading 'T' if user typed it
+        if text.startswith("T"):
+            text = text[1:]
+        try:
+            tool_num = int(text)
+        except ValueError:
+            self._tool["tool_number_input"].setStyleSheet(
+                f"font-family: '{FONTS['mono_family']}'; font-size: 12pt;"
+                f" color: {COLORS['status_error']};"
+                f" background: {COLORS['bg_surface']};"
+                f" border: 1px solid {COLORS['status_error']};"
+                f" border-radius: 4px; padding: 2px 6px;"
+            )
+            return
+
+        # Get valid tool numbers from the tools tab
+        valid_tools = self._get_valid_tool_numbers()
+        if tool_num not in valid_tools:
+            self._tool["tool_number_input"].setStyleSheet(
+                f"font-family: '{FONTS['mono_family']}'; font-size: 12pt;"
+                f" color: {COLORS['status_error']};"
+                f" background: {COLORS['bg_surface']};"
+                f" border: 1px solid {COLORS['status_error']};"
+                f" border-radius: 4px; padding: 2px 6px;"
+            )
+            return
+
+        # Valid — reset style and execute
+        self._tool["tool_number_input"].setStyleSheet(
+            f"font-family: '{FONTS['mono_family']}'; font-size: 12pt;"
+            f" color: {COLORS['text_primary']};"
+            f" background: {COLORS['bg_surface']};"
+            f" border: 1px solid {COLORS['border_normal']};"
+            f" border-radius: 4px; padding: 2px 6px;"
+        )
+        self._tool["tool_number_input"].clear()
+        self._backend.tool_change(tool_num)
+
+    def _get_valid_tool_numbers(self) -> set:
+        """Return set of valid tool numbers from the Tools tab."""
+        main_window = self.window()
+        if hasattr(main_window, 'tools_tab'):
+            tools = main_window.tools_tab.get_tools()
+            return {t.tool_number for t in tools}
+        # Fallback: allow 1 through MAX_TOOLS
+        from hal.constants import MAX_TOOLS
+        return set(range(1, MAX_TOOLS + 1))
+
     def _on_touchoff(self):
-        """Execute touch-off (G10 L20)."""
+        """Execute touch-off (G10 L20).
+
+        The touch-off value spinbox displays in the current unit system.
+        Convert to inches before sending to LinuxCNC.
+        """
         axis = self._touchoff["axis"].currentIndex()
-        value = self._touchoff["value"].value()
+        display_value = self._touchoff["value"].value()
+        value = unit_state.from_display(display_value)
         wcs = self._touchoff["wcs"].currentIndex() + 1
         self._backend.touch_off(axis, value, wcs)
-        logger.info("Touch-off: axis=%d, value=%.4f, WCS=%d", axis, value, wcs)
+        logger.info("Touch-off: axis=%d, value=%.4f (inches), WCS=%d", axis, value, wcs)
 
     def _on_mdi_send(self):
         """Send MDI command."""
@@ -355,6 +422,49 @@ class ManualTab(QWidget):
         self._coord_toggle.setText(
             "Machine Coords (G53)" if checked else "Work Coords (G54)"
         )
+
+    def _on_unit_changed(self, mode: str):
+        """Handle unit mode change — update suffixes, ranges, and displays.
+
+        Called when the global unit toggle switches between inch and metric.
+        Updates:
+          - Touch-off value spinbox suffix and range
+          - Jog velocity spinbox suffix and range
+          - DRO is updated automatically on next poll cycle
+        """
+        from hal.constants import MAX_JOG_VELOCITY
+
+        # Touch-off value spinbox — update suffix and range
+        touchoff_spin = self._touchoff["value"]
+        if unit_state.is_metric:
+            touchoff_spin.setSuffix(" mm")
+            touchoff_spin.setDecimals(3)
+            touchoff_spin.setRange(-10.0 * 25.4, 25.0 * 25.4)
+            touchoff_spin.setSingleStep(0.025)
+        else:
+            touchoff_spin.setSuffix("\"")
+            touchoff_spin.setDecimals(4)
+            touchoff_spin.setRange(-10.0, 25.0)
+            touchoff_spin.setSingleStep(0.001)
+
+        # Jog velocity spinbox — update suffix and range
+        jog_spin = self._jog["jog_vel_spin"]
+        # Block signals to avoid triggering _on_jog_vel_changed during update
+        jog_spin.blockSignals(True)
+        current_vel_inches = self._jog_velocity  # always stored in inches/sec
+        if unit_state.is_metric:
+            jog_spin.setSuffix(" mm/s")
+            jog_spin.setDecimals(1)
+            jog_spin.setRange(0.01 * 25.4, MAX_JOG_VELOCITY * 25.4)
+            jog_spin.setSingleStep(2.5)
+            jog_spin.setValue(current_vel_inches * 25.4)
+        else:
+            jog_spin.setSuffix(" in/s")
+            jog_spin.setDecimals(2)
+            jog_spin.setRange(0.01, MAX_JOG_VELOCITY)
+            jog_spin.setSingleStep(0.1)
+            jog_spin.setValue(current_vel_inches)
+        jog_spin.blockSignals(False)
 
     # ==================================================================
     # Compound Slide

@@ -58,6 +58,7 @@ class MainWindow(QMainWindow):
 
         self._setup_ui()
         self._wire_signals()
+        self._set_initial_tool()
 
         self._prev_estop = False
 
@@ -188,6 +189,7 @@ class MainWindow(QMainWindow):
         Args:
             tool_number: The tool number that was modified.
         """
+        from pipeline.tool_card_data import tool_card_to_tool_def
         logger.info("Tool T%d modified in tool table", tool_number)
         # If the modified tool is the active tool, mark program stale
         if hasattr(self._program_tab, '_active_tool'):
@@ -195,16 +197,40 @@ class MainWindow(QMainWindow):
             if active and active.tool_number == tool_number:
                 updated = self._tools_tab.get_tool(tool_number)
                 if updated:
-                    self._program_tab.set_active_tool(updated)
+                    self._program_tab.set_active_tool(tool_card_to_tool_def(updated))
+
+    def _set_initial_tool(self):
+        """Set the first tool from the tool table as the active tool on startup.
+
+        Prevents the Program tab from falling back to a hardcoded T1 default
+        when the user generates without explicitly selecting a tool first.
+        """
+        from pipeline.tool_card_data import tool_card_to_tool_def
+        tools = self._tools_tab.get_tools()
+        if tools:
+            # Use the first non-reference tool (skip T99 master reference)
+            for card in tools:
+                if card.tool_number != 99:
+                    self._program_tab.set_active_tool(tool_card_to_tool_def(card))
+                    logger.info("Initial active tool set to T%d", card.tool_number)
+                    return
+            # If only T99 exists, use it anyway
+            self._program_tab.set_active_tool(tool_card_to_tool_def(tools[0]))
+            logger.info("Initial active tool set to T%d (only tool available)", tools[0].tool_number)
 
     def _on_tool_selected(self, tool_def):
         """Handle tool selection in Tools tab — update Program tab's active tool.
 
+        Converts ToolCardData to ToolDef before passing to the Program tab,
+        ensuring proper field mapping (radius→diameter, direction derivation).
+
         Args:
-            tool_def: The ToolDef that was selected.
+            tool_def: The ToolCardData that was selected.
         """
-        logger.info("Tool T%d selected in tool table", tool_def.tool_number)
-        self._program_tab.set_active_tool(tool_def)
+        from pipeline.tool_card_data import tool_card_to_tool_def
+        converted = tool_card_to_tool_def(tool_def)
+        logger.info("Tool T%d selected in tool table", converted.tool_number)
+        self._program_tab.set_active_tool(converted)
 
     def _on_tab_changed(self, index: int):
         """Handle main tab switch — activate/deactivate polling tabs."""

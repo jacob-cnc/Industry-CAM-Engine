@@ -70,6 +70,43 @@ the conversion is automatic.</p>
 <p>G54 is the default work coordinate system. Touch-off sets the G54 origin.
 G55–G59 are available for multiple setups.</p>
 """),
+        ("Graph Display & Scaling", """
+<h2>Graph Display &amp; Scaling</h2>
+<h3>What the Graph Shows</h3>
+<p>The position graph displays a <b>cross-section of one side</b> of the workpiece
+(the tool side), similar to looking at a lathe from above with the top half cut away.</p>
+<ul>
+<li><b>Vertical axis (X)</b> — labeled in <b>diameter</b> (inches)</li>
+<li><b>Horizontal axis (Z)</b> — labeled in inches (negative = into workpiece)</li>
+</ul>
+<h3>Why Arcs Appear Stretched</h3>
+<p>Because the X axis displays <b>diameter</b> but the graph only shows <b>one side</b>
+of the part (half the cross-section), features appear vertically stretched by 2:1
+relative to their Z extent.</p>
+<p>For example, a 0.015&quot; radius fillet spans 0.015&quot; in the physical X direction
+(radius), but shows up as 0.030&quot; on the graph (diameter). This means:</p>
+<ul>
+<li>A perfectly round fillet will look like an <b>ellipse</b> (2:1 aspect ratio)</li>
+<li>Arc features appear twice as tall as they are wide</li>
+<li>This is purely visual — the <b>G-code and geometry are correct</b></li>
+</ul>
+<p>This is standard behavior for any CAM software using diameter mode on a lathe.
+The DRO, G-code output, and graph all use the same diameter convention.</p>
+<h3>DRO (Digital Readout)</h3>
+<p>The DRO shows machine position in the same coordinate system as the graph
+and G-code:</p>
+<table border="1" cellpadding="6" cellspacing="0">
+<tr><th>Display</th><th>Convention</th><th>Example</th></tr>
+<tr><td>X DRO</td><td>Diameter</td><td>X1.000 = 0.500&quot; from center</td></tr>
+<tr><td>Z DRO</td><td>Position</td><td>Z-1.500 = 1.5&quot; from face</td></tr>
+<tr><td>Graph X axis</td><td>Diameter</td><td>Same as DRO</td></tr>
+<tr><td>Graph Z axis</td><td>Position</td><td>Same as DRO</td></tr>
+</table>
+<h3>Practical Implication</h3>
+<p>When measuring features on the graph (using the crosshair or zoom), remember
+that X differences are in diameter. To get the actual physical depth of a feature,
+divide the X span by 2.</p>
+"""),
     ],
     "Tabs": [
         ("Manual Tab", """

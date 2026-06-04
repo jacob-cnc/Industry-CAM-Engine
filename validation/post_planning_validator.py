@@ -119,7 +119,27 @@ def validate_all_moves(
                     fp_check = finished_part
 
                 for seg in sub_segments:
+                    # crosses() returns True when a line enters and exits
+                    # the polygon interior. But it returns False when the line
+                    # runs along the polygon BOUNDARY (coincident edge). To catch
+                    # boundary-coincident gouges (e.g., a roughing pass running
+                    # along a profile vertex where the polygon has a vertical edge),
+                    # also check if the segment's intersection with the polygon
+                    # interior has non-zero length.
+                    gouge_detected = False
                     if seg.crosses(fp_check):
+                        gouge_detected = True
+                    elif move.pass_type == PassType.ROUGH:
+                        # Extra check for roughing: a line that overlaps the
+                        # polygon boundary without crossing is still a gouge if
+                        # it has significant interior overlap. This catches the
+                        # case where a vertical roughing pass at a profile X
+                        # vertex coincides with the polygon edge.
+                        intersection = seg.intersection(fp_check)
+                        if not intersection.is_empty and intersection.length > TOLERANCE:
+                            gouge_detected = True
+
+                    if gouge_detected:
                         move_type_str = move.move_type.value.upper()
                         results.append(ValidationResult(
                             severity=Severity.ERROR,

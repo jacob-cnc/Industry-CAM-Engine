@@ -368,7 +368,8 @@ class ToolGeometryRow(QWidget):
         params_row.addWidget(front_label)
 
         self._front_angle_field = NumericField(NumericFieldConfig(
-            min_value=0.0, max_value=360.0, decimals=1, default_value=95.0
+            min_value=0.0, max_value=360.0, decimals=1, default_value=95.0,
+            unit_aware=False,
         ))
         self._front_angle_field.setFixedWidth(90)
         self._front_angle_field.value_changed.connect(self._on_geometry_changed)
@@ -379,7 +380,8 @@ class ToolGeometryRow(QWidget):
         params_row.addWidget(back_label)
 
         self._back_angle_field = NumericField(NumericFieldConfig(
-            min_value=0.0, max_value=360.0, decimals=1, default_value=175.0
+            min_value=0.0, max_value=360.0, decimals=1, default_value=175.0,
+            unit_aware=False,
         ))
         self._back_angle_field.setFixedWidth(90)
         self._back_angle_field.value_changed.connect(self._on_geometry_changed)
