@@ -32,3 +32,6 @@ from models.results import (
 from models.validation import (
     Severity, PipelineStatus, ValidationResult, PipelineResult,
 )
+from models.program import (
+    ThreadingParams, GroovingParams, ProgramBlock,
+)

@@ -168,6 +168,9 @@ class MainWindow(QMainWindow):
         # 5. Tool selected in Tools tab → update Program tab's active tool
         self._tools_tab.tool_selected.connect(self._on_tool_selected)
 
+        # 5b. Tool resolver — lets Program tab look up any tool by number
+        self._program_tab.set_tool_resolver(self._resolve_tool_by_number)
+
         # 6. Tab change → activate/deactivate Setup tab polling
         self._tab_widget.currentChanged.connect(self._on_tab_changed)
 
@@ -231,6 +234,21 @@ class MainWindow(QMainWindow):
         converted = tool_card_to_tool_def(tool_def)
         logger.info("Tool T%d selected in tool table", converted.tool_number)
         self._program_tab.set_active_tool(converted)
+
+    def _resolve_tool_by_number(self, tool_number: int):
+        """Look up a ToolDef by tool number from the tool table.
+
+        Used by Program tab to resolve finish tool when it differs from
+        the roughing tool.
+
+        Returns:
+            ToolDef or None if tool not found.
+        """
+        from pipeline.tool_card_data import tool_card_to_tool_def
+        card = self._tools_tab.get_tool(tool_number)
+        if card is not None:
+            return tool_card_to_tool_def(card)
+        return None
 
     def _on_tab_changed(self, index: int):
         """Handle main tab switch — activate/deactivate polling tabs."""

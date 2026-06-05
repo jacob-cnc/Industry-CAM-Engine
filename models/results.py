@@ -85,6 +85,9 @@ class PlanResult:
     validations: List['ValidationResult']
     warnings_overridden: bool = False
 
+    # Finish tool (if different from roughing tool)
+    finish_tool: Optional[ToolDef] = None
+
     # Metadata
     generation_time_ms: float = 0.0
     pass_count: int = 0

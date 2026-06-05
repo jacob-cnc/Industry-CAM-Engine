@@ -80,8 +80,8 @@ class FinishPlanner:
         if profile_edges and len(profile_edges) > 0:
             moves = self._moves_from_edges(profile_edges, finishing_params)
         else:
-            # Fallback: trace raw segments (no corner breaks in output)
-            moves = self._moves_from_segments(segments, finishing_params)
+            # Fallback: expand corner breaks from profile coords directly
+            moves = self._moves_from_segments(segments, finishing_params, profile)
 
         if not moves:
             return []
@@ -112,6 +112,10 @@ class FinishPlanner:
         coord to the last profile coord WITHOUT going through the closure
         region (centerline for OD, stock OD for ID).
 
+        If OCCT merged a collinear edge that contains the first profile
+        coord as an interior point, the edge is split at that point so
+        only the profile portion is returned.
+
         Returns:
             List of EdgeData for the profile portion in cutting order, or None.
         """
@@ -133,6 +137,7 @@ class FinishPlanner:
             last_z = profile_coords[-1]["z"]
 
             n_total = len(all_edges)
+            TOL = 0.001
 
             # Find edge whose start matches the last profile coord
             # (the wire goes: ...closure... → last_profile → ...profile... → first_profile → ...closure...)
@@ -143,7 +148,7 @@ class FinishPlanner:
             last_start_idx = None
             for i, edge in enumerate(all_edges):
                 sx, sz = edge.start
-                if abs(sx - last_x_dia) < 0.001 and abs(sz - last_z) < 0.001:
+                if abs(sx - last_x_dia) < TOL and abs(sz - last_z) < TOL:
                     last_start_idx = i
                     break
 
@@ -154,16 +159,33 @@ class FinishPlanner:
             # These are the profile edges in REVERSE cutting order
             reversed_edges = []
             idx = last_start_idx
+            found_first = False
             for _ in range(n_total):
                 edge = all_edges[idx]
                 ex, ez = edge.end
                 reversed_edges.append(edge)
-                # Check if we've reached the first profile coord
-                if abs(ex - first_x_dia) < 0.001 and abs(ez - first_z) < 0.001:
+                # Check if we've reached the first profile coord (exact endpoint)
+                if abs(ex - first_x_dia) < TOL and abs(ez - first_z) < TOL:
+                    found_first = True
                     break
                 idx = (idx + 1) % n_total
-            else:
-                # Didn't find first coord — extraction failed
+
+            if not found_first:
+                # OCCT may have merged collinear edges so the first profile
+                # coord is an interior point of a merged edge. Check the last
+                # edge we collected: if the first coord lies on it, split it.
+                if reversed_edges:
+                    last_edge = reversed_edges[-1]
+                    split_edge = self._split_edge_at_point(
+                        last_edge, first_x_dia, first_z, TOL
+                    )
+                    if split_edge is not None:
+                        # Replace the last edge with just the portion up to
+                        # the first profile coord
+                        reversed_edges[-1] = split_edge
+                        found_first = True
+
+            if not found_first:
                 return None
 
             # Reverse the edges and flip each one to get cutting direction.
@@ -185,6 +207,54 @@ class FinishPlanner:
             return profile_edges if profile_edges else None
         except Exception:
             return None
+
+    @staticmethod
+    def _split_edge_at_point(
+        edge, point_x_dia: float, point_z: float, tol: float
+    ):
+        """Split a LINE edge at an interior point, returning the portion from start to point.
+
+        Returns a new EdgeData if the point lies on the edge (between start and end),
+        or None if it doesn't.
+        """
+        from geometry.zone_query import EdgeData
+
+        if edge.edge_type != "LINE":
+            return None
+
+        sx, sz = edge.start
+        ex, ez = edge.end
+
+        # Check if the point is between start and end (parametrically)
+        dx = ex - sx
+        dz = ez - sz
+        length_sq = dx * dx + dz * dz
+        if length_sq < tol * tol:
+            return None
+
+        # Parameter t of the point on the line start→end
+        t = ((point_x_dia - sx) * dx + (point_z - sz) * dz) / length_sq
+
+        if t < 0.0 or t > 1.0:
+            return None
+
+        # Check distance from point to line
+        proj_x = sx + t * dx
+        proj_z = sz + t * dz
+        dist_sq = (proj_x - point_x_dia) ** 2 + (proj_z - point_z) ** 2
+        if dist_sq > tol * tol:
+            return None
+
+        # Point lies on the edge — return trimmed portion (start → point)
+        return EdgeData(
+            edge_type="LINE",
+            start=(sx, sz),
+            end=(point_x_dia, point_z),
+            center=None,
+            radius=None,
+            direction=edge.direction,
+            ocp_edge=None,  # Split edge doesn't have a valid OCP edge
+        )
 
     def _moves_from_edges(
         self, edges: List['EdgeData'], finishing_params: FinishingParams
@@ -572,12 +642,27 @@ class FinishPlanner:
         return (ux, uz)
 
     def _moves_from_segments(
-        self, segments: List[ProfileMove], finishing_params: FinishingParams
+        self, segments: List[ProfileMove], finishing_params: FinishingParams,
+        profile: ClosedProfile = None,
     ) -> List[ToolMove]:
-        """Fallback: trace raw segments without corner breaks.
+        """Fallback: trace profile segments with corner breaks expanded.
 
-        Used when zone_query is unavailable (e.g., testing without Build123d).
+        Used when zone_query is unavailable or OCCT edge extraction fails.
+        Expands chamfers and fillets using _profile_to_radius_coords so the
+        finish pass includes all corner break geometry.
         """
+        from geometry.zone_builder import _profile_to_radius_coords
+
+        # Use expanded coords (with chamfers/fillets) if profile is available
+        if profile is not None:
+            coords = _profile_to_radius_coords(profile)
+        else:
+            coords = None
+
+        if coords and len(coords) >= 2:
+            return self._moves_from_expanded_coords(coords, finishing_params)
+
+        # Ultimate fallback: raw segments (no corner breaks)
         moves = []
 
         first_seg = segments[0]
@@ -635,6 +720,82 @@ class FinishPlanner:
 
             prev_x_dia = seg.x
             prev_z = seg.z
+
+        return moves
+
+    def _moves_from_expanded_coords(
+        self, coords: list, finishing_params: FinishingParams
+    ) -> List[ToolMove]:
+        """Convert expanded profile coords (from _profile_to_radius_coords) to ToolMoves.
+
+        Coords are in RADIUS for x_radius. Output ToolMoves use DIAMETER for x.
+        Handles LINE and ARC segments with proper center computation.
+        """
+        import math
+        moves = []
+
+        # First move: feed to first coord
+        first = coords[0]
+        first_x_dia = first["x_radius"] * 2.0
+        first_z = first["z"]
+        moves.append(ToolMove(
+            move_type=MoveType.FEED,
+            x=first_x_dia,
+            z=first_z,
+            feed=finishing_params.feed,
+            pass_type=PassType.FINISH,
+            pass_index=0,
+        ))
+
+        prev_x_dia = first_x_dia
+        prev_z = first_z
+
+        for i in range(1, len(coords)):
+            coord = coords[i]
+            x_dia = coord["x_radius"] * 2.0
+            z = coord["z"]
+            seg_type = coord.get("type", SegmentType.LINE)
+            radius = coord.get("radius", 0.0)
+
+            if seg_type == SegmentType.ARC and radius != 0.0:
+                is_cw = radius > 0
+                center = self._find_arc_center(
+                    prev_x_dia / 2.0, prev_z,
+                    x_dia / 2.0, z,
+                    abs(radius), is_cw,
+                )
+                if center is not None:
+                    center_x_r, center_z = center
+                    center_i = (center_x_r - prev_x_dia / 2.0) * 2.0
+                    center_k = center_z - prev_z
+                else:
+                    center_i = 0.0
+                    center_k = 0.0
+
+                move_type = MoveType.ARC_CW if is_cw else MoveType.ARC_CCW
+                moves.append(ToolMove(
+                    move_type=move_type,
+                    x=x_dia,
+                    z=z,
+                    feed=finishing_params.feed,
+                    radius=radius,
+                    center_i=center_i,
+                    center_k=center_k,
+                    pass_type=PassType.FINISH,
+                    pass_index=0,
+                ))
+            else:
+                moves.append(ToolMove(
+                    move_type=MoveType.FEED,
+                    x=x_dia,
+                    z=z,
+                    feed=finishing_params.feed,
+                    pass_type=PassType.FINISH,
+                    pass_index=0,
+                ))
+
+            prev_x_dia = x_dia
+            prev_z = z
 
         return moves
 

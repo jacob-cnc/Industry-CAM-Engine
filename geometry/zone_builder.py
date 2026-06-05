@@ -270,20 +270,20 @@ def _profile_to_radius_coords(profile: ClosedProfile) -> List[dict]:
 
                         # Auto-detect corner type from cross product of
                         # arrival × departure directions.
-                        # This determines which side the arc center is on,
-                        # expressed as a signed radius (same convention as
-                        # user-defined arc segments: +R = one side, -R = other).
+                        # This determines which side of the chord the arc
+                        # center goes on, expressed as the Build123d RadiusArc
+                        # sign convention (passed directly, no downstream flip).
                         cross = arr_ux * dep_uz - arr_uz * dep_ux
 
-                        # Cross product sign → signed radius:
+                        # Cross product sign → Build123d RadiusArc sign:
                         # Positive cross (left turn / inside corner for OD):
-                        #   Center is on the left side → +R in our convention
+                        #   Center on material side → negative RadiusArc radius
                         # Negative cross (right turn / outside corner for OD):
-                        #   Center is on the right side → -R in our convention
+                        #   Center on material side → positive RadiusArc radius
                         if cross > 0:
-                            signed_fillet_r = fillet_r
-                        else:
                             signed_fillet_r = -fillet_r
+                        else:
+                            signed_fillet_r = fillet_r
 
                         # Emit trimmed endpoint for this segment
                         coords.append({
@@ -386,10 +386,10 @@ def _build_face_from_coords(coords: List[dict], profile: ClosedProfile) -> objec
     The coords list contains segment endpoints. We draw lines/arcs between
     consecutive endpoints to form a closed wire.
 
-    Arc segments use RadiusArc with signed radius:
-      +R → Build123d -R → minor arc (center on one side)
-      -R → Build123d +R → major arc (center on other side)
-    This is the same convention used for user-defined arc segments.
+    Arc segments use RadiusArc with signed radius passed directly:
+      ProfileMove.radius sign = direction (+CW, -CCW)
+      Build123d RadiusArc sign = which side of chord center goes on
+      These conventions align: pass target["radius"] directly (no sign flip).
 
     Quadrant arc segments (quarter ellipse) are handled based on alignment:
     - Axis-aligned (same X or same Z within tolerance) → RadiusArc (true circular arc)
@@ -469,10 +469,10 @@ def _build_face_from_coords(coords: List[dict], profile: ClosedProfile) -> objec
                                 Line((p1[0], p1[1]), (p2[0], p2[1]))
 
                 elif target["type"] == SegmentType.ARC and target.get("radius", 0.0) != 0.0:
-                    # Arc segment: signed radius convention
-                    # Our convention: +R = minor arc, -R = major arc
-                    # Build123d RadiusArc: -R = minor arc, +R = major arc (inverted)
-                    b3d_radius = -target["radius"]
+                    # Arc segment: pass signed radius directly to Build123d.
+                    # ProfileMove.radius sign (+CW/-CCW) matches RadiusArc's
+                    # side-of-chord convention for this engine's geometry.
+                    b3d_radius = target["radius"]
                     RadiusArc((cx, cz), (tx, tz), b3d_radius)
                 else:
                     Line((cx, cz), (tx, tz))

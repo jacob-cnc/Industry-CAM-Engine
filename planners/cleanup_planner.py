@@ -314,7 +314,7 @@ class CleanupPlanner:
                                     if abs(_x0 - _x1) > 1e-10 or abs(_z0 - _z1) > 1e-10:
                                         Line((_x0, _z0), (_x1, _z1))
                         elif target["type"] == SegmentType.ARC and target["radius"] != 0.0:
-                            b3d_radius = -target["radius"]
+                            b3d_radius = target["radius"]
                             RadiusArc((cx, cz), (tx, tz), b3d_radius)
                         else:
                             Line((cx, cz), (tx, tz))
@@ -323,8 +323,6 @@ class CleanupPlanner:
             finished_part_face = sketch.sketch
         except Exception:
             return []
-
-        # Step 2: Offset the finished part face outward by fin_allowance
         # Keep zone is ALWAYS larger than finished part (protective buffer)
         # Positive offset expands the face outward in all directions
         try:
@@ -671,7 +669,7 @@ class CleanupPlanner:
                         if abs(cx - tx) < 1e-10 and abs(cz - tz) < 1e-10:
                             continue
                         if target["type"] == SegmentType.ARC and target["radius"] != 0.0:
-                            b3d_radius = -target["radius"]
+                            b3d_radius = target["radius"]
                             RadiusArc((cx, cz), (tx, tz), b3d_radius)
                         else:
                             Line((cx, cz), (tx, tz))

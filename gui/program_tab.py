@@ -224,13 +224,18 @@ class ProgramTab(QWidget):
         super().__init__(parent)
         self._state = ProgramState.IDLE
         self._active_tool: Optional[ToolDef] = None
+        self._tool_resolver = None  # Callable[[int], Optional[ToolDef]] set by main_window
         self._program_file_path: Optional[str] = None
         self._last_gcode_text: str = ""  # Last generated G-code for saving
         self._profile_contour_segments: list = []  # Profile overlay for toolpath display
+        self._active_block_id: int = -1  # Currently displayed block ID
         self._selected_segment_index: int = -1  # Currently selected segment in builder
         self._setup_ui()
         self._connect_signals()
         self._update_ui_for_state()
+        # Start with a default OD Profile block in the block list
+        default_block = self._block_list.add_block("od_profile", select=True)
+        self._active_block_id = default_block.block_id
 
     # ------------------------------------------------------------------
     # Public API
@@ -309,6 +314,15 @@ class ProgramTab(QWidget):
         self._active_tool = tool_def
         self._on_field_changed()  # Mark as stale so user re-generates
 
+    def set_tool_resolver(self, resolver) -> None:
+        """Set the tool lookup callback for resolving tool numbers to ToolDef.
+
+        Args:
+            resolver: Callable[[int], Optional[ToolDef]] that looks up a tool
+                      by number from the tool table.
+        """
+        self._tool_resolver = resolver
+
     @property
     def graph_widget(self) -> MachiningGraphWidget:
         """Access the graph widget for external data loading."""
@@ -356,6 +370,7 @@ class ProgramTab(QWidget):
             - Status label
         """
         from gui.components.collapsible_section import CollapsibleSection
+        from gui.components.block_list import BlockListWidget
 
         panel = QWidget()
         panel_layout = QVBoxLayout(panel)
@@ -364,6 +379,13 @@ class ProgramTab(QWidget):
 
         # File operations row (always visible)
         panel_layout.addWidget(self._build_file_ops_section())
+
+        # Block list (multi-operation management) — inside a collapsible section
+        from gui.components.collapsible_section import CollapsibleSection as CS
+        self._section_blocks = CS("Blocks", expanded=True)
+        self._block_list = BlockListWidget()
+        self._section_blocks.add_widget(self._block_list)
+        panel_layout.addWidget(self._section_blocks)
 
         # Scrollable area for the accordion sections
         scroll = QScrollArea()
@@ -377,9 +399,10 @@ class ProgramTab(QWidget):
         sections_layout.setContentsMargins(0, 0, 0, 0)
         sections_layout.setSpacing(2)
 
-        # --- Toolpath Type section ---
+        # --- Toolpath Type section (hidden — replaced by block list, kept for internal state) ---
         self._section_type = CollapsibleSection("Toolpath Type", expanded=True)
         self._build_block_type_content(self._section_type)
+        self._section_type.setVisible(False)
         sections_layout.addWidget(self._section_type)
 
         # --- Stock section ---
@@ -401,6 +424,29 @@ class ProgramTab(QWidget):
         self._section_profile = CollapsibleSection("Profile Segments", expanded=True)
         self._build_profile_content(self._section_profile)
         sections_layout.addWidget(self._section_profile, stretch=1)
+
+        # --- Threading Parameters section (hidden by default) ---
+        from gui.components.threading_panel import ThreadingPanel
+        self._section_threading = CollapsibleSection("Threading Parameters", expanded=True)
+        self._threading_panel = ThreadingPanel()
+        self._section_threading.add_widget(self._threading_panel)
+        sections_layout.addWidget(self._section_threading)
+        self._section_threading.setVisible(False)
+
+        # --- Grooving Parameters section (hidden by default) ---
+        from gui.components.grooving_panel import GroovingPanel
+        self._section_grooving = CollapsibleSection("Grooving Parameters", expanded=True)
+        self._grooving_panel = GroovingPanel()
+        self._section_grooving.add_widget(self._grooving_panel)
+        sections_layout.addWidget(self._section_grooving)
+        self._section_grooving.setVisible(False)
+
+        # --- Parting Parameters section (hidden by default) ---
+        self._section_parting = CollapsibleSection("Parting Parameters", expanded=True)
+        self._parting_panel = GroovingPanel(is_parting=True)
+        self._section_parting.add_widget(self._parting_panel)
+        sections_layout.addWidget(self._section_parting)
+        self._section_parting.setVisible(False)
 
         scroll.setWidget(container)
         panel_layout.addWidget(scroll, stretch=1)
@@ -454,10 +500,6 @@ class ProgramTab(QWidget):
         self._block_type_combo.addItem("ID Profile")
         self._block_type_combo.addItem("Threading")
         self._block_type_combo.addItem("Grooving")
-        model = self._block_type_combo.model()
-        for i in (2, 3):
-            item = model.item(i)
-            item.setEnabled(False)
 
         form.addRow("Type:", self._block_type_combo)
         section.add_layout(form)
@@ -711,6 +753,16 @@ class ProgramTab(QWidget):
         # Block type change
         self._block_type_combo.currentIndexChanged.connect(self._on_block_type_changed)
 
+        # Block list signals
+        self._block_list.block_selected.connect(self._on_block_selected)
+        self._block_list.block_added.connect(self._on_block_added)
+        self._block_list.block_deleted.connect(self._on_block_deleted)
+
+        # Threading/grooving panel changes
+        self._threading_panel.params_changed.connect(self._on_field_changed)
+        self._grooving_panel.params_changed.connect(self._on_field_changed)
+        self._parting_panel.params_changed.connect(self._on_field_changed)
+
         # Stock fields
         self._stock_diameter.value_changed.connect(self._on_field_changed)
         self._stock_x_start.value_changed.connect(self._on_field_changed)
@@ -753,10 +805,173 @@ class ProgramTab(QWidget):
     # ------------------------------------------------------------------
 
     def _on_block_type_changed(self, index: int):
-        """Handle block type combo change — show/hide pilot hole for ID mode."""
+        """Handle block type combo change — show/hide sections for the selected type."""
         is_id = index == 1  # "ID Profile"
+        is_profile = index in (0, 1)  # OD or ID Profile
+        is_threading = index == 2
+        is_grooving = index == 3
+
+        # Pilot hole (ID profile only)
         self._pilot_hole_label.setVisible(is_id)
         self._stock_pilot_hole.setVisible(is_id)
+
+        # Show/hide profile-specific sections
+        self._section_stock.setVisible(is_profile)
+        self._section_roughing.setVisible(is_profile)
+        self._section_finishing.setVisible(is_profile)
+        self._section_profile.setVisible(is_profile)
+
+        # Show/hide threading section
+        self._section_threading.setVisible(is_threading)
+
+        # Show/hide grooving/parting sections
+        self._section_grooving.setVisible(is_grooving)
+        self._section_parting.setVisible(False)  # Parting is a separate block type in the list
+
+        self._on_field_changed()
+
+    def _on_block_selected(self, block_id: int):
+        """Handle block selection in the block list — save current, restore new."""
+        block = self._block_list.get_block_by_id(block_id)
+        if block is None:
+            return
+
+        # Save current block's field data before switching
+        self._save_active_block_data()
+
+        # Update the active block ID
+        self._active_block_id = block_id
+
+        # Map block_type to combo index
+        type_to_index = {
+            "od_profile": 0,
+            "id_profile": 1,
+            "threading_od": 2,
+            "threading_id": 2,
+            "grooving_od": 3,
+            "grooving_id": 3,
+            "parting": 3,
+        }
+        idx = type_to_index.get(block.block_type, 0)
+        # Block the combo signal to avoid recursion
+        self._block_type_combo.blockSignals(True)
+        self._block_type_combo.setCurrentIndex(idx)
+        self._block_type_combo.blockSignals(False)
+        # Trigger the section visibility update (no _on_field_changed to avoid saving again)
+        is_id = idx == 1
+        is_profile = idx in (0, 1)
+        is_threading = idx == 2
+        is_grooving = idx == 3
+
+        self._pilot_hole_label.setVisible(is_id)
+        self._stock_pilot_hole.setVisible(is_id)
+        self._section_stock.setVisible(is_profile)
+        self._section_roughing.setVisible(is_profile)
+        self._section_finishing.setVisible(is_profile)
+        self._section_profile.setVisible(is_profile)
+        self._section_threading.setVisible(is_threading)
+        self._section_grooving.setVisible(is_grooving)
+        self._section_parting.setVisible(False)
+
+        # Restore the new block's saved field data
+        self._restore_block_data(block)
+
+    def _save_active_block_data(self):
+        """Save current field values into the active block's params_data."""
+        if self._active_block_id < 0:
+            return
+        block = self._block_list.get_block_by_id(self._active_block_id)
+        if block is None:
+            return
+
+        if block.is_profile:
+            block.params_data = {
+                "stock": self.get_stock_values(),
+                "roughing": self.get_roughing_values(),
+                "finishing": self.get_finishing_values(),
+                "segments": self.get_segments(),
+                "corner_breaks": self.get_corner_breaks(),
+            }
+        elif block.is_threading:
+            block.params_data = self._threading_panel.get_values()
+        elif block.is_grooving:
+            if block.block_type == "parting":
+                block.params_data = self._parting_panel.get_values()
+            else:
+                block.params_data = self._grooving_panel.get_values()
+
+    def _restore_block_data(self, block):
+        """Restore field values from a block's params_data into the UI."""
+        data = block.params_data
+        if not data:
+            # No saved data — clear fields to defaults for new blocks
+            if block.is_profile:
+                self._segment_list.clear()
+            return
+
+        if block.is_profile:
+            # Restore stock fields
+            stock = data.get("stock", {})
+            if "diameter" in stock:
+                self._stock_diameter.set_value(stock["diameter"])
+            if "x_start" in stock:
+                self._stock_x_start.set_value(stock["x_start"])
+            if "z_start" in stock:
+                self._stock_z_start.set_value(stock["z_start"])
+            if "z_end" in stock:
+                self._stock_z_end.set_value(stock["z_end"])
+            if "x_park" in stock:
+                self._stock_x_park.set_value(stock["x_park"])
+            if "z_park" in stock:
+                self._stock_z_park.set_value(stock["z_park"])
+            if "pilot_hole_dia" in stock:
+                self._stock_pilot_hole.set_value(stock["pilot_hole_dia"])
+
+            # Restore roughing fields
+            roughing = data.get("roughing", {})
+            if "doc_dia" in roughing:
+                self._rough_doc.set_value(roughing["doc_dia"])
+            if "feed" in roughing:
+                self._rough_feed.set_value(roughing["feed"])
+            if "fin_allowance" in roughing:
+                self._rough_fin_allowance.set_value(roughing["fin_allowance"])
+            if "spindle_rpm" in roughing:
+                self._rough_rpm.set_value(roughing["spindle_rpm"])
+            if "tool_number" in roughing:
+                self._rough_tool_num.setValue(int(roughing["tool_number"]))
+
+            # Restore finishing fields
+            finishing = data.get("finishing", {})
+            if "tool_number" in finishing:
+                self._finish_tool_num.setValue(int(finishing["tool_number"]))
+            if "passes" in finishing:
+                self._finish_passes.set_value(float(finishing["passes"]))
+            if "doc_dia" in finishing:
+                self._finish_doc.set_value(finishing["doc_dia"])
+            if "feed" in finishing:
+                self._finish_feed.set_value(finishing["feed"])
+
+            # Restore segments
+            segments = data.get("segments", [])
+            corner_breaks = data.get("corner_breaks", [])
+            self._segment_list.set_segments(segments, corner_breaks)
+
+        elif block.is_threading:
+            self._threading_panel.set_values(data)
+        elif block.is_grooving:
+            if block.block_type == "parting":
+                self._parting_panel.set_values(data)
+            else:
+                self._grooving_panel.set_values(data)
+
+    def _on_block_added(self, block_type: str):
+        """Handle a new block being added to the list."""
+        block = self._block_list.get_selected_block()
+        if block:
+            self._on_field_changed()
+
+    def _on_block_deleted(self, block_id: int):
+        """Handle a block being removed from the list."""
         self._on_field_changed()
 
     def _on_field_changed(self, *args):
@@ -793,186 +1008,365 @@ class ProgramTab(QWidget):
         self._on_field_changed()
 
     def _on_generate_clicked(self):
-        """Generate button clicked — execute pipeline and display results.
+        """Generate button clicked — execute all visible blocks and combine output.
 
-        Uses staged error handling: each pipeline phase is wrapped individually
-        so the error dialog can report exactly which stage failed and why.
+        Iterates all enabled+visible blocks in order. Profile blocks run the
+        full pipeline. Threading/grooving blocks run their respective planners.
+        Tool changes (M0 + M6) are inserted between blocks with different tools.
         """
-        # Allow generate from BUILDING or READY (user may not have triggered validation)
         if self._state not in (ProgramState.READY, ProgramState.BUILDING):
             return
 
         self.set_state(ProgramState.GENERATING)
         self.generate_requested.emit()
 
-        stage = "model_build"
+        # Save the currently displayed block's data before generating
+        self._save_active_block_data()
+
+        stage = "block_iteration"
         try:
-            # 1. Gather field values
-            stock = self.get_stock_values()
-            roughing = self.get_roughing_values()
-            finishing = self.get_finishing_values()
-            segments = self.get_segments()
+            blocks = self._block_list.get_blocks()
+            # Filter to visible + enabled blocks
+            active_blocks = [b for b in blocks if b.enabled and b.visible]
 
-            # 2. Resolve tool from active selection or roughing tool number
-            #    Priority: _active_tool (set by Tools tab selection or startup)
-            #    Fallback: look up roughing tool_number from tool table via signal
-            tool_def = self._active_tool
-            if tool_def is None:
-                # No tool selected — use hardcoded default as last resort
-                tool_def = ToolDef(
-                    tool_number=roughing["tool_number"],
-                    nose_radius=0.016,
-                    tip_angle=80.0,
-                    edge_length=0.375,
-                    orientation=ToolOrientation.OD_FRONT_RIGHT,
-                    direction=ToolDirection.RIGHT,
-                    tool_type=ToolType.TURNING,
-                    description=f"Default T{roughing['tool_number']}",
-                )
-
-            # 3. Build typed dataclasses from field values
-            # x_start: Use the user's X Start value directly.
-            # X Start = 0 means face passes cut all the way to the centerline.
-            # X Start > 0 means face passes stop at that diameter.
-            x_start_val = stock["x_start"]
-
-            profile, stock_def, roughing_params, finishing_params = build_from_fields(
-                segments=segments,
-                stock_dia=stock["diameter"],
-                x_start=x_start_val,
-                z_start=stock["z_start"],
-                z_end=stock["z_end"],
-                mode=stock["mode"],
-                pilot_hole_dia=stock["pilot_hole_dia"],
-                doc_dia=roughing["doc_dia"],
-                feed=roughing["feed"],
-                strategy=roughing["strategy"],
-                fin_allowance=roughing["fin_allowance"],
-                peck_enabled=roughing["peck_enabled"],
-                peck_length=roughing["peck_length"],
-                spindle_rpm=roughing["spindle_rpm"],
-                finish_passes=int(finishing["passes"]),
-                finish_doc_dia=finishing["doc_dia"],
-                finish_feed=finishing["feed"],
-                tool_def=tool_def,
-                x_park=stock["x_park"],
-                z_park=stock["z_park"],
-                corner_breaks=self.get_corner_breaks(),
-            )
-
-            # 4. Execute pipeline
-            stage = "pipeline"
-            pipeline_result = pipeline_execute(
-                profile=profile,
-                stock=stock_def,
-                tool=tool_def,
-                roughing_params=roughing_params,
-                finishing_params=finishing_params,
-            )
-
-            # 5. Check result status
-            if pipeline_result.status not in (PipelineStatus.SUCCESS, PipelineStatus.SUCCESS_WITH_WARNINGS):
-                # Show validation errors in status label (brief)
-                errors = [v for v in pipeline_result.validations
-                          if v.severity.value == "error"]
-                first_msg = errors[0].message if errors else "Pipeline blocked"
-                self._status_label.setText(f"Error: {first_msg}")
-                self._status_label.setStyleSheet(
-                    f"color: {COLORS['status_error']}; font-size: {FONTS['small_size']}pt;"
-                )
-                # Log all validation results
-                for v in pipeline_result.validations:
-                    logger.warning("Validation [%s/%s]: %s", v.severity.value, v.category, v.message)
-
-                # Show detailed error dialog
-                from gui.components.error_dialog import GenerationErrorDialog
-                dlg = GenerationErrorDialog(self)
-                dlg.show_validation_errors(pipeline_result.validations, stage="pipeline validation")
-
-                self.set_state(ProgramState.READY)
-                return
-
-            plan_result = pipeline_result.plan_result
-
-            # 6. Material simulation DISABLED — still buggy, not accurately reflecting
-            #    real material removal. See .kiro/specs/material-sim-accuracy-fix/ and
-            #    .kiro/specs/material-removal-simulation/ for specs + progress notes.
-            #    Falls back to raster zone shading instead.
-            sim_data = None
-
-            # 7. Generate G-code (before graph data — graph uses parsed G-code)
-            stage = "gcode_write"
-            gcode_text = GCodeWriter().write(plan_result, unit_mode=unit_state.mode.value)
-
-            # 8. Convert to graph data by parsing the generated G-code.
-            # This ensures the viewer shows ALL moves including approach/retract
-            # rapids that the G-code writer synthesizes (not in tool_moves).
-            stage = "graph_convert"
-            from outputs.graph_adapter import convert_from_moves
-            parsed_moves = parse_gcode(gcode_text)
-            if parsed_moves:
-                graph_data = convert_from_moves(parsed_moves)
-            else:
-                graph_data = graph_convert(plan_result, material_sim_data=sim_data)
-
-            # 9. Parse for sim and load into SimViewerWidget
-            stage = "sim_load"
-            from gui.components.sim_viewer import parse_gcode_for_sim
-            sim_moves = parse_gcode_for_sim(gcode_text)
-            self._sim_viewer.load(graph_data, gcode_text, sim_moves)
-
-            # 9b. Pass profile contour for overlay toggle
-            if hasattr(self, '_profile_contour_segments') and self._profile_contour_segments:
-                self._sim_viewer.set_profile_overlay(self._profile_contour_segments)
-
-            # 10. Emit signals
-            self._last_gcode_text = gcode_text
-            self.gcode_generated.emit(gcode_text)
-            self.plan_result_ready.emit(plan_result)
-
-            # 11. Transition to DISPLAYING
-            self.set_state(ProgramState.DISPLAYING)
-
-            # Show success with warning count if any
-            warning_count = sum(1 for v in pipeline_result.validations
-                                if v.severity.value == "warning")
-            if warning_count > 0:
-                self._status_label.setText(
-                    f"Toolpath ready — {len(sim_moves)} moves, {warning_count} warning(s)"
-                )
+            if not active_blocks:
+                self._status_label.setText("No visible blocks to generate")
                 self._status_label.setStyleSheet(
                     f"color: {COLORS['status_warning']}; font-size: {FONTS['small_size']}pt;"
                 )
+                self.set_state(ProgramState.READY)
+                return
+
+            # Generate each block — collect G-code sections and the first plan_result
+            all_gcode_sections = []
+            first_plan_result = None
+            prev_tool_number = None
+            writer = GCodeWriter()
+
+            for block_idx, block in enumerate(active_blocks):
+                stage = f"block_{block_idx + 1}_{block.block_type}"
+
+                if block.is_profile:
+                    # Profile block — run the full pipeline
+                    gcode_text, plan_result = self._generate_profile_block(block, writer)
+                    if gcode_text is None:
+                        # Error occurred — already displayed to user
+                        self.set_state(ProgramState.READY)
+                        return
+                    if first_plan_result is None:
+                        first_plan_result = plan_result
+                    all_gcode_sections.append(gcode_text)
+
+                elif block.is_threading:
+                    # Threading block — emit G76 section
+                    gcode_lines = self._generate_threading_block(block, writer, prev_tool_number)
+                    all_gcode_sections.append("\n".join(gcode_lines) + "\n")
+
+                elif block.is_grooving:
+                    # Grooving/parting block — emit plunge section
+                    gcode_lines = self._generate_grooving_block(block, writer, prev_tool_number)
+                    all_gcode_sections.append("\n".join(gcode_lines) + "\n")
+
+                prev_tool_number = block.tool_number
+
+            # Combine all sections
+            # For multi-block: the first profile block provides the full program
+            # (with header, safety line, etc). Subsequent blocks are appended
+            # before the program end.
+            if len(all_gcode_sections) == 1:
+                combined_gcode = all_gcode_sections[0]
             else:
-                self._status_label.setStyleSheet(
-                    f"color: {COLORS['text_secondary']}; font-size: {FONTS['small_size']}pt;"
-                )
+                # First block is the full program — inject subsequent blocks before END
+                combined_gcode = self._combine_gcode_sections(all_gcode_sections)
+
+            # Load into viewer using the combined G-code
+            stage = "graph_convert"
+            from outputs.graph_adapter import convert_from_moves
+            parsed_moves = parse_gcode(combined_gcode)
+            if parsed_moves:
+                graph_data = convert_from_moves(parsed_moves)
+            else:
+                graph_data = graph_convert(first_plan_result)
+
+            stage = "sim_load"
+            from gui.components.sim_viewer import parse_gcode_for_sim
+            sim_moves = parse_gcode_for_sim(combined_gcode)
+            self._sim_viewer.load(graph_data, combined_gcode, sim_moves)
+
+            if hasattr(self, '_profile_contour_segments') and self._profile_contour_segments:
+                self._sim_viewer.set_profile_overlay(self._profile_contour_segments)
+
+            # Emit signals
+            self._last_gcode_text = combined_gcode
+            self.gcode_generated.emit(combined_gcode)
+            if first_plan_result:
+                self.plan_result_ready.emit(first_plan_result)
+
+            self.set_state(ProgramState.DISPLAYING)
+
+            block_count = len(active_blocks)
+            self._status_label.setText(
+                f"Program ready — {block_count} block{'s' if block_count > 1 else ''}, "
+                f"{len(sim_moves)} moves"
+            )
+            self._status_label.setStyleSheet(
+                f"color: {COLORS['text_secondary']}; font-size: {FONTS['small_size']}pt;"
+            )
 
         except Exception as e:
             import traceback as tb_module
             tb_str = tb_module.format_exc()
+            logger.error("Generation failed at stage '%s': %s\n%s", stage, e, tb_str)
 
-            # Log full traceback
-            logger.error(
-                "Generation failed at stage '%s': %s\n%s",
-                stage, e, tb_str,
-            )
-
-            # Brief status label message
             error_msg = str(e) if str(e) else type(e).__name__
-            # Truncate for status label (single line)
-            display_msg = error_msg[:80] + "..." if len(error_msg) > 80 else error_msg
-            self._status_label.setText(f"Error ({stage}): {display_msg}")
+            self._status_label.setText(f"Error: {error_msg[:80]}")
             self._status_label.setStyleSheet(
                 f"color: {COLORS['status_error']}; font-size: {FONTS['small_size']}pt;"
             )
 
-            # Show detailed error dialog
             from gui.components.error_dialog import GenerationErrorDialog
             dlg = GenerationErrorDialog(self)
             dlg.show_exception(e, tb_str, stage=stage)
 
             self.set_state(ProgramState.READY)
+
+    def _generate_profile_block(self, block, writer):
+        """Generate a profile block through the full pipeline.
+
+        Returns (gcode_text, plan_result) or (None, None) on error.
+        """
+        data = block.params_data
+        if not data or not data.get("segments"):
+            self._status_label.setText(f"Error: Block '{block.display_label}' has no segments")
+            self._status_label.setStyleSheet(
+                f"color: {COLORS['status_error']}; font-size: {FONTS['small_size']}pt;"
+            )
+            return None, None
+
+        stock = data.get("stock", {})
+        roughing = data.get("roughing", {})
+        finishing = data.get("finishing", {})
+        segments = data.get("segments", [])
+        corner_breaks = data.get("corner_breaks", [])
+
+        # Resolve tool
+        tool_num = roughing.get("tool_number", block.tool_number)
+        tool_def = None
+        if self._tool_resolver:
+            tool_def = self._tool_resolver(tool_num)
+        if tool_def is None:
+            tool_def = self._active_tool
+        if tool_def is None:
+            tool_def = ToolDef(
+                tool_number=tool_num,
+                nose_radius=0.016, tip_angle=80.0, edge_length=0.375,
+                orientation=ToolOrientation.OD_FRONT_RIGHT,
+                direction=ToolDirection.RIGHT,
+                tool_type=ToolType.TURNING,
+                description=f"T{tool_num}",
+            )
+
+        # Determine mode from block type
+        mode = "id" if block.block_type == "id_profile" else "od"
+
+        profile, stock_def, roughing_params, finishing_params = build_from_fields(
+            segments=segments,
+            stock_dia=stock.get("diameter", 1.0),
+            x_start=stock.get("x_start", 0.0),
+            z_start=stock.get("z_start", 0.1),
+            z_end=stock.get("z_end", -1.0),
+            mode=mode,
+            pilot_hole_dia=stock.get("pilot_hole_dia", 0.0),
+            doc_dia=roughing.get("doc_dia", 0.030),
+            feed=roughing.get("feed", 0.005),
+            strategy=roughing.get("strategy", "staircase"),
+            fin_allowance=roughing.get("fin_allowance", 0.010),
+            peck_enabled=roughing.get("peck_enabled", False),
+            peck_length=roughing.get("peck_length", None),
+            spindle_rpm=roughing.get("spindle_rpm", 1200.0),
+            finish_passes=int(finishing.get("passes", 1)),
+            finish_doc_dia=finishing.get("doc_dia", 0.002),
+            finish_feed=finishing.get("feed", 0.003),
+            tool_def=tool_def,
+            x_park=stock.get("x_park", 3.0),
+            z_park=stock.get("z_park", 3.0),
+            corner_breaks=corner_breaks,
+        )
+
+        # Resolve finish tool
+        finish_tool_def = None
+        finish_tool_num = finishing.get("tool_number", tool_num)
+        if finish_tool_num != tool_def.tool_number:
+            if self._tool_resolver:
+                finish_tool_def = self._tool_resolver(finish_tool_num)
+            if finish_tool_def is None:
+                finish_tool_def = ToolDef(
+                    tool_number=finish_tool_num,
+                    nose_radius=0.008, tip_angle=35.0, edge_length=0.375,
+                    orientation=ToolOrientation.OD_FRONT_RIGHT,
+                    direction=ToolDirection.RIGHT,
+                    tool_type=ToolType.TURNING,
+                    description=f"Finish T{finish_tool_num}",
+                )
+
+        pipeline_result = pipeline_execute(
+            profile=profile, stock=stock_def, tool=tool_def,
+            roughing_params=roughing_params, finishing_params=finishing_params,
+            finish_tool=finish_tool_def,
+        )
+
+        if pipeline_result.status not in (PipelineStatus.SUCCESS, PipelineStatus.SUCCESS_WITH_WARNINGS):
+            errors = [v for v in pipeline_result.validations if v.severity.value == "error"]
+            first_msg = errors[0].message if errors else "Pipeline blocked"
+            self._status_label.setText(f"Error in '{block.display_label}': {first_msg}")
+            self._status_label.setStyleSheet(
+                f"color: {COLORS['status_error']}; font-size: {FONTS['small_size']}pt;"
+            )
+            from gui.components.error_dialog import GenerationErrorDialog
+            dlg = GenerationErrorDialog(self)
+            dlg.show_validation_errors(pipeline_result.validations, stage=f"pipeline ({block.display_label})")
+            return None, None
+
+        plan_result = pipeline_result.plan_result
+        gcode_text = GCodeWriter().write(plan_result, unit_mode=unit_state.mode.value)
+        return gcode_text, plan_result
+
+    def _generate_threading_block(self, block, writer, prev_tool_number):
+        """Generate G-code lines for a threading block."""
+        from models.program import ThreadingParams
+        from planners.threading_planner import ThreadingPlanner
+
+        data = block.params_data
+        if not data:
+            return [f"; === THREADING BLOCK (no parameters set) ==="]
+
+        lines = []
+
+        # Tool change if needed
+        if prev_tool_number is not None and block.tool_number != prev_tool_number:
+            tool_def = self._resolve_tool_for_block(block)
+            rpm = data.get("spindle_rpm", 400)
+            lines.extend(writer.write_tool_change(tool_def, rpm))
+
+        # Build ThreadingParams
+        params = ThreadingParams(
+            thread_standard=data.get("thread_standard", "UNC"),
+            designation=data.get("designation", ""),
+            major_diameter=data.get("major_diameter", 0.5),
+            pitch=data.get("pitch", 1.0 / 13.0),
+            thread_depth=data.get("thread_depth", 0.0416),
+            start_z=data.get("start_z", 0.05),
+            end_z=data.get("end_z", -0.75),
+            infeed_method=data.get("infeed_method", "modified_flank"),
+            num_passes=data.get("num_passes", 6),
+            spring_passes=data.get("spring_passes", 2),
+            chamfer_threads=data.get("chamfer_threads", 1.0),
+            is_internal=block.block_type == "threading_id",
+            spindle_rpm=data.get("spindle_rpm", 400),
+            tool_number=block.tool_number,
+            num_starts=data.get("num_starts", 1),
+        )
+
+        tool_def = self._resolve_tool_for_block(block)
+        # Use a reasonable stock diameter for safe_x calculation
+        stock_dia = data.get("major_diameter", 0.5) + 0.1
+        lines.extend(writer.write_threading_block(
+            params, tool_def, stock_dia=stock_dia,
+            unit_mode=unit_state.mode.value,
+        ))
+        return lines
+
+    def _generate_grooving_block(self, block, writer, prev_tool_number):
+        """Generate G-code lines for a grooving/parting block."""
+        from models.program import GroovingParams
+
+        data = block.params_data
+        if not data:
+            return [f"; === GROOVING BLOCK (no parameters set) ==="]
+
+        lines = []
+
+        # Tool change if needed
+        if prev_tool_number is not None and block.tool_number != prev_tool_number:
+            tool_def = self._resolve_tool_for_block(block)
+            rpm = data.get("spindle_rpm", 800)
+            lines.extend(writer.write_tool_change(tool_def, rpm))
+
+        params = GroovingParams(
+            groove_type=data.get("groove_type", "single"),
+            is_internal=block.block_type == "grooving_id",
+            z_start=data.get("z_start", -0.5),
+            z_end=data.get("z_end", -0.625),
+            groove_depth=data.get("groove_depth", 0.100),
+            start_diameter=data.get("start_diameter", 1.0),
+            peck_enabled=data.get("peck_enabled", True),
+            peck_depth=data.get("peck_depth", 0.030),
+            peck_retract=data.get("peck_retract", 0.010),
+            feed=data.get("feed", 0.002),
+            spindle_rpm=data.get("spindle_rpm", 800),
+            tool_number=block.tool_number,
+            blade_width=data.get("blade_width", 0.125),
+        )
+
+        tool_def = self._resolve_tool_for_block(block)
+        stock_dia = data.get("start_diameter", 1.0) + 0.25
+        lines.extend(writer.write_grooving_block(
+            params, tool_def, stock_dia=stock_dia,
+            unit_mode=unit_state.mode.value,
+        ))
+        return lines
+
+    def _resolve_tool_for_block(self, block):
+        """Look up ToolDef for a block from the tool table."""
+        tool_def = None
+        if self._tool_resolver:
+            tool_def = self._tool_resolver(block.tool_number)
+        if tool_def is None:
+            from models.tool import ToolType as TT
+            tool_def = ToolDef(
+                tool_number=block.tool_number,
+                nose_radius=0.0, tip_angle=60.0, edge_length=0.375,
+                orientation=ToolOrientation.OD_FRONT_RIGHT,
+                direction=ToolDirection.RIGHT,
+                tool_type=TT.TURNING,
+                description=f"T{block.tool_number}",
+            )
+        return tool_def
+
+    def _combine_gcode_sections(self, sections):
+        """Combine multiple G-code sections into one program.
+
+        The first section is assumed to be a complete program (with header,
+        safety preamble, and M2 ending). Subsequent sections are inserted
+        before the program end (before the '=== PROGRAM END ===' marker).
+        """
+        if len(sections) <= 1:
+            return sections[0] if sections else ""
+
+        first = sections[0]
+        # Find the program end marker in the first section
+        end_marker = "; === PROGRAM END ==="
+        lines = first.split("\n")
+        insert_idx = None
+        for i, line in enumerate(lines):
+            if end_marker in line:
+                insert_idx = i
+                break
+
+        if insert_idx is None:
+            # No marker found — just concatenate
+            return "\n".join(sections)
+
+        # Insert subsequent sections before the end marker
+        before = lines[:insert_idx]
+        after = lines[insert_idx:]
+
+        # Add subsequent block sections
+        for section in sections[1:]:
+            before.append("")
+            before.extend(section.strip().split("\n"))
+
+        return "\n".join(before + [""] + after) + "\n"
 
     # ------------------------------------------------------------------
     # State Machine Logic
@@ -1157,17 +1551,34 @@ class ProgramTab(QWidget):
         Saves two files:
             - <name>.json — conversational program parameters (reloadable)
             - <name>.ngc — G-code output (loadable by Run tab)
+
+        Multi-block format: saves all blocks with their params_data.
         """
         import json
+
+        # Save the active block's current field state first
+        self._save_active_block_data()
+
+        # Serialize all blocks
+        blocks = self._block_list.get_blocks()
+        blocks_data = []
+        for block in blocks:
+            block_entry = {
+                "block_id": block.block_id,
+                "block_type": block.block_type,
+                "tool_number": block.tool_number,
+                "enabled": block.enabled,
+                "label": block.label,
+                "visible": block.visible,
+                "params": block.params_data,
+            }
+            blocks_data.append(block_entry)
+
         data = {
-            "version": 1,
-            "block_type": self.get_block_type(),
-            "stock": self.get_stock_values(),
-            "roughing": self.get_roughing_values(),
-            "finishing": self.get_finishing_values(),
-            "segments": self.get_segments(),
-            "corner_breaks": self.get_corner_breaks(),
+            "version": 2,
+            "blocks": blocks_data,
         }
+
         try:
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2)
@@ -1189,17 +1600,82 @@ class ProgramTab(QWidget):
                 )
 
     def _load_program_data(self, data: dict):
-        """Deserialize program state from JSON dict into fields."""
+        """Deserialize program state from JSON dict into fields.
+
+        Handles both formats:
+            - Version 2 (multi-block): data["blocks"] array
+            - Version 1 (legacy single-block): flat structure with stock/roughing/segments
+        """
+        from models.program import ProgramBlock
+
+        version = data.get("version", 1)
+
+        if version >= 2 and "blocks" in data:
+            # Multi-block format — rebuild the block list
+            blocks_data = data["blocks"]
+            blocks = []
+            for bd in blocks_data:
+                block = ProgramBlock(
+                    block_id=bd.get("block_id", 0),
+                    block_type=bd.get("block_type", "od_profile"),
+                    tool_number=bd.get("tool_number", 1),
+                    enabled=bd.get("enabled", True),
+                    label=bd.get("label", ""),
+                    visible=bd.get("visible", True),
+                )
+                block.params_data = bd.get("params", {})
+                blocks.append(block)
+
+            # Load into block list
+            self._block_list.set_blocks(blocks)
+            # Select the first block and restore its data
+            if blocks:
+                self._active_block_id = blocks[0].block_id
+                self._restore_block_data(blocks[0])
+                # Trigger section visibility for the first block's type
+                type_to_index = {
+                    "od_profile": 0, "id_profile": 1,
+                    "threading_od": 2, "threading_id": 2,
+                    "grooving_od": 3, "grooving_id": 3, "parting": 3,
+                }
+                idx = type_to_index.get(blocks[0].block_type, 0)
+                self._block_type_combo.blockSignals(True)
+                self._block_type_combo.setCurrentIndex(idx)
+                self._block_type_combo.blockSignals(False)
+                self._on_block_type_changed(idx)
+        else:
+            # Legacy single-block format — create one profile block from flat data
+            self._block_list.clear()
+
+            block_type_str = data.get("block_type", "OD Profile")
+            block_type_map = {"OD Profile": "od_profile", "ID Profile": "id_profile"}
+            block_type = block_type_map.get(block_type_str, "od_profile")
+
+            block = self._block_list.add_block(block_type, select=True)
+            self._active_block_id = block.block_id
+
+            # Load the legacy fields directly into the UI
+            self._legacy_load_fields(data)
+
+            # Save into the block's params_data
+            self._save_active_block_data()
+
+    def _legacy_load_fields(self, data: dict):
+        """Load fields from a legacy (version 1) single-block format."""
         # Block type
         block_type = data.get("block_type", "OD Profile")
         idx = self._block_type_combo.findText(block_type)
         if idx >= 0:
+            self._block_type_combo.blockSignals(True)
             self._block_type_combo.setCurrentIndex(idx)
+            self._block_type_combo.blockSignals(False)
 
         # Stock
         stock = data.get("stock", {})
         if "diameter" in stock:
             self._stock_diameter.set_value(stock["diameter"])
+        if "x_start" in stock:
+            self._stock_x_start.set_value(stock["x_start"])
         if "z_start" in stock:
             self._stock_z_start.set_value(stock["z_start"])
         if "z_end" in stock:
@@ -1313,13 +1789,17 @@ class ProgramTab(QWidget):
         seg_point_ranges: List[tuple] = []
 
         # Pre-compute segment endpoints (radius coords) for corner break geometry
-        seg_endpoints = [(0.0, 0.0)]  # origin as implicit start
+        # The profile implicitly starts at (first_segment_X, Z=0) — NOT at the origin.
+        # Use the first segment's X as the starting point (profile always starts at Z=0).
+        first_x_dia = float(segments[0].get("x", 0.0))
+        first_x_r = first_x_dia / 2.0
+        seg_endpoints = [(first_x_r, 0.0)]  # Profile start = first segment X at Z=0
 
         for seg in segments:
             seg_endpoints.append((float(seg.get("x", 0.0)) / 2.0,
                                   float(seg.get("z", 0.0))))
 
-        prev_x_r = 0.0
+        prev_x_r = first_x_r
         prev_z = 0.0
 
         for seg_idx, seg in enumerate(segments):
@@ -1623,6 +2103,9 @@ class ProgramTab(QWidget):
             for seg_z, seg_x in segments_to_draw:
                 self._graph_widget.plot(seg_z, seg_x, pen=profile_pen)
 
+            # Draw OTHER visible profile blocks' profiles (dimmer, behind active)
+            self._draw_other_block_profiles(pg)
+
             # Highlight selected segment with a brighter, slightly thicker pen
             sel_idx = self._selected_segment_index
             if (0 <= sel_idx < len(seg_point_ranges)
@@ -1654,6 +2137,92 @@ class ProgramTab(QWidget):
             self._graph_widget.getViewBox().autoRange()
         except Exception:
             pass  # Preview is best-effort, never block UI
+
+    def _draw_other_block_profiles(self, pg):
+        """Draw profile lines for all OTHER visible profile blocks (dimmer style).
+
+        Called during _update_preview to show all visible profiles simultaneously,
+        not just the active block's.
+        """
+        import math
+        from PyQt5.QtGui import QColor
+
+        blocks = self._block_list.get_blocks()
+        active_id = self._active_block_id
+
+        # Dimmer pen for non-active profiles
+        dim_color = QColor(COLORS['graph_profile'])
+        dim_color.setAlpha(100)
+        dim_pen = pg.mkPen(dim_color, width=1.5)
+
+        for block in blocks:
+            # Skip the active block (already drawn in bold), hidden blocks, and non-profile blocks
+            if block.block_id == active_id:
+                continue
+            if not block.visible or not block.enabled:
+                continue
+            if not block.is_profile:
+                continue
+
+            # Get saved segments for this block
+            data = block.params_data
+            if not data:
+                continue
+            segments = data.get("segments", [])
+            if not segments:
+                continue
+
+            # Build simple polyline from segments (no corner break rendering for non-active)
+            first_x_dia = float(segments[0].get("x", 0.0))
+            prev_x_r = first_x_dia / 2.0
+            prev_z = 0.0
+            z_pts = [prev_z]
+            x_pts = [prev_x_r]
+
+            for seg in segments:
+                x_dia = float(seg.get("x", 0.0))
+                z = float(seg.get("z", 0.0))
+                x_r = x_dia / 2.0
+                seg_type = seg.get("type", "line")
+                raw_radius = seg.get("radius", 0.0)
+
+                if seg_type == "arc" and raw_radius:
+                    # Simple arc interpolation for display
+                    try:
+                        if isinstance(raw_radius, str):
+                            radius_val = 0.0
+                        else:
+                            radius_val = float(raw_radius)
+                        if abs(radius_val) > 0.001:
+                            r = abs(radius_val)
+                            dx = x_r - prev_x_r
+                            dz = z - prev_z
+                            chord = math.sqrt(dx*dx + dz*dz)
+                            if chord < 2 * r:
+                                n_pts = max(8, int(chord / r * 16))
+                                for i in range(1, n_pts + 1):
+                                    t = i / n_pts
+                                    # Linear interpolation (approximate for preview)
+                                    z_pts.append(prev_z + dz * t)
+                                    x_pts.append(prev_x_r + dx * t)
+                            else:
+                                z_pts.append(z)
+                                x_pts.append(x_r)
+                        else:
+                            z_pts.append(z)
+                            x_pts.append(x_r)
+                    except (ValueError, TypeError):
+                        z_pts.append(z)
+                        x_pts.append(x_r)
+                else:
+                    z_pts.append(z)
+                    x_pts.append(x_r)
+
+                prev_x_r = x_r
+                prev_z = z
+
+            if len(z_pts) > 1:
+                self._graph_widget.plot(z_pts, x_pts, pen=dim_pen)
 
     def _validate_inline(self):
         """Show/clear validation errors as user types.

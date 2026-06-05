@@ -1,0 +1,204 @@
+%
+
+; Industry CAM Engine - Generated Program
+; Units: inch
+; Mode: OD
+;
+; === STOCK ===
+; Diameter: 3.5000
+; X Start: 3.0000
+; Z Start: 0.0250
+; Z End: -0.8000
+; X Park: 3.6000
+; Z Park: 2.0000
+; Pilot Hole Dia: 3.0000
+;
+; === TOOL ===
+; Tool Number: T1
+; Description: 
+; Nose Radius: 0.0160
+; Tip Angle: 80.0 deg
+; Edge Length: 0.0000
+; Orientation: 2
+; Direction: R
+; Type: turning
+;
+; === FEEDS & SPEEDS ===
+; Spindle RPM: 1200
+; Roughing Strategy: staircase
+; Roughing DOC (dia): 0.0500
+; Roughing Feed: 0.0060
+; Finish Allowance (dia): 0.0050
+; Finish Passes: 1
+; Finish DOC (dia): 0.0020
+; Finish Feed: 0.0030
+;
+; === PROFILE (3 segments) ===
+; Z Start: 0.0000
+; Z End: -0.8000
+; Seg 1: LINE X3.0000 Z0.0000
+; Seg 2: LINE X3.4000 Z0.0000
+;        Corner: CHAMFER 0.0150 x 45.0 deg
+; Seg 3: LINE X3.4000 Z-0.8000
+;
+; Passes: 5 total, Moves: 22
+; Generation time: 142.9 ms
+
+N10 G20 G18 G40 G49 G80  ; Safety line - inch, ZX plane, comp off
+N20 G90 G95  ; Absolute positioning, feed per revolution
+
+N30 S1200 M3  ; Spindle CW - enables encoder for feed/rev
+N40 G00 X3.6000 Z2.0000  ; Move to park position
+
+N50 T1 M6  ; Load tool T1 - 
+N60 G43  ; Tool length comp on
+
+N70 G42  ; Cutter comp on (TNR=0.0160)
+
+; === FACE PASSES (1 passes) ===
+N80 G00 X3.5100 Z0.0250  ; Approach: Stock OD, Z_start
+N90 G01 X3.5100 Z0.0025 F0.0060  ; Face pass 1: feed Z to 0.0025
+N100 G01 X3.5000 Z0.0025  ; Face pass 1: feed to X_start
+N110 G01 X3.0000 Z0.0025  ; Face pass 1: feed to X_start
+N120 G00 X3.5100 Z0.0250  ; Retract X to stock OD, Z=0.0250 (prev pass)
+
+; === ROUGHING PASSES (2 passes) ===
+N130 G00 X3.5100 Z0.0025  ; Rough pass 1: traverse Z to 0.0025 at X3.5100
+N140 G00 X3.5000 Z0.0025  ; Rough pass 1: rapid X to prev cleared 3.5000
+N150 G01 X3.4500 Z0.0025  ; Rough pass 1: feed X to DOC level 3.4500
+N160 G01 X3.4500 Z-0.8000  ; Rough pass 1 cut
+N170 G00 X3.5100 Z-0.8000  ; Retract X to prev pass level 3.5100
+N180 G00 X3.4500 Z0.0025  ; Rough pass 2: traverse Z to 0.0025 at X3.4500
+N190 G01 X3.4000 Z0.0025  ; Rough pass 2: feed X to DOC level 3.4000
+N200 G01 X3.4000 Z-0.0115  ; Rough pass 2 cut
+N210 G00 X3.4500 Z0.0025  ; Diagonal retract to X3.4500 (clears shoulder)
+
+; === CLEANUP PASS (semi-finish, roughing boundary contour) ===
+N220 G00 X3.5100 Z0.0025  ; Rapid to stock OD at Z0+fin
+N230 G00 X3.0050 Z0.0025  ; Rapid to X_start+fin=3.0050
+N240 G01 X3.3771 Z0.0025  ; Cleanup move 1
+N250 G01 X3.3771 Z0.0000  ; Cleanup move 2
+N260 G01 X3.4050 Z-0.0140  ; Cleanup move 3
+N270 G01 X3.4050 Z-0.8000  ; Cleanup move 4
+N280 G00 X3.5100 Z-0.8000  ; Retract X after cleanup
+N290 G00 X3.5100 Z0.0250  ; Traverse Z to Z_start
+
+; === FINISH PASS (profile contour) ===
+N300 G00 X3.5100 Z0.0010  ; Rapid to stock OD at Z0+fin
+N310 G00 X3.0000 Z0.0010  ; Rapid to X_start=3.0000
+N320 G01 X3.0000 Z0.0000 F0.0030  ; Finish move 1
+N330 G01 X3.3700 Z0.0000  ; Finish move 2
+N340 G01 X3.4000 Z-0.0150  ; Finish move 3
+N350 G01 X3.4000 Z-0.8000  ; Finish move 4
+
+
+%
+
+; Industry CAM Engine - Generated Program
+; Units: inch
+; Mode: ID
+;
+; === STOCK ===
+; Diameter: 3.5000
+; X Start: 3.2300
+; Z Start: 0.0250
+; Z End: -0.8000
+; X Park: 3.6000
+; Z Park: 2.0000
+; Pilot Hole Dia: 3.0000
+;
+; === TOOL ===
+; Tool Number: T1
+; Description: 
+; Nose Radius: 0.0160
+; Tip Angle: 80.0 deg
+; Edge Length: 0.0000
+; Orientation: 2
+; Direction: R
+; Type: turning
+;
+; === FEEDS & SPEEDS ===
+; Spindle RPM: 1200
+; Roughing Strategy: staircase
+; Roughing DOC (dia): 0.0500
+; Roughing Feed: 0.0060
+; Finish Allowance (dia): 0.0050
+; Finish Passes: 1
+; Finish DOC (dia): 0.0020
+; Finish Feed: 0.0030
+;
+; === PROFILE (3 segments) ===
+; Z Start: 0.0000
+; Z End: -0.8000
+; Seg 1: LINE X3.2300 Z0.0000
+; Seg 2: LINE X3.2000 Z0.0000
+;        Corner: CHAMFER 0.0150 x 45.0 deg
+; Seg 3: LINE X3.2000 Z-0.8000
+;
+; Passes: 6 total, Moves: 26
+; Generation time: 68.7 ms
+
+N10 G20 G18 G40 G49 G80  ; Safety line - inch, ZX plane, comp off
+N20 G90 G95  ; Absolute positioning, feed per revolution
+
+N30 S1200 M3  ; Spindle CW - enables encoder for feed/rev
+N40 G00 X3.6000 Z2.0000  ; Move to park position
+
+N50 T1 M6  ; Load tool T1 - 
+N60 G43  ; Tool length comp on
+
+N70 G42  ; Cutter comp on (TNR=0.0160)
+
+; === ROUGHING PASSES (4 passes) ===
+N80 G00 X2.9900 Z0.0025  ; Rough pass 1: traverse Z to 0.0025 at X2.9900
+N90 G01 X3.0500 Z0.0025 F0.0060  ; Rough pass 1: feed X to DOC level 3.0500
+N100 G01 X3.0500 Z-0.7975  ; Rough pass 1 cut
+N110 G00 X2.9900 Z0.0025  ; Diagonal retract to X2.9900 (clears pocket wall)
+N120 G00 X2.9900 Z0.0025  ; Rough pass 2: traverse Z to 0.0025 at X2.9900
+N130 G00 X3.0500 Z0.0025  ; Rough pass 2: rapid X to prev level 3.0500
+N140 G01 X3.1000 Z0.0025  ; Rough pass 2: feed X to DOC level 3.1000
+N150 G01 X3.1000 Z-0.7975  ; Rough pass 2 cut
+N160 G00 X2.9900 Z0.0025  ; Diagonal retract to X2.9900 (clears pocket wall)
+N170 G00 X2.9900 Z0.0025  ; Rough pass 3: traverse Z to 0.0025 at X2.9900
+N180 G00 X3.1000 Z0.0025  ; Rough pass 3: rapid X to prev level 3.1000
+N190 G01 X3.1500 Z0.0025  ; Rough pass 3: feed X to DOC level 3.1500
+N200 G01 X3.1500 Z-0.7975  ; Rough pass 3 cut
+N210 G00 X2.9900 Z0.0025  ; Diagonal retract to X2.9900 (clears pocket wall)
+N220 G00 X2.9900 Z0.0025  ; Rough pass 4: traverse Z to 0.0025 at X2.9900
+N230 G00 X3.1500 Z0.0025  ; Rough pass 4: rapid X to prev level 3.1500
+N240 G01 X3.2000 Z0.0025  ; Rough pass 4: feed X to DOC level 3.2000
+N250 G01 X3.2000 Z-0.0083  ; Rough pass 4 cut
+N260 G00 X2.9900 Z0.0025  ; Diagonal retract to X2.9900 (clears pocket wall)
+
+; === CLEANUP PASS (semi-finish, roughing boundary contour) ===
+N270 G00 X2.9900 Z0.0250  ; Rapid to pilot hole at Z0+fin
+N280 G00 X3.0000 Z0.0250  ; Rapid to X_start+fin=3.0000
+N290 G01 X3.2086 Z0.0250  ; Cleanup move 1
+N300 G01 X3.2086 Z0.0025  ; Cleanup move 2
+N310 G01 X3.1950 Z-0.0145  ; Cleanup move 3
+N320 G01 X3.1950 Z-0.7975  ; Cleanup move 4
+N330 G00 X2.9900 Z-0.7975  ; Retract X after cleanup
+N340 G00 X2.9900 Z0.0250  ; Traverse Z to Z_start
+
+; === FINISH PASS (profile contour) ===
+N350 G00 X2.9900 Z0.0250  ; Rapid to pilot hole at Z0+fin
+N360 G00 X3.2300 Z0.0250  ; Rapid to X_start=3.2300
+N370 G01 X3.2300 Z0.0000 F0.0030  ; Finish move 1
+N380 G01 X3.2120 Z0.0000  ; Finish move 2
+N390 G01 X3.2000 Z-0.0150  ; Finish move 3
+N400 G01 X3.2000 Z-0.8000  ; Finish move 4
+
+; === PROGRAM END ===
+N410 G40  ; Cutter comp cancel
+N420 G00 X3.6000 Z2.0000  ; Return to park
+N430 M5  ; Spindle stop
+N440 M2  ; Program end
+%
+
+; === PROGRAM END ===
+N360 G40  ; Cutter comp cancel
+N370 G00 X3.6000 Z2.0000  ; Return to park
+N380 M5  ; Spindle stop
+N390 M2  ; Program end
+%
+

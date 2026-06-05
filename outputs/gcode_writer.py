@@ -13,6 +13,7 @@ from models.results import PlanResult
 from models.moves import ToolMove, MoveType, PassType
 from models.profile import SegmentType, CornerBreakType
 from models.tool import ToolDef, ToolDirection
+from models.program import ThreadingParams, GroovingParams
 from models.constants import TOLERANCE, CENTER_ARC_RADIUS_TOLERANCE_INCH
 
 
@@ -33,6 +34,9 @@ class GCodeWriter:
         self._z: float = 0.0
         self._feed: Optional[float] = None
         self._n: int = 10
+        self._metric: bool = False
+        self._conv: float = 1.0
+        self._fmt: str = ".4f"
 
     def write(self, plan_result: PlanResult, unit_mode: str = "inch") -> str:
         """Generate complete G-code program from PlanResult.
@@ -62,8 +66,11 @@ class GCodeWriter:
         lines = []
 
         pr = plan_result
-        same_tool = True  # For now, roughing and finishing use same tool (single tool_def)
         is_id = pr.mode.value == "id"
+
+        # Determine if roughing and finishing use different tools
+        finish_tool = pr.finish_tool if pr.finish_tool is not None else pr.tool
+        same_tool = (finish_tool.tool_number == pr.tool.tool_number)
 
         # Safe boundary X: the side the tool approaches/retracts from
         # OD: stock OD + 0.010" clearance (0.005" per side above stock surface)
@@ -261,7 +268,12 @@ class GCodeWriter:
                     # Feed only the last DOC into material
                     lines.append(self._feed_line(p.x_level, p.z_start, pr.roughing_params.feed, f"Rough pass {i+1}: feed X to DOC level {p.x_level:.4f}"))
                 else:
-                    # Normal pass or first valley pass: feed from approach_x to DOC level
+                    # Normal pass: rapid X to previous cleared level, then feed last DOC
+                    # Previous cleared level = current DOC level + one DOC (already cut)
+                    prev_cleared_x = p.x_level + pr.roughing_params.doc_dia
+                    # Only add the rapid step if there's meaningful distance to cover
+                    if abs(approach_x - prev_cleared_x) > TOLERANCE and approach_x > prev_cleared_x + TOLERANCE:
+                        lines.append(self._rapid(prev_cleared_x, p.z_start, f"Rough pass {i+1}: rapid X to prev cleared {prev_cleared_x:.4f}"))
                     lines.append(self._feed_line(p.x_level, p.z_start, pr.roughing_params.feed, f"Rough pass {i+1}: feed X to DOC level {p.x_level:.4f}"))
                 # 3. Cut along Z
                 for move in p.moves:
@@ -314,17 +326,47 @@ class GCodeWriter:
                 lines.append(self._rapid(safe_x, self._z, "Retract X after cleanup"))
                 lines.append(self._rapid(safe_x, pr.stock.z_start, "Traverse Z to Z_start"))
             else:
-                # Different tool — retract to park for tool change
-                lines.append(self._line("G40", "Comp off for tool change"))
-                lines.append(self._rapid(park_x, park_z, "Retract to park for tool change"))
-                lines.append(self._line(f"T{pr.tool.tool_number} M6", "Load finish tool"))
+                # Different tool — retract to park, stop for tool change
+                lines.append(self._line("G40", "Cutter comp off for tool change"))
+                lines.extend(self._safe_retract_to_park(
+                    park_x, park_z, is_id, pr.stock_boundary, "Retract to park for tool change"
+                ))
+                lines.append(self._line("M5", "Spindle stop for tool change"))
+                lines.append(self._line("M0", "Mandatory stop - change tool"))
+                lines.append(self._line(f"T{finish_tool.tool_number} M6", f"Load finish tool T{finish_tool.tool_number} - {finish_tool.description}"))
                 lines.append(self._line("G43", "Tool length comp on"))
-                if has_tnr and comp_code != "G40":
-                    lines.append(self._line(f"{comp_code}", f"Re-engage cutter comp (TNR={pr.tool.nose_radius:.4f})"))
+                lines.append(self._line(f"S{pr.roughing_params.spindle_rpm:.0f} M3", "Spindle CW - resume"))
+                # Re-engage cutter comp for finish tool
+                finish_has_tnr = finish_tool.nose_radius > 0.0001
+                finish_comp_code = self._get_comp_code(finish_tool.direction) if finish_has_tnr else "G40"
+                if finish_has_tnr and finish_comp_code != "G40":
+                    lines.append(self._line(f"{finish_comp_code}", f"Cutter comp on (TNR={finish_tool.nose_radius:.4f})"))
+                else:
+                    lines.append(self._line("G40", "Cutter comp off (no TNR)"))
             lines.append("")
 
         # === FINISH PASS ===
         if pr.finish_passes:
+            # Tool change needed if no cleanup handled it and tools differ
+            if not pr.cleanup_passes and not same_tool:
+                lines.append("; === TOOL CHANGE (roughing → finishing) ===")
+                lines.append(self._line("G40", "Cutter comp off for tool change"))
+                lines.extend(self._safe_retract_to_park(
+                    park_x, park_z, is_id, pr.stock_boundary, "Retract to park for tool change"
+                ))
+                lines.append(self._line("M5", "Spindle stop for tool change"))
+                lines.append(self._line("M0", "Mandatory stop - change tool"))
+                lines.append(self._line(f"T{finish_tool.tool_number} M6", f"Load finish tool T{finish_tool.tool_number} - {finish_tool.description}"))
+                lines.append(self._line("G43", "Tool length comp on"))
+                lines.append(self._line(f"S{pr.roughing_params.spindle_rpm:.0f} M3", "Spindle CW - resume"))
+                finish_has_tnr = finish_tool.nose_radius > 0.0001
+                finish_comp_code = self._get_comp_code(finish_tool.direction) if finish_has_tnr else "G40"
+                if finish_has_tnr and finish_comp_code != "G40":
+                    lines.append(self._line(f"{finish_comp_code}", f"Cutter comp on (TNR={finish_tool.nose_radius:.4f})"))
+                else:
+                    lines.append(self._line("G40", "Cutter comp off (no TNR)"))
+                lines.append("")
+
             lines.append("; === FINISH PASS (profile contour) ===")
             # Approach: rapid to safe boundary at Z0+fin, then rapid X to X_start
             finish_pass = pr.finish_passes[0]
@@ -344,7 +386,9 @@ class GCodeWriter:
         # End
         lines.append("; === PROGRAM END ===")
         lines.append(self._line("G40", "Cutter comp cancel"))
-        lines.append(self._rapid(park_x, park_z, "Return to park"))
+        lines.extend(self._safe_retract_to_park(
+            park_x, park_z, is_id, pr.stock_boundary, "Return to park"
+        ))
         lines.append(self._line("M5", "Spindle stop"))
         lines.append(self._line("M2", "Program end"))
         lines.append("%")   # RS274 closing delimiter
@@ -367,6 +411,8 @@ class GCodeWriter:
             return self._feed_line(move.x, move.z, move.feed, comment)
         elif move.move_type in (MoveType.ARC_CW, MoveType.ARC_CCW):
             return self._arc(move, comment)
+        elif move.move_type == MoveType.DWELL:
+            return self._dwell(move.feed, comment)
         return ""
 
     def _rapid(self, x: float, z: float, comment: str) -> str:
@@ -377,6 +423,10 @@ class GCodeWriter:
         self._x = x
         self._z = z
         return self._line(line, comment)
+
+    def _dwell(self, seconds: float, comment: str) -> str:
+        """Emit G04 P[seconds] — dwell (chip-breaking pause in place)."""
+        return self._line(f"G04 P{seconds:.3f}", comment)
 
     def _feed_line(self, x: float, z: float, feed: float, comment: str) -> str:
         """Emit G01 — always shows both X and Z."""
@@ -501,6 +551,120 @@ class GCodeWriter:
         # Cap at safe_x — never retract beyond stock boundary
         return min(retract_x, safe_x)
 
+    def _safe_retract_to_park(
+        self, park_x: float, park_z: float, is_id: bool,
+        stock_boundary: list, comment: str = "Return to park",
+    ) -> List[str]:
+        """Material-aware retract to park position.
+
+        Instead of a single diagonal rapid (which may cut through the part),
+        this performs a 3-move sequence:
+          1. Retract X to safe clearance (clear of all material between current Z and park Z)
+          2. Traverse Z to park Z
+          3. Move X to park X
+
+        For OD: safe X = max material diameter in the Z travel range + clearance
+        For ID: safe X = min material diameter in the Z travel range - clearance
+
+        Args:
+            park_x: Park X position (diameter).
+            park_z: Park Z position.
+            is_id: True for ID/bore mode, False for OD mode.
+            stock_boundary: List of (diameter, Z) coordinate pairs defining the
+                material envelope (stock_boundary from PlanResult).
+            comment: Comment for the retract sequence.
+
+        Returns:
+            List of G-code lines for the safe retract.
+        """
+        lines = []
+        clearance = 0.050  # 0.050" diameter clearance beyond material
+
+        # Compute the Z range the tool will traverse
+        current_z = self._z
+        z_min = min(current_z, park_z)
+        z_max = max(current_z, park_z)
+
+        # Find the maximum (OD) or minimum (ID) material X across the Z travel range
+        safe_x = self._compute_safe_retract_x(
+            stock_boundary, z_min, z_max, is_id, clearance
+        )
+
+        # Step 1: Retract X to safe clearance at current Z
+        lines.append(self._rapid(safe_x, current_z, f"{comment} (1/3): retract X clear"))
+        # Step 2: Traverse Z to park Z at safe X
+        lines.append(self._rapid(safe_x, park_z, f"{comment} (2/3): traverse Z to park"))
+        # Step 3: Move X to park position
+        lines.append(self._rapid(park_x, park_z, f"{comment} (3/3): X to park"))
+
+        return lines
+
+    def _compute_safe_retract_x(
+        self, stock_boundary: list, z_min: float, z_max: float,
+        is_id: bool, clearance: float,
+    ) -> float:
+        """Compute the safe retract X that clears all material in a Z range.
+
+        Walks the stock boundary polygon and finds the extreme X value
+        for any segment that overlaps the Z travel range.
+
+        For OD: returns the maximum diameter + clearance (retract outward).
+        For ID: returns the minimum diameter - clearance (retract inward toward center).
+
+        Falls back to a conservative default if boundary is empty.
+        """
+        if not stock_boundary or len(stock_boundary) < 2:
+            # No boundary data — fall back to conservative value
+            return self._x  # Stay where we are (caller handles park separately)
+
+        if is_id:
+            # ID: find the minimum X (smallest bore diameter) in the Z range
+            # Start with a large value and find the tightest constraint
+            extreme_x = float('inf')
+            for i in range(len(stock_boundary) - 1):
+                x1, z1 = stock_boundary[i]
+                x2, z2 = stock_boundary[i + 1]
+                # Check if this edge overlaps the Z travel range
+                seg_z_min = min(z1, z2)
+                seg_z_max = max(z1, z2)
+                if seg_z_max < z_min - TOLERANCE or seg_z_min > z_max + TOLERANCE:
+                    continue  # No overlap
+                # This segment is in the Z range — track the minimum X
+                extreme_x = min(extreme_x, x1, x2)
+            # Also check first/last connecting segment (closed polygon)
+            if len(stock_boundary) >= 2:
+                x1, z1 = stock_boundary[-1]
+                x2, z2 = stock_boundary[0]
+                seg_z_min = min(z1, z2)
+                seg_z_max = max(z1, z2)
+                if not (seg_z_max < z_min - TOLERANCE or seg_z_min > z_max + TOLERANCE):
+                    extreme_x = min(extreme_x, x1, x2)
+
+            if extreme_x == float('inf'):
+                extreme_x = 0.0  # Fallback for ID — retract to centerline
+            return max(0.0, extreme_x - clearance)
+        else:
+            # OD: find the maximum X (largest stock diameter) in the Z range
+            extreme_x = 0.0
+            for i in range(len(stock_boundary) - 1):
+                x1, z1 = stock_boundary[i]
+                x2, z2 = stock_boundary[i + 1]
+                seg_z_min = min(z1, z2)
+                seg_z_max = max(z1, z2)
+                if seg_z_max < z_min - TOLERANCE or seg_z_min > z_max + TOLERANCE:
+                    continue
+                extreme_x = max(extreme_x, x1, x2)
+            # Close the polygon
+            if len(stock_boundary) >= 2:
+                x1, z1 = stock_boundary[-1]
+                x2, z2 = stock_boundary[0]
+                seg_z_min = min(z1, z2)
+                seg_z_max = max(z1, z2)
+                if not (seg_z_max < z_min - TOLERANCE or seg_z_min > z_max + TOLERANCE):
+                    extreme_x = max(extreme_x, x1, x2)
+
+            return extreme_x + clearance
+
     def _get_comp_code(self, direction: ToolDirection) -> str:
         """Get G41/G42 based on tool direction."""
         if direction == ToolDirection.RIGHT:
@@ -553,3 +717,306 @@ class GCodeWriter:
             line += f"  ; {comment}"
         self._n += 10
         return line
+
+    # ------------------------------------------------------------------
+    # Threading block output
+    # ------------------------------------------------------------------
+
+    def write_threading_block(
+        self, params: ThreadingParams, tool: ToolDef, stock_dia: float,
+        park_x: float = 3.0, park_z: float = 3.0, unit_mode: str = "inch",
+    ) -> List[str]:
+        """Generate G-code lines for a threading operation (G76 cycle).
+
+        This produces a self-contained section that can be appended to a
+        multi-block program. Includes tool change, approach, G76, and retract.
+
+        Args:
+            params: Threading parameters.
+            tool: Threading tool definition.
+            stock_dia: Stock OD for safe retract computation.
+            park_x: Park X position (diameter).
+            park_z: Park Z position.
+            unit_mode: "inch" or "metric".
+
+        Returns:
+            List of G-code lines (strings).
+        """
+        from planners.threading_planner import ThreadingPlanner
+
+        conv = 25.4 if unit_mode == "metric" else 1.0
+        fmt = ".3f" if unit_mode == "metric" else ".4f"
+
+        planner = ThreadingPlanner()
+        g76 = planner.compute_g76_params(params)
+
+        lines = []
+        is_id = params.is_internal
+
+        # Safe X for threading approach/retract
+        if is_id:
+            safe_x = max(0.0, params.major_diameter - 0.100)
+        else:
+            safe_x = stock_dia + 0.050
+
+        # Section header
+        thread_type = "Internal" if is_id else "External"
+        lines.append(f"; === THREADING ({params.designation}, {thread_type}) ===")
+        lines.append(f"; Pitch: {params.pitch * conv:{fmt}} ({'mm/rev' if unit_mode == 'metric' else 'in/rev'})")
+        lines.append(f"; Depth: {params.thread_depth * conv:{fmt}}")
+        lines.append(f"; Passes: {params.num_passes} + {params.spring_passes} spring")
+        lines.append(f"; Infeed: {params.infeed_method}")
+        if params.num_starts > 1:
+            lines.append(f"; Starts: {params.num_starts} (lead = {params.pitch * params.num_starts * conv:{fmt}})")
+        lines.append("")
+
+        # Spindle speed for threading (typically lower than roughing)
+        lines.append(self._line(f"S{params.spindle_rpm:.0f} M3", f"Threading speed {params.spindle_rpm:.0f} RPM"))
+
+        # Position at threading start
+        lines.append(self._rapid(safe_x, params.start_z, f"Approach: safe X at thread start Z"))
+        lines.append(self._rapid(params.major_diameter, params.start_z, f"Rapid to thread major dia"))
+        lines.append("")
+
+        # G76 threading cycle
+        # LinuxCNC G76 format:
+        # G76 P- Z- I- J- K- R- Q- H- E- L-
+        g76_line = (
+            f"G76 P{g76['P'] * conv:{fmt}} "
+            f"Z{g76['Z'] * conv:{fmt}} "
+            f"I{g76['I'] * conv:{fmt}} "
+            f"J{g76['J'] * conv:{fmt}} "
+            f"K{g76['K'] * conv:{fmt}} "
+            f"R{g76['R']:.1f} "
+            f"Q{g76['Q']:.1f} "
+            f"H{g76['H']} "
+            f"E{g76['E'] * conv:{fmt}} "
+            f"L{int(g76['L'])}"
+        )
+        lines.append(self._line(g76_line, f"Thread cycle: {params.designation}"))
+
+        # Handle multi-start threads
+        if params.num_starts > 1:
+            lines.append(f"; Multi-start: {params.num_starts} starts")
+            for start_num in range(1, params.num_starts):
+                # Offset start Z by (start_num * pitch) for each additional start
+                offset_z = params.start_z - (start_num * params.pitch)
+                g76_ms = (
+                    f"G76 P{g76['P'] * conv:{fmt}} "
+                    f"Z{(g76['Z'] - start_num * params.pitch) * conv:{fmt}} "
+                    f"I{g76['I'] * conv:{fmt}} "
+                    f"J{g76['J'] * conv:{fmt}} "
+                    f"K{g76['K'] * conv:{fmt}} "
+                    f"R{g76['R']:.1f} "
+                    f"Q{g76['Q']:.1f} "
+                    f"H{g76['H']} "
+                    f"E{g76['E'] * conv:{fmt}} "
+                    f"L{int(g76['L'])}"
+                )
+                lines.append(self._line(
+                    f"G00 Z{offset_z * conv:{fmt}}",
+                    f"Position for start {start_num + 1}"
+                ))
+                lines.append(self._line(g76_ms, f"Thread start {start_num + 1}"))
+        lines.append("")
+
+        # Retract
+        lines.append(self._rapid(safe_x, params.start_z, "Retract after threading"))
+
+        return lines
+
+    # ------------------------------------------------------------------
+    # Grooving block output
+    # ------------------------------------------------------------------
+
+    def write_grooving_block(
+        self, params: GroovingParams, tool: ToolDef, stock_dia: float,
+        park_x: float = 3.0, park_z: float = 3.0, unit_mode: str = "inch",
+    ) -> List[str]:
+        """Generate G-code lines for a grooving/parting operation.
+
+        Produces a self-contained section with approach, plunge cycles
+        (with optional peck), and retract for each plunge position.
+
+        Args:
+            params: Grooving parameters.
+            tool: Grooving tool definition.
+            stock_dia: Stock OD for safe retract.
+            park_x: Park X position (diameter).
+            park_z: Park Z position.
+            unit_mode: "inch" or "metric".
+
+        Returns:
+            List of G-code lines (strings).
+        """
+        from planners.grooving_planner import GroovingPlanner
+        from models.stock import StockDef
+        from models.profile import MachiningMode
+
+        conv = 25.4 if unit_mode == "metric" else 1.0
+        fmt = ".3f" if unit_mode == "metric" else ".4f"
+
+        lines = []
+        is_id = params.is_internal
+
+        # Safe X
+        if is_id:
+            safe_x = max(0.0, params.start_diameter - 0.100)
+        else:
+            safe_x = stock_dia + 0.050
+
+        # Section header
+        groove_width = params.groove_width
+        op_type = "PARTING" if params.groove_type == "parting" else "GROOVING"
+        mode_str = "ID" if is_id else "OD"
+        lines.append(f"; === {op_type} ({mode_str}, Z={params.z_start:{fmt}} to Z={params.z_end:{fmt}}) ===")
+        lines.append(f"; Width: {groove_width * conv:{fmt}}, Depth: {params.groove_depth * conv:{fmt}}")
+        lines.append(f"; Blade: {params.blade_width * conv:{fmt}}")
+        lines.append(f"; Start Dia: {params.start_diameter * conv:{fmt}}, Bottom Dia: {params.bottom_diameter * conv:{fmt}}")
+        if params.peck_enabled:
+            lines.append(f"; Peck: {params.peck_depth * conv:{fmt}} depth, {params.peck_retract * conv:{fmt}} retract")
+        lines.append("")
+
+        # Spindle
+        lines.append(self._line(f"S{params.spindle_rpm:.0f} M3", f"Grooving speed {params.spindle_rpm:.0f} RPM"))
+
+        # Compute plunge positions
+        planner = GroovingPlanner()
+        positions = planner._compute_plunge_positions(
+            params.z_start, params.z_end, params.blade_width
+        )
+
+        # Clearance above start surface
+        clearance = 0.010
+        if is_id:
+            approach_x = params.start_diameter - clearance
+        else:
+            approach_x = params.start_diameter + clearance
+
+        bottom_dia = params.bottom_diameter
+
+        for plunge_idx, z_pos in enumerate(positions):
+            lines.append(f"; --- Plunge {plunge_idx + 1}/{len(positions)} at Z={z_pos * conv:{fmt}} ---")
+
+            # Rapid to safe X at plunge Z
+            lines.append(self._rapid(safe_x, z_pos, f"Position at groove Z={z_pos:{fmt}}"))
+            # Rapid to just above surface
+            lines.append(self._rapid(approach_x, z_pos, "Rapid to surface + clearance"))
+
+            if not params.peck_enabled:
+                # Single plunge to depth
+                lines.append(self._feed_line(
+                    bottom_dia, z_pos, params.feed,
+                    f"Plunge to depth (Dia {bottom_dia:{fmt}})"
+                ))
+                # Optional dwell at bottom for surface finish
+                lines.append(self._dwell(0.5, "Dwell at groove bottom"))
+            else:
+                # Peck cycle
+                peck_depth = params.peck_depth
+                peck_retract = params.peck_retract
+                x_current = params.start_diameter
+                peck_num = 0
+
+                if is_id:
+                    # ID: increasing diameter
+                    while x_current < bottom_dia - TOLERANCE:
+                        peck_num += 1
+                        x_target = min(x_current + peck_depth, bottom_dia)
+                        lines.append(self._feed_line(
+                            x_target, z_pos, params.feed,
+                            f"Peck {peck_num}: plunge to {x_target:{fmt}}"
+                        ))
+                        x_current = x_target
+                        if x_current < bottom_dia - TOLERANCE:
+                            retract_x = x_current - peck_retract
+                            lines.append(self._rapid(
+                                retract_x, z_pos,
+                                f"Peck retract {peck_retract:{fmt}}"
+                            ))
+                            # Rapid back to previous depth
+                            lines.append(self._rapid(x_current, z_pos, "Return to prev depth"))
+                else:
+                    # OD: decreasing diameter
+                    while x_current > bottom_dia + TOLERANCE:
+                        peck_num += 1
+                        x_target = max(x_current - peck_depth, bottom_dia)
+                        lines.append(self._feed_line(
+                            x_target, z_pos, params.feed,
+                            f"Peck {peck_num}: plunge to {x_target:{fmt}}"
+                        ))
+                        x_current = x_target
+                        if x_current > bottom_dia + TOLERANCE:
+                            retract_x = x_current + peck_retract
+                            lines.append(self._rapid(
+                                retract_x, z_pos,
+                                f"Peck retract {peck_retract:{fmt}}"
+                            ))
+                            # Rapid back to previous depth
+                            lines.append(self._rapid(x_current, z_pos, "Return to prev depth"))
+
+                # Dwell at final depth
+                lines.append(self._dwell(0.3, "Dwell at groove bottom"))
+
+            # Retract from groove
+            lines.append(self._rapid(safe_x, z_pos, "Retract from groove"))
+            lines.append("")
+
+        return lines
+
+    # ------------------------------------------------------------------
+    # Tool change sequence (reusable between blocks)
+    # ------------------------------------------------------------------
+
+    def write_tool_change(
+        self, new_tool: ToolDef, rpm: float,
+        park_x: float = 3.0, park_z: float = 3.0,
+        engage_comp: bool = False,
+        is_id: bool = False,
+        stock_boundary: list = None,
+    ) -> List[str]:
+        """Generate G-code for a tool change between blocks.
+
+        Sequence: G40 → safe retract to park → M5 → M0 → Tn M6 → G43 → S M3 → [comp]
+
+        Args:
+            new_tool: Tool to load.
+            rpm: Spindle speed for the new operation.
+            park_x: Park X (diameter).
+            park_z: Park Z.
+            engage_comp: Whether to engage cutter comp after tool change.
+            is_id: True for ID/bore mode (affects retract direction).
+            stock_boundary: Material boundary polygon for safe retract.
+                If None, falls back to direct rapid (legacy behavior).
+
+        Returns:
+            List of G-code lines.
+        """
+        lines = []
+        lines.append("; === TOOL CHANGE ===")
+        lines.append(self._line("G40", "Cutter comp off"))
+        if stock_boundary:
+            lines.extend(self._safe_retract_to_park(
+                park_x, park_z, is_id, stock_boundary, "Retract to park"
+            ))
+        else:
+            lines.append(self._rapid(park_x, park_z, "Retract to park"))
+        lines.append(self._line("M5", "Spindle stop"))
+        lines.append(self._line("M0", "Mandatory stop - change tool"))
+        lines.append(self._line(
+            f"T{new_tool.tool_number} M6",
+            f"Load T{new_tool.tool_number} - {new_tool.description}"
+        ))
+        lines.append(self._line("G43", "Tool length comp on"))
+        lines.append(self._line(f"S{rpm:.0f} M3", f"Spindle CW at {rpm:.0f} RPM"))
+
+        if engage_comp:
+            has_tnr = new_tool.nose_radius > 0.0001
+            comp_code = self._get_comp_code(new_tool.direction) if has_tnr else "G40"
+            if has_tnr and comp_code != "G40":
+                lines.append(self._line(f"{comp_code}", f"Cutter comp on (TNR={new_tool.nose_radius:.4f})"))
+            else:
+                lines.append(self._line("G40", "Cutter comp off (no TNR)"))
+
+        lines.append("")
+        return lines

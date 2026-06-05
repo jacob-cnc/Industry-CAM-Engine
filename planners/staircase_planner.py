@@ -110,14 +110,9 @@ class StaircasePlanner:
                 if clipped_z_begin - z_terminate < TOLERANCE:
                     continue
 
-                # Create the feed move (along Z at constant X)
-                move = ToolMove(
-                    move_type=MoveType.FEED,
-                    x=x_dia,
-                    z=z_terminate,
-                    feed=params.feed,
-                    pass_type=PassType.ROUGH,
-                    pass_index=pass_index,
+                # Create moves for this pass (with optional peck dwells)
+                moves = self._make_pass_moves(
+                    x_dia, clipped_z_begin, z_terminate, params, pass_index
                 )
 
                 # Swept region
@@ -134,7 +129,7 @@ class StaircasePlanner:
                     z_end=z_terminate,
                     pass_index=pass_index,
                     pass_type=PassType.ROUGH,
-                    moves=[move],
+                    moves=moves,
                     swept_region=swept,
                 )
                 passes.append(turning_pass)
@@ -143,6 +138,77 @@ class StaircasePlanner:
             prev_x_dia = x_dia
 
         return passes
+
+    def _make_pass_moves(
+        self,
+        x_dia: float,
+        z_start: float,
+        z_end: float,
+        params: RoughingParams,
+        pass_index: int,
+    ) -> List[ToolMove]:
+        """Create feed moves for a single pass, with optional peck dwells.
+
+        When peck is disabled: single feed move from z_start to z_end.
+        When peck is enabled: feed moves broken at peck_length intervals
+        with G04 dwell moves inserted between them for chip breaking.
+
+        The dwell time = 5 spindle revolutions = 5 / RPM * 60 seconds.
+        The tool does NOT retract — it pauses in place.
+        """
+        if not params.peck_enabled or not params.peck_length or params.peck_length <= 0:
+            # No peck — single feed move
+            return [ToolMove(
+                move_type=MoveType.FEED,
+                x=x_dia,
+                z=z_end,
+                feed=params.feed,
+                pass_type=PassType.ROUGH,
+                pass_index=pass_index,
+            )]
+
+        # Peck enabled — split pass into segments with dwells between them
+        peck_length = params.peck_length
+        total_z_travel = z_start - z_end  # positive (feeding in -Z direction)
+
+        # Compute dwell time: 5 spindle revolutions
+        rpm = params.spindle_rpm if params.spindle_rpm > 0 else 1200.0
+        dwell_seconds = (5.0 / rpm) * 60.0
+
+        moves = []
+        z_current = z_start
+        remaining = total_z_travel
+
+        while remaining > TOLERANCE:
+            # Feed distance for this segment
+            segment_length = min(peck_length, remaining)
+            z_target = z_current - segment_length
+
+            # Feed move to next peck position
+            moves.append(ToolMove(
+                move_type=MoveType.FEED,
+                x=x_dia,
+                z=z_target,
+                feed=params.feed,
+                pass_type=PassType.ROUGH,
+                pass_index=pass_index,
+            ))
+
+            remaining -= segment_length
+            z_current = z_target
+
+            # Insert dwell if there's more material to cut after this segment
+            if remaining > TOLERANCE:
+                moves.append(ToolMove(
+                    move_type=MoveType.DWELL,
+                    x=x_dia,
+                    z=z_target,
+                    feed=dwell_seconds,  # Overload feed field for dwell time
+                    pass_type=PassType.ROUGH,
+                    pass_index=pass_index,
+                ))
+
+        return moves
 
     def _get_intervals(
         self,

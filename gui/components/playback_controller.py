@@ -28,7 +28,7 @@ class PlaybackController(QtCore.QObject):
         self._frames: List[PlaybackFrame] = []
         self._current_index: int = 0
         self._speed: float = 1.0
-        self._base_interval_ms: int = 100  # 10 fps at 1x (slower for readability)
+        self._base_interval_ms: int = 200  # 5 fps at 1x (slower for readability)
 
     @property
     def is_playing(self) -> bool:

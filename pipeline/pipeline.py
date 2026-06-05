@@ -43,6 +43,7 @@ def execute(
     tool: ToolDef,
     roughing_params: RoughingParams,
     finishing_params: FinishingParams,
+    finish_tool: ToolDef | None = None,
     verify_roundtrip: bool = False,
 ) -> PipelineResult:
     """Execute the full CAM pipeline.
@@ -182,6 +183,7 @@ def execute(
         roughing_params=roughing_params,
         finishing_params=finishing_params,
         mode=profile.mode,
+        finish_tool=finish_tool,
         face_passes=face_passes,
         roughing_passes=roughing_passes,
         cleanup_passes=cleanup_passes,
@@ -367,8 +369,8 @@ def _assemble_moves(passes: List[TurningPass], transitions: list) -> List[ToolMo
     for move in all_moves[1:]:
         prev = filtered[-1]
         if abs(move.x - prev.x) < TOLERANCE and abs(move.z - prev.z) < TOLERANCE:
-            # Zero-length — skip unless it's an arc (arcs can start/end at same XZ)
-            if move.move_type not in (MoveType.ARC_CW, MoveType.ARC_CCW):
+            # Zero-length — skip unless it's an arc or dwell (both are intentionally stationary)
+            if move.move_type not in (MoveType.ARC_CW, MoveType.ARC_CCW, MoveType.DWELL):
                 continue
         filtered.append(move)
 
