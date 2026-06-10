@@ -1,0 +1,73 @@
+name: Machine commissioning
+description: Plan and record controlled testing on the physical lathe
+title: "[Commissioning] "
+labels:
+  - commissioning
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: State the machine behavior being commissioned.
+    validations:
+      required: true
+
+  - type: input
+    id: commit
+    attributes:
+      label: Commit or branch
+      description: Identify the exact software/configuration state to test.
+    validations:
+      required: true
+
+  - type: textarea
+    id: starting_state
+    attributes:
+      label: Starting machine state
+      description: Include tooling, power state, position, wiring, and relevant configuration.
+    validations:
+      required: true
+
+  - type: textarea
+    id: limits
+    attributes:
+      label: Test limits and abort conditions
+      description: State maximum speed, feed, RPM, travel, and when to stop immediately.
+    validations:
+      required: true
+
+  - type: textarea
+    id: procedure
+    attributes:
+      label: Procedure
+      description: Write the controlled test steps in order.
+    validations:
+      required: true
+
+  - type: textarea
+    id: rollback
+    attributes:
+      label: Rollback plan
+      description: Identify the known-good commit/configuration and preserved machine state.
+    validations:
+      required: true
+
+  - type: textarea
+    id: results
+    attributes:
+      label: Results
+      description: After testing, record observations, measurements, and repeatability.
+
+  - type: checkboxes
+    id: readiness
+    attributes:
+      label: Pre-test readiness
+      options:
+        - label: Physical E-stop is accessible and verified
+          required: true
+        - label: Tooling and travel are clear
+          required: true
+        - label: Rollback state is available
+          required: true
+        - label: Relevant offline/software verification is recorded
+          required: true

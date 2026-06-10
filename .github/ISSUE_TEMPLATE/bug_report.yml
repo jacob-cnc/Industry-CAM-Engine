@@ -1,0 +1,57 @@
+name: Bug report
+description: Report incorrect software, GUI, CAM, G-code, or machine-control behavior
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: dropdown
+    id: classification
+    attributes:
+      label: Change classification
+      description: Select the highest-impact area affected by the bug.
+      options:
+        - Software-only
+        - Motion-affecting
+        - Machine-control
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe what happened and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Include inputs, profile, G-code, machine state, and exact steps.
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Include raw errors, measurements, screenshots, or generated files.
+
+  - type: textarea
+    id: safety
+    attributes:
+      label: Safety impact
+      description: Explain whether this could alter motion, machine state, or operator decisions.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: verification
+    attributes:
+      label: Verification status
+      options:
+        - label: Reproduced offline
+        - label: Reproduced on the physical lathe
+        - label: Compared against NX or another ground-truth source
+        - label: Generated G-code reviewed
