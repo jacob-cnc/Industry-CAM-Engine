@@ -12,6 +12,7 @@ agents, and machines.
 | `RISK_REGISTER.md` | Known technical and machine-safety risks |
 | `decisions/README.md` | Durable architectural and operational decisions |
 | `handoffs/TEMPLATE.md` | Standard session handoff format |
+| `prompts/` | Durable prompts for queued cross-machine or agent work |
 
 Detailed design guidance remains in `.kiro/steering/`. Historical experiments,
 commissioning logs, and checkpoints remain in `session-notes/`.

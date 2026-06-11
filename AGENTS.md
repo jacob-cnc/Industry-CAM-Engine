@@ -18,6 +18,23 @@ When documents conflict, prefer measured facts in the newest dated session note
 and the checked-in machine configuration. Record and resolve the conflict rather
 than silently choosing one.
 
+## Evidence and Reference Discipline
+
+Treat existing behavior and external references as evidence, not authority.
+Before substantial work, perform a proportional review of relevant project
+history, tests, configuration, and `reference/` material. Review depth should
+increase with uncertainty, machine impact, and difficulty of rollback.
+
+Do not preserve surprising behavior merely because it exists, and do not replace
+it merely because it looks unconventional. Challenge both the current design and
+the proposed change, then prefer the explanation best supported by applicable
+evidence and focused verification.
+
+Use `reference/INDEX.md` to find relevant material and understand its scope,
+version, and limitations. See
+`docs/decisions/ADR-002-evidence-reference-and-change-discipline.md` for the
+decision policy.
+
 ## Critical Machine Facts
 
 - `stepgen.00` drives Z / Joint 1.

@@ -1,8 +1,9 @@
 # Current Project State
 
-**Last consolidated:** 2026-06-09
-**Repository baseline:** `main` at `4e55d6c`
-**Source:** Checked-in configuration and session notes through 2026-05-26
+**Last consolidated:** 2026-06-11
+**Repository baseline:** `main` through the reference-governance handoff
+**Source:** Checked-in configuration and session notes through 2026-05-26, plus
+reference-governance work through 2026-06-11
 
 This document is the concise cross-machine status summary. Update it after
 meaningful commissioning, deployment, or architecture changes.
@@ -109,9 +110,30 @@ Validate spindle-synchronized threading with a conservative first test:
 
 ## Immediate Project Priorities
 
-1. Establish safe, repeatable deployment and rollback.
-2. Validate threading on the physical lathe.
-3. Add remaining-material rapid validation.
-4. Fix Program-tab arc preview.
-5. Reconcile stale machine and feature documentation.
-6. Add automated CI once a reproducible test environment is defined.
+1. Establish the Windows Codex PC development environment: Python, project
+   dependencies, architecture checks, and full tests.
+2. During the next Linux/Claude session, run
+   `docs/prompts/linux-claude-reference-gap-acquisition.md`; keep this queued
+   across unrelated intervening sessions.
+3. Establish safe, repeatable deployment and rollback.
+4. Validate threading on the physical lathe.
+5. Add remaining-material rapid validation.
+6. Fix Program-tab arc preview.
+7. Reconcile stale machine and feature documentation.
+8. Add automated CI once a reproducible test environment is defined.
+
+## Reference and Environment Status
+
+- Reference/evidence policy is recorded in
+  `docs/decisions/ADR-002-evidence-reference-and-change-discipline.md`.
+- `reference/INDEX.md` maps reference authority, scope, limitations, and
+  unresolved acquisition gaps.
+- Official Mesa 7i96S/7i85S manuals, NISTIR 6556, and a targeted LinuxCNC
+  `v2.9.6` source snapshot are checked in.
+- The existing broader LinuxCNC snapshot reports `2.10.0~pre1` and must not be
+  treated alone as authority for the documented `2.9.6` machine runtime.
+- Exact Linux runtime/package, Mesa firmware, motor, scale, spindle-encoder, and
+  installed-tooling identities remain queued for the Linux/Claude acquisition
+  session.
+- Python and project development dependencies are not yet installed/on PATH on
+  the Windows Codex PC.

@@ -11,6 +11,11 @@ Whenever analyzing, theorizing, designing, or discussing code structure and logi
 - Code structure patterns that match or inform the architecture
 - How other projects solved the same problem
 
+Start with `reference/INDEX.md` to check each source's scope, version, authority,
+and limitations. Existing project behavior and reference implementations are
+evidence, not automatic authority. Keep review proportional to risk and
+uncertainty.
+
 ## Location
 
 All reference repos live under `Industry CAM Engine/reference/`:
@@ -65,6 +70,8 @@ reference/
 - `reference/bapt-cam/utils/Contour.py` — edge-to-gcode conversion with arc direction
 
 ### LinuxCNC Internals
+- `reference/linuxcnc-2.9.6-source/` — preferred for runtime-dependent decisions
+  while the machine is documented as LinuxCNC 2.9.6
 - `reference/linuxcnc-source/src/emc/rs274ngc/interp_arc.cc` — arc tolerance validation
 - `reference/linuxcnc-source/src/emc/rs274ngc/interp_internal.hh` — tolerance constants
 - `reference/linuxcnc-source/src/emc/motion/` — trajectory planner behavior

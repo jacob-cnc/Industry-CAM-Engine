@@ -76,6 +76,23 @@ Use the applicable levels in order:
 
 Passing a lower level does not imply a higher level passed.
 
+## Decision and Reference Review
+
+Before substantial design or implementation:
+
+1. State the decision, uncertainty, and possible machine impact.
+2. Search the relevant current code, tests, Git history, session notes, and
+   `reference/INDEX.md`.
+3. Check official version-matched material for runtime-dependent behavior.
+4. Record meaningful source/version mismatches and unresolved assumptions.
+5. Prefer a focused reversible experiment when it can answer the question faster
+   than further reading.
+
+Existing behavior is evidence, not proof of correctness. Reference
+implementations are guidance, not drop-in authority. Review depth should be
+proportional to risk and should not become an open-ended prerequisite for
+routine work.
+
 ## Machine Commissioning Record
 
 Before powered testing, record:
