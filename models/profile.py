@@ -50,11 +50,15 @@ class ProfileMove:
         x: End X position in DIAMETER (inches)
         z: End Z position in INCHES
         radius: Arc radius in RADIUS (inches), signed: +CW (G02), -CCW (G03). 0 for lines.
+        quadrant: If True, this is a tangent-bounded quadrant arc (quarter ellipse).
+                  The radius field is ignored and the arc is computed from endpoints.
     """
     segment_type: SegmentType
     x: float
     z: float
     radius: float = 0.0
+    quadrant: bool = False
+    quadrant_sign: int = 1  # +1 = convex (Q), -1 = concave (-Q)
 
 
 @dataclass(frozen=True)

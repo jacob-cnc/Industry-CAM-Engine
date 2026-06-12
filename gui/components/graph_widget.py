@@ -6,11 +6,9 @@ profile boundary, stock boundary, playback tool dot.
 
 All coordinates displayed in RADIUS internally, axis labels show DIAMETER.
 
-Architecture matches the proven _visual_test_arc.py viewer:
-  - No aspect lock (lathe parts have different Z vs X ranges)
-  - No restrictive setLimits (prevents zoom lock-up)
-  - Native pyqtgraph wheel zoom and pan
-  - Double-click to auto-fit
+Aspect ratio is locked 1:1 — arcs display as true circles, geometry is always
+accurate. The view may have empty space on one axis for non-square parts, but
+the user can pan/zoom freely to focus on the area of interest.
 """
 
 import pyqtgraph as pg
@@ -54,7 +52,7 @@ class MachiningGraphWidget(pg.PlotWidget):
     """Reusable graph widget for machining visualization.
 
     Features:
-    - Free zoom/pan (no aspect lock — lathe parts aren't square)
+    - 1:1 aspect ratio (arcs display as true circles, geometry is accurate)
     - Crosshair with coordinate readout (radius + diameter for X)
     - Zone shading (filled polygons)
     - Toolpath trace (PlotCurveItem per move type, color-coded)
@@ -83,6 +81,7 @@ class MachiningGraphWidget(pg.PlotWidget):
         self._setup_plot()
         self._setup_crosshair()
         self._tool_dot = None
+        self._next_seg_item = None
         self._rapid_items = []
         self._graph_data: Optional[GraphData] = None
         self._material_fill_items: list = []
@@ -110,10 +109,8 @@ class MachiningGraphWidget(pg.PlotWidget):
         self._last_mouse_data_pos = None
 
     def _setup_plot(self):
-        """Configure the plot area — Y inverted for operator POV."""
+        """Configure the plot area — Y inverted for operator POV, 1:1 aspect."""
         plot_item = self.getPlotItem()
-        # No aspect lock — lathe parts have very different Z vs X ranges.
-        # Locking 1:1 causes excessive empty space and missing gridlines.
         plot_item.showGrid(x=True, y=True, alpha=0.3)
 
         # Set axis labels
@@ -124,6 +121,11 @@ class MachiningGraphWidget(pg.PlotWidget):
         vb = self.getViewBox()
         vb.invertY(True)
         vb.setMouseEnabled(x=True, y=True)
+
+        # Lock 1:1 aspect ratio — geometry is always accurate.
+        # X axis is in RADIUS internally, Z in inches. ratio=1.0 means
+        # 1 inch of radius = 1 inch of Z on screen.
+        vb.setAspectLocked(True, ratio=1.0)
 
     def mouseDoubleClickEvent(self, event):
         """Double-click to auto-fit the view back to the full part."""
@@ -185,6 +187,8 @@ class MachiningGraphWidget(pg.PlotWidget):
         self.clear()
         self._setup_crosshair()
         self._tool_dot = None
+        self._next_seg_item = None
+        self._profile_overlay_items = []
         self._material_fill_items = []
         self._graph_data = data
 
@@ -234,12 +238,35 @@ class MachiningGraphWidget(pg.PlotWidget):
         """Update animated tool dot position during playback."""
         if self._tool_dot is None:
             self._tool_dot = pg.ScatterPlotItem(
-                size=10, brush=pg.mkBrush(COLORS['graph_tool_dot']),
-                pen=pg.mkPen(None),
+                size=16,
+                brush=pg.mkBrush(COLORS['graph_tool_dot']),
+                pen=pg.mkPen('#00000099', width=2),
             )
+            self._tool_dot.setZValue(20)
             self.addItem(self._tool_dot)
 
         self._tool_dot.setData([z], [x_radius])
+
+    def highlight_next_segment(self, move_index: int):
+        """Show the upcoming segment as a dotted preview line (next move to be executed).
+
+        Call with move_index=-1 or out-of-range to clear the highlight.
+        """
+        if self._next_seg_item is None:
+            self._next_seg_item = self.plot(
+                [], [],
+                pen=pg.mkPen('#FFFFFF55', width=2, style=QtCore.Qt.DotLine),
+            )
+            self._next_seg_item.setZValue(15)
+
+        if (not self._graph_data or
+                move_index < 0 or
+                move_index >= len(self._graph_data.toolpath_segments)):
+            self._next_seg_item.setData([], [])
+            return
+
+        seg = self._graph_data.toolpath_segments[move_index]
+        self._next_seg_item.setData(seg.z_coords, seg.x_coords)
 
     def set_rapids_visible(self, visible: bool):
         """Show or hide all rapid move lines."""
@@ -277,6 +304,36 @@ class MachiningGraphWidget(pg.PlotWidget):
         """Hide all toolpath segments (Reset button)."""
         for item in self._toolpath_items:
             item.setVisible(False)
+
+    def set_profile_overlay(self, segments: list):
+        """Draw profile contour overlay on the graph.
+
+        Args:
+            segments: List of (z_coords, x_coords) tuples, each a sub-path
+                      in radius/inches coordinates (same format as preview).
+        """
+        import pyqtgraph as pg
+        from PyQt5.QtGui import QColor
+        from pyqtgraph.Qt import QtCore as _QtCore
+
+        # Remove any existing overlay items
+        for item in getattr(self, '_profile_overlay_items', []):
+            self.removeItem(item)
+        self._profile_overlay_items = []
+
+        profile_color = QColor(COLORS['graph_profile'])
+        profile_color.setAlpha(180)
+        profile_pen = pg.mkPen(profile_color, width=2, style=_QtCore.Qt.SolidLine)
+
+        for seg_z, seg_x in segments:
+            item = self.plot(seg_z, seg_x, pen=profile_pen)
+            item.setZValue(5)  # Above zones, below tool dot
+            self._profile_overlay_items.append(item)
+
+    def set_profile_visible(self, visible: bool):
+        """Show or hide the profile contour overlay."""
+        for item in getattr(self, '_profile_overlay_items', []):
+            item.setVisible(visible)
 
     def clear_toolpath(self):
         """Clear toolpath display (return to preview mode)."""

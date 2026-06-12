@@ -14,6 +14,7 @@ class MoveType(Enum):
     FEED = "feed"           # G01
     ARC_CW = "arc_cw"      # G02
     ARC_CCW = "arc_ccw"     # G03
+    DWELL = "dwell"         # G04 (chip-breaking pause in place)
 
 
 class PassType(Enum):
@@ -23,6 +24,8 @@ class PassType(Enum):
     CLEANUP = "cleanup"
     FINISH = "finish"
     TRANSITION = "transition"
+    THREADING = "threading"
+    GROOVING = "grooving"
 
 
 @dataclass(frozen=True)

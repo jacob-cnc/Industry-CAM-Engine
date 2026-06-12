@@ -20,6 +20,7 @@ from models.results import PlanResult
 from outputs.dxf_exporter import export as export_dxf, export_from_gcode
 from outputs.svg_exporter import export as export_svg
 from outputs.gcode_writer import GCodeWriter
+from gui.unit_state import unit_state
 
 
 class DebugTab(QWidget):
@@ -277,11 +278,11 @@ class DebugTab(QWidget):
             elif format_name == "png":
                 self._export_png(path)
             elif format_name == "gcode":
-                gcode_text = GCodeWriter().write(self._plan_result)
+                gcode_text = GCodeWriter().write(self._plan_result, unit_mode=unit_state.mode.value)
                 with open(path, 'w', encoding='utf-8') as f:
                     f.write(gcode_text)
             elif format_name == "gcode_dxf":
-                gcode_text = GCodeWriter().write(self._plan_result)
+                gcode_text = GCodeWriter().write(self._plan_result, unit_mode=unit_state.mode.value)
                 export_from_gcode(gcode_text, path)
 
             self._export_status.setText(f"\u2713 Exported: {path}")

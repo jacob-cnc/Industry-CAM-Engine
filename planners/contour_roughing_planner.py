@@ -64,7 +64,8 @@ class ContourRoughingPlanner:
         """Build finished part face (profile + closure to centerline)."""
         try:
             coords = [{"type": s.segment_type, "x_radius": s.x / 2.0,
-                       "z": s.z, "radius": s.radius} for s in segments]
+                       "z": s.z, "radius": s.radius,
+                       "quadrant": s.quadrant, "quadrant_sign": s.quadrant_sign} for s in segments]
             lx, lz = segments[-1].x / 2.0, segments[-1].z
             fx, fz = segments[0].x / 2.0, segments[0].z
             if abs(lx) > 1e-10:
@@ -81,7 +82,42 @@ class ContourRoughingPlanner:
                         tx, tz = t["x_radius"], t["z"]
                         if abs(cx - tx) < 1e-10 and abs(cz - tz) < 1e-10:
                             continue
-                        if t["type"] == SegmentType.ARC and t["radius"] != 0.0:
+                        if t.get("quadrant", False):
+                            # Quadrant arc: polyline ellipse approximation
+                            from models.constants import TOLERANCE as _TOL
+                            _qs = t.get("quadrant_sign", 1)
+                            _dx = tx - cx
+                            _dz = tz - cz
+                            if abs(_dx) < _TOL or abs(_dz) < _TOL:
+                                _arc_r = abs(_dz) if abs(_dx) < _TOL else abs(_dx)
+                                RadiusArc((cx, cz), (tx, tz), -_arc_r * _qs)
+                            else:
+                                _b, _a = abs(_dx), abs(_dz)
+                                if _qs == 1:
+                                    _ecx, _ecz = cx, tz
+                                    _sx = 1.0 if _dx > 0 else -1.0
+                                    _sz = -1.0 if _dz > 0 else 1.0
+                                else:
+                                    _ecx, _ecz = tx, cz
+                                    _sx = -1.0 if _dx > 0 else 1.0
+                                    _sz = 1.0 if _dz > 0 else -1.0
+                                _npts = 64
+                                for _j in range(_npts):
+                                    _t0 = (math.pi / 2.0) * _j / _npts
+                                    _t1 = (math.pi / 2.0) * (_j + 1) / _npts
+                                    if _qs == 1:
+                                        _x0 = _ecx + _sx * _b * math.sin(_t0)
+                                        _z0 = _ecz + _sz * _a * math.cos(_t0)
+                                        _x1 = _ecx + _sx * _b * math.sin(_t1)
+                                        _z1 = _ecz + _sz * _a * math.cos(_t1)
+                                    else:
+                                        _x0 = _ecx + _sx * _b * math.cos(_t0)
+                                        _z0 = _ecz + _sz * _a * math.sin(_t0)
+                                        _x1 = _ecx + _sx * _b * math.cos(_t1)
+                                        _z1 = _ecz + _sz * _a * math.sin(_t1)
+                                    if abs(_x0 - _x1) > 1e-10 or abs(_z0 - _z1) > 1e-10:
+                                        Line((_x0, _z0), (_x1, _z1))
+                        elif t["type"] == SegmentType.ARC and t["radius"] != 0.0:
                             RadiusArc((cx, cz), (tx, tz), -t["radius"])
                         else:
                             Line((cx, cz), (tx, tz))
@@ -184,18 +220,24 @@ class ContourRoughingPlanner:
         keep = []
         for e in raw:
             s, en = e[0], e[1]
+            # Filter edges that lie entirely on clip boundaries (no material there)
+            # X_min boundary (centerline / pilot hole)
             if abs(s[0] - xmin_d) < tol and abs(en[0] - xmin_d) < tol:
                 continue
-            # Stock OD edge: only filter if it spans the full Z range (boundary edge)
-            # Partial vertical at stock OD is a connector between split arc sections — keep it
+            # Stock OD boundary: remove if either endpoint touches Z_bot or Z_top
+            # (these are clip artifacts, not real cutting geometry).
+            # Keep only true connectors between split arc sections (both endpoints
+            # are at stock OD but neither touches Z_top or Z_bot).
             if abs(s[0] - xmax_d) < tol and abs(en[0] - xmax_d) < tol:
-                z_span = abs(s[1] - en[1])
-                full_span = abs(z_top - z_bot)
-                if z_span > full_span * 0.9:  # Nearly full span = boundary edge
+                at_z_top = abs(s[1] - z_top) < tol or abs(en[1] - z_top) < tol
+                at_z_bot = abs(s[1] - z_bot) < tol or abs(en[1] - z_bot) < tol
+                if at_z_top or at_z_bot:
                     continue
-                # Otherwise it's a partial connector — keep it
+                # Neither endpoint at Z boundary — true connector between split arcs
+            # Z_top boundary (face)
             if abs(s[1] - z_top) < tol and abs(en[1] - z_top) < tol:
                 continue
+            # Z_bot boundary (bottom)
             if abs(s[1] - z_bot) < tol and abs(en[1] - z_bot) < tol:
                 continue
             keep.append(e)
@@ -229,10 +271,20 @@ class ContourRoughingPlanner:
         return ordered
 
     def _to_moves(self, edges, params):
-        """Convert edges to ToolMoves."""
+        """Convert edges to ToolMoves.
+        
+        Emits a feed move to the first edge's start point so that arc I/K
+        values (which are relative to the arc start) are correct in the
+        assembled move sequence.
+        """
         moves = []
-        for e in edges:
+        for idx, e in enumerate(edges):
             s, en, tp, ctr, rad = e
+            # Emit a positioning feed to the start of the first edge
+            # so that arc I/K offsets are relative to the correct point.
+            if idx == 0:
+                moves.append(ToolMove(MoveType.FEED, s[0], s[1],
+                             feed=params.feed, pass_type=PassType.ROUGH))
             if tp == "RAPID":
                 moves.append(ToolMove(MoveType.RAPID, en[0], en[1],
                              feed=0.0, pass_type=PassType.ROUGH))

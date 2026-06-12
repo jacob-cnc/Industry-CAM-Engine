@@ -13,7 +13,7 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout,
     QLabel, QPushButton, QComboBox, QLineEdit,
-    QFrame, QSpinBox, QDoubleSpinBox,
+    QFrame, QDoubleSpinBox,
 )
 
 from gui.colors import COLORS, FONTS
@@ -21,7 +21,6 @@ from gui.components.collapsible_section import CollapsibleSection
 from hal.constants import (
     JOG_MODES, DEFAULT_JOG_MODE_INDEX,
     DEFAULT_JOG_VELOCITY, MAX_JOG_VELOCITY,
-    MAX_TOOLS,
 )
 
 
@@ -217,18 +216,24 @@ def build_tool_section() -> tuple:
     section.add_layout(tool_row)
 
     change_row = QHBoxLayout()
-    tool_number_spin = QSpinBox()
-    tool_number_spin.setRange(1, MAX_TOOLS)
-    tool_number_spin.setValue(1)
-    tool_number_spin.setPrefix("T")
+    tool_number_input = QLineEdit()
+    tool_number_input.setPlaceholderText("T#")
+    tool_number_input.setMaximumWidth(80)
+    tool_number_input.setStyleSheet(
+        f"font-family: '{FONTS['mono_family']}'; font-size: 12pt;"
+        f" color: {COLORS['text_primary']};"
+        f" background: {COLORS['bg_surface']};"
+        f" border: 1px solid {COLORS['border_normal']};"
+        f" border-radius: 4px; padding: 2px 6px;"
+    )
     btn_change = QPushButton("Change (M6)")
-    change_row.addWidget(tool_number_spin)
+    change_row.addWidget(tool_number_input)
     change_row.addWidget(btn_change)
     section.add_layout(change_row)
 
     widgets = {
         "tool_display": tool_display,
-        "tool_number_spin": tool_number_spin,
+        "tool_number_input": tool_number_input,
         "btn_change": btn_change,
     }
     return section, widgets

@@ -107,11 +107,22 @@ def build_from_fields(
         z = seg.get("z", 0.0)
         radius = seg.get("radius", 0.0)
 
+        # Detect quadrant arc: "Q" (convex) or "-Q" (concave)
+        radius_str = str(radius).strip().upper() if not isinstance(radius, (int, float)) else ""
+        is_quadrant = radius_str in ("Q", "-Q")
+        quadrant_sign = -1 if radius_str == "-Q" else 1
+        if is_quadrant:
+            radius_val = 0.0
+        else:
+            radius_val = float(radius)
+
         profile_moves.append(ProfileMove(
             segment_type=seg_type,
             x=float(x),
             z=float(z),
-            radius=float(radius),
+            radius=radius_val,
+            quadrant=is_quadrant,
+            quadrant_sign=quadrant_sign,
         ))
 
     # Convert corner breaks

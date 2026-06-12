@@ -22,6 +22,8 @@ from models.params import RoughingParams
 from models.stock import StockDef
 from models.profile import ClosedProfile, ProfileMove, SegmentType, MachiningMode
 from models.constants import TOLERANCE
+from geometry.arc_helpers import is_arc_within_x_bounds
+from geometry.zone_builder import _profile_to_radius_coords
 
 if TYPE_CHECKING:
     from geometry.zone_query import ZoneQueryAPI, EdgeData
@@ -94,49 +96,57 @@ class CleanupPlanner:
         # Compute the offset profile using the geometry kernel
         # Completely separate paths for OD and ID — no shared logic that could regress
         if mode == MachiningMode.OD:
-            offset_edges = self._compute_offset_profile(segments, fin_allowance_radius, mode, stock, z0_fin)
+            offset_edges = self._compute_offset_profile(segments, fin_allowance_radius, mode, stock, z0_fin, profile)
         else:
-            offset_edges = self._compute_offset_profile_id(segments, fin_allowance_radius, stock, z0_fin)
+            offset_edges = self._compute_offset_profile_id(segments, fin_allowance_radius, stock, z0_fin, profile)
 
         if not offset_edges:
             return []
 
         # The offset edges from the kernel are the turning portion of the offset wire
-        # (clipped at Z0+fin, Z_end). They start at the first turning edge after the clip.
-        # We need to build the full move sequence:
-        #   1. Feed along face at Z0+fin from X_start+fin to the offset profile X
-        #   2. Feed straight down from Z0+fin to the first offset edge start Z (if gap exists)
-        #   3. Then the offset edges (arc + straight segments)
+        # (clipped at Z0+fin or Z=0, Z_end). They start at the first turning edge.
+        # Build the approach sequence to reach the first edge's start point.
 
-        # Determine the offset profile X (the X value of the turning edges)
-        # All turning edges should be at the same X for this profile type
         first_edge_start = offset_edges[0][0]
         offset_x_dia = first_edge_start[0]
         offset_start_z = first_edge_start[1]
 
         moves = []
 
-        # Move 1: Feed along face at Z0+fin from X_start+fin to offset X
-        if offset_x_dia - x_start_fin_dia > TOLERANCE:
-            moves.append(ToolMove(
-                move_type=MoveType.FEED,
-                x=offset_x_dia,
-                z=z0_fin,
-                feed=params.feed,
-                pass_type=PassType.CLEANUP,
-                pass_index=0,
-            ))
-
-        # Move 2: If the first offset edge doesn't start at Z0+fin, feed down to it
-        if abs(offset_start_z - z0_fin) > TOLERANCE:
-            moves.append(ToolMove(
-                move_type=MoveType.FEED,
-                x=offset_x_dia,
-                z=offset_start_z,
-                feed=params.feed,
-                pass_type=PassType.CLEANUP,
-                pass_index=0,
-            ))
+        # Approach: feed from (X_start+fin, z0_fin) to the first offset edge start.
+        # This may be a face-level feed (if first edge starts at Z≈0) or a
+        # two-step approach (feed along face, then down to edge start Z).
+        if abs(offset_start_z - z0_fin) < TOLERANCE:
+            # First edge starts at face level — single feed along face to it
+            if offset_x_dia - x_start_fin_dia > TOLERANCE:
+                moves.append(ToolMove(
+                    move_type=MoveType.FEED,
+                    x=offset_x_dia,
+                    z=z0_fin,
+                    feed=params.feed,
+                    pass_type=PassType.CLEANUP,
+                    pass_index=0,
+                ))
+        else:
+            # First edge starts below face level — feed along face to X, then down
+            if offset_x_dia - x_start_fin_dia > TOLERANCE:
+                moves.append(ToolMove(
+                    move_type=MoveType.FEED,
+                    x=offset_x_dia,
+                    z=z0_fin,
+                    feed=params.feed,
+                    pass_type=PassType.CLEANUP,
+                    pass_index=0,
+                ))
+            if abs(offset_start_z - z0_fin) > TOLERANCE:
+                moves.append(ToolMove(
+                    move_type=MoveType.FEED,
+                    x=offset_x_dia,
+                    z=offset_start_z,
+                    feed=params.feed,
+                    pass_type=PassType.CLEANUP,
+                    pass_index=0,
+                ))
 
         # Moves 3+: The offset wire edges
         wire_moves = self._build_moves_from_offset(offset_edges, params)
@@ -179,6 +189,7 @@ class CleanupPlanner:
         mode: MachiningMode,
         stock: StockDef = None,
         z0_fin: float = 0.001,
+        profile: ClosedProfile = None,
     ) -> List[tuple]:
         """Compute the cleanup contour by offsetting the finished part face.
 
@@ -210,14 +221,18 @@ class CleanupPlanner:
 
         # Build closed profile contour (profile + closure)
         try:
-            coords = []
-            for seg in segments:
-                coords.append({
-                    "type": seg.segment_type,
-                    "x_radius": seg.x / 2.0,
-                    "z": seg.z,
-                    "radius": seg.radius,
-                })
+            # Use corner-break-aware coords if profile is available
+            if profile is not None:
+                coords = _profile_to_radius_coords(profile)
+            else:
+                coords = []
+                for seg in segments:
+                    coords.append({
+                        "type": seg.segment_type,
+                        "x_radius": seg.x / 2.0,
+                        "z": seg.z,
+                        "radius": seg.radius,
+                    })
 
             # Add closure segments
             last_seg = segments[-1]
@@ -231,11 +246,12 @@ class CleanupPlanner:
                     return []
                 closure_x = stock.diameter / 2.0
 
-            # Closure: last point → (closure_x, last_z) → (closure_x, 0) → first point
-            last_x_r = last_seg.x / 2.0
-            last_z = last_seg.z
-            first_x_r = first_seg.x / 2.0
-            first_z = first_seg.z
+            # Closure: last coord → (closure_x, last_z) → (closure_x, 0) → first coord
+            # Use actual coords endpoints (may be trimmed by corner breaks)
+            last_x_r = coords[-1]["x_radius"]
+            last_z = coords[-1]["z"]
+            first_x_r = coords[0]["x_radius"]
+            first_z = coords[0]["z"]
 
             if abs(last_x_r - closure_x) > 1e-10:
                 coords.append({"type": SegmentType.LINE, "x_radius": closure_x, "z": last_z, "radius": 0.0})
@@ -257,8 +273,48 @@ class CleanupPlanner:
                         if abs(cx - tx) < 1e-10 and abs(cz - tz) < 1e-10:
                             continue
 
-                        if target["type"] == SegmentType.ARC and target["radius"] != 0.0:
-                            b3d_radius = -target["radius"]
+                        if target.get("quadrant", False):
+                            # Quadrant arc: polyline ellipse approximation
+                            import math as _math
+                            from models.constants import TOLERANCE as _TOL
+                            quadrant_sign = target.get("quadrant_sign", 1)
+                            _dx = tx - cx
+                            _dz = tz - cz
+                            _same_x = abs(_dx) < _TOL
+                            _same_z = abs(_dz) < _TOL
+
+                            if _same_x or _same_z:
+                                _arc_r = abs(_dz) if _same_x else abs(_dx)
+                                _signed_r = -_arc_r * quadrant_sign
+                                RadiusArc((cx, cz), (tx, tz), _signed_r)
+                            else:
+                                _b, _a = abs(_dx), abs(_dz)
+                                if quadrant_sign == 1:
+                                    _ecx, _ecz = cx, tz
+                                    _sx = 1.0 if _dx > 0 else -1.0
+                                    _sz = -1.0 if _dz > 0 else 1.0
+                                else:
+                                    _ecx, _ecz = tx, cz
+                                    _sx = -1.0 if _dx > 0 else 1.0
+                                    _sz = 1.0 if _dz > 0 else -1.0
+                                _npts = 64
+                                for _j in range(_npts):
+                                    _t0 = (_math.pi / 2.0) * _j / _npts
+                                    _t1 = (_math.pi / 2.0) * (_j + 1) / _npts
+                                    if quadrant_sign == 1:
+                                        _x0 = _ecx + _sx * _b * _math.sin(_t0)
+                                        _z0 = _ecz + _sz * _a * _math.cos(_t0)
+                                        _x1 = _ecx + _sx * _b * _math.sin(_t1)
+                                        _z1 = _ecz + _sz * _a * _math.cos(_t1)
+                                    else:
+                                        _x0 = _ecx + _sx * _b * _math.cos(_t0)
+                                        _z0 = _ecz + _sz * _a * _math.sin(_t0)
+                                        _x1 = _ecx + _sx * _b * _math.cos(_t1)
+                                        _z1 = _ecz + _sz * _a * _math.sin(_t1)
+                                    if abs(_x0 - _x1) > 1e-10 or abs(_z0 - _z1) > 1e-10:
+                                        Line((_x0, _z0), (_x1, _z1))
+                        elif target["type"] == SegmentType.ARC and target["radius"] != 0.0:
+                            b3d_radius = target["radius"]
                             RadiusArc((cx, cz), (tx, tz), b3d_radius)
                         else:
                             Line((cx, cz), (tx, tz))
@@ -267,8 +323,6 @@ class CleanupPlanner:
             finished_part_face = sketch.sketch
         except Exception:
             return []
-
-        # Step 2: Offset the finished part face outward by fin_allowance
         # Keep zone is ALWAYS larger than finished part (protective buffer)
         # Positive offset expands the face outward in all directions
         try:
@@ -297,6 +351,15 @@ class CleanupPlanner:
             from OCP.BRepAlgoAPI import BRepAlgoAPI_Common
 
             z_top = z0_fin  # Use the same Z start as the cleanup pass itself
+            # If the profile has corner breaks near Z=0 (chamfer at face/turning
+            # junction), extend the clip to include that geometry.
+            # Check if any early corner break produces geometry at Z=0.
+            if profile is not None and profile.corner_breaks:
+                for cb in profile.corner_breaks:
+                    if cb is not None and cb.break_type.value != "none":
+                        # There's a corner break — extend clip to Z=0
+                        z_top = 0.0
+                        break
             # Z_end for clip: for ID mode, leave fin_allowance at the bottom for finish pass
             if mode == MachiningMode.ID:
                 z_bot = segments[-1].z + fin_allowance_radius
@@ -306,7 +369,10 @@ class CleanupPlanner:
             if mode == MachiningMode.OD:
                 # OD: clip to X > x_start+fin, keeping the outer (profile-side) boundary
                 x_min_r = fin_allowance_radius  # x_start(0) + fin_allowance in radius
-                x_max_r = 10.0  # Well beyond any stock
+                # Cap x_max_r at stock radius + margin (not arbitrary 10.0)
+                # This keeps tolerance calculations sane for small features like chamfers.
+                stock_r = stock.diameter / 2.0 if stock else 0.5
+                x_max_r = stock_r + 0.1  # Small margin beyond stock OD
             else:
                 # ID: clip to the bore region between pilot hole and roughing boundary
                 # The turning edge is at the max X of this clip (the roughing boundary)
@@ -407,11 +473,13 @@ class CleanupPlanner:
             # Clip boundary edges run along the clip rectangle boundaries.
             # Turning edges are everything else (they follow the offset profile shape).
             #
-            # Use a relative tolerance (0.1% of the clip dimension) to catch floating
-            # point drift from Build123d offset operations.
+            # Filter criteria: an edge is a clip boundary edge if BOTH endpoints are
+            # near a boundary value AND the edge runs ALONG that boundary (doesn't
+            # significantly span in the perpendicular direction). This prevents
+            # filtering diagonal edges (like chamfers) that merely terminate at a boundary.
             z_range = abs(z_top - z_bot)
             x_range = abs(x_max_r - x_min_r) * 2.0
-            tol = max(1e-3, z_range * 0.001, x_range * 0.001)
+            tol = max(1e-4, min(z_range * 0.001, x_range * 0.001))
             x_min_dia = x_min_r * 2.0
             x_max_dia = x_max_r * 2.0
             turning_edges = []
@@ -421,17 +489,28 @@ class CleanupPlanner:
                 ex, ez = end
 
                 # Skip edges along the clip boundary (X = x_min_dia)
+                # Must be nearly vertical at x_min (both X near x_min, Z span is the extent)
                 if abs(sx - x_min_dia) < tol and abs(ex - x_min_dia) < tol:
                     continue
                 # Skip edges along the clip boundary (X = x_max_dia)
                 if abs(sx - x_max_dia) < tol and abs(ex - x_max_dia) < tol:
                     continue
                 # Skip edges along Z = z_top (face level — handled by face passes)
+                # BOTH endpoints must be at z_top AND the edge must be essentially
+                # horizontal (X span >> Z span). A diagonal chamfer touching z_top
+                # will have significant Z span and should NOT be filtered.
                 if abs(sz - z_top) < tol and abs(ez - z_top) < tol:
-                    continue
+                    x_span = abs(sx - ex)
+                    z_span = abs(sz - ez)
+                    if x_span > z_span * 2.0 or x_span < tol:
+                        # Horizontal edge along z_top — filter it
+                        continue
                 # Skip edges along Z = z_bot
                 if abs(sz - z_bot) < tol and abs(ez - z_bot) < tol:
-                    continue
+                    x_span = abs(sx - ex)
+                    z_span = abs(sz - ez)
+                    if x_span > z_span * 2.0 or x_span < tol:
+                        continue
 
                 turning_edges.append(edge)
 
@@ -521,6 +600,7 @@ class CleanupPlanner:
         fin_allowance_radius: float,
         stock: StockDef,
         z0_fin: float,
+        profile: ClosedProfile = None,
     ) -> List[tuple]:
         """Compute the ID cleanup contour by offsetting the finished part face TOWARD centerline.
 
@@ -552,21 +632,25 @@ class CleanupPlanner:
 
         # Step 1: Build the finished part face (profile + closure to stock OD)
         try:
-            coords = []
-            for seg in segments:
-                coords.append({
-                    "type": seg.segment_type,
-                    "x_radius": seg.x / 2.0,
-                    "z": seg.z,
-                    "radius": seg.radius,
-                })
+            # Use corner-break-aware coords if profile is available
+            if profile is not None:
+                coords = _profile_to_radius_coords(profile)
+            else:
+                coords = []
+                for seg in segments:
+                    coords.append({
+                        "type": seg.segment_type,
+                        "x_radius": seg.x / 2.0,
+                        "z": seg.z,
+                        "radius": seg.radius,
+                    })
 
             # ID closure goes to stock OD
             closure_x = stock.diameter / 2.0
-            last_x_r = segments[-1].x / 2.0
-            last_z = segments[-1].z
-            first_x_r = segments[0].x / 2.0
-            first_z = segments[0].z
+            last_x_r = coords[-1]["x_radius"]
+            last_z = coords[-1]["z"]
+            first_x_r = coords[0]["x_radius"]
+            first_z = coords[0]["z"]
 
             if abs(last_x_r - closure_x) > 1e-10:
                 coords.append({"type": SegmentType.LINE, "x_radius": closure_x, "z": last_z, "radius": 0.0})
@@ -585,7 +669,7 @@ class CleanupPlanner:
                         if abs(cx - tx) < 1e-10 and abs(cz - tz) < 1e-10:
                             continue
                         if target["type"] == SegmentType.ARC and target["radius"] != 0.0:
-                            b3d_radius = -target["radius"]
+                            b3d_radius = target["radius"]
                             RadiusArc((cx, cz), (tx, tz), b3d_radius)
                         else:
                             Line((cx, cz), (tx, tz))
@@ -802,17 +886,28 @@ class CleanupPlanner:
                 ))
 
             elif edge_type == "ARC":
-                # Determine CW vs CCW from the cross product of vectors:
-                # start→center and start→end
-                # For a 2D plane (X=radius, Y=Z):
-                #   cross > 0 → CCW, cross < 0 → CW
-                dx_center = center[0] - start[0]
-                dz_center = center[1] - start[1]
-                dx_end = end[0] - start[0]
-                dz_end = end[1] - start[1]
-                cross = dx_center * dz_end - dz_center * dx_end
+                # Determine CW vs CCW from the sweep direction.
+                # The center is correct (from RadiusArc with proper signed radius).
+                # Compute sweep from start to end, normalize to [-π, π].
+                import math as _math
 
-                if cross < 0:
+                sx_r = start[0] / 2.0
+                sz = start[1]
+                ex_r = end[0] / 2.0
+                ez = end[1]
+                cx_r = center[0] / 2.0
+                cz = center[1]
+
+                angle_start = _math.atan2(sz - cz, sx_r - cx_r)
+                angle_end = _math.atan2(ez - cz, ex_r - cx_r)
+                sweep = angle_end - angle_start
+                if sweep > _math.pi:
+                    sweep -= 2 * _math.pi
+                elif sweep < -_math.pi:
+                    sweep += 2 * _math.pi
+
+                # Negative sweep = CW = G02, Positive sweep = CCW = G03
+                if sweep < 0:
                     move_type = MoveType.ARC_CW
                     radius_signed = radius
                 else:
@@ -839,19 +934,24 @@ class CleanupPlanner:
 
     def _find_arc_center(
         self, x1_r: float, z1: float, x2_r: float, z2: float,
-        radius: float, is_ccw: bool
+        radius: float, is_cw: bool
     ) -> tuple:
-        """Find arc center given two endpoints and radius using OCCT.
+        """Find arc center given two endpoints and radius.
+
+        Uses cross product to pick the center that produces the correct
+        CW/CCW direction on screen (inverted Y axis).
+
+        Empirically verified convention:
+            CW on screen -> cross product (start-center) x (end-center) < 0
+            CCW on screen -> cross product > 0
 
         Returns (center_x_radius, center_z) or None if no solution.
         """
         import math
 
-        # Midpoint
         mx = (x1_r + x2_r) / 2.0
         mz = (z1 + z2) / 2.0
 
-        # Distance between points
         dx = x2_r - x1_r
         dz = z2 - z1
         d = math.sqrt(dx**2 + dz**2)
@@ -859,25 +959,43 @@ class CleanupPlanner:
         if d < 1e-10:
             return None
 
-        # Distance from midpoint to center
         h_sq = radius**2 - (d / 2.0)**2
         if h_sq < 0:
             h_sq = 0
         h = math.sqrt(h_sq)
 
-        # Perpendicular direction
         px = -dz / d
         pz = dx / d
 
-        # Two possible centers — choose based on CW/CCW
-        if is_ccw:
-            center_x = mx - h * px
-            center_z = mz - h * pz
-        else:
-            center_x = mx + h * px
-            center_z = mz + h * pz
+        c1_x = mx + h * px
+        c1_z = mz + h * pz
+        c2_x = mx - h * px
+        c2_z = mz - h * pz
 
-        return (center_x, center_z)
+        # Cross product: (start-center) x (end-center)
+        ax = x1_r - c1_x
+        az = z1 - c1_z
+        bx = x2_r - c1_x
+        bz = z2 - c1_z
+        cr1 = ax * bz - az * bx
+
+        # CW -> negative cross, CCW -> positive cross
+        if is_cw:
+            cx, cz = (c1_x, c1_z) if cr1 < 0 else (c2_x, c2_z)
+            other_cx, other_cz = (c2_x, c2_z) if cr1 < 0 else (c1_x, c1_z)
+        else:
+            cx, cz = (c1_x, c1_z) if cr1 > 0 else (c2_x, c2_z)
+            other_cx, other_cz = (c2_x, c2_z) if cr1 > 0 else (c1_x, c1_z)
+
+        # Bounds-aware center selection: if the cross-product choice produces
+        # an arc that exceeds X bounds, swap to the other candidate center.
+        if not is_arc_within_x_bounds(cx, cz, radius, x1_r, z1, x2_r, z2, is_cw):
+            # Check if the other center produces a bounded arc
+            if is_arc_within_x_bounds(other_cx, other_cz, radius, x1_r, z1, x2_r, z2, not is_cw):
+                cx, cz = other_cx, other_cz
+            # If both centers produce out-of-bounds arcs, keep original (degenerate case)
+
+        return (cx, cz)
 
     def _plan_from_zone_boundary(
         self,

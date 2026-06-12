@@ -1,0 +1,111 @@
+{
+  "version": 1,
+  "block_type": "OD Profile",
+  "stock": {
+    "diameter": 1.0,
+    "x_start": 0.0,
+    "z_start": 0.1,
+    "z_end": -1.25,
+    "x_park": 2.0,
+    "z_park": 2.0,
+    "pilot_hole_dia": 0.0,
+    "mode": "od"
+  },
+  "roughing": {
+    "tool_number": 1,
+    "doc_dia": 0.05,
+    "feed": 0.006,
+    "strategy": "offset_contour",
+    "fin_allowance": 0.005,
+    "peck_enabled": false,
+    "peck_length": null,
+    "spindle_rpm": 1200.0
+  },
+  "finishing": {
+    "tool_number": 1,
+    "passes": 1,
+    "doc_dia": 0.002,
+    "feed": 0.003,
+    "spindle_rpm": 1200.0,
+    "spring_pass": false
+  },
+  "segments": [
+    {
+      "type": "line",
+      "x": 0.0,
+      "z": 0.0,
+      "radius": 0.0
+    },
+    {
+      "type": "line",
+      "x": 0.5,
+      "z": 0.0,
+      "radius": 0.0
+    },
+    {
+      "type": "line",
+      "x": 0.5,
+      "z": -0.5,
+      "radius": 0.0
+    },
+    {
+      "type": "line",
+      "x": 0.25,
+      "z": -0.625,
+      "radius": 0.0
+    },
+    {
+      "type": "line",
+      "x": 0.25,
+      "z": -0.75,
+      "radius": 0.0
+    },
+    {
+      "type": "line",
+      "x": 0.75,
+      "z": -0.75,
+      "radius": 0.0
+    },
+    {
+      "type": "line",
+      "x": 0.75,
+      "z": -1.0,
+      "radius": 0.0
+    },
+    {
+      "type": "line",
+      "x": 1.0,
+      "z": -1.25,
+      "radius": 0.0
+    }
+  ],
+  "corner_breaks": [
+    null,
+    {
+      "type": "chamfer",
+      "size": 0.015,
+      "angle": 45.0,
+      "radius": 0.0
+    },
+    {
+      "type": "fillet",
+      "radius": 0.015,
+      "size": 0.0,
+      "angle": 45.0
+    },
+    {
+      "type": "fillet",
+      "radius": 0.015,
+      "size": 0.0,
+      "angle": 45.0
+    },
+    {
+      "type": "fillet",
+      "radius": 0.015,
+      "size": 0.0,
+      "angle": 45.0
+    },
+    null,
+    null
+  ]
+}

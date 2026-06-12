@@ -107,8 +107,39 @@ def validate_all_moves(
                     sub_segments = [LineString([(start_x_r, start_z), (end_x_r, end_z)])]
 
                 # Check each sub-segment vs finished_part
+                # Finish pass traces the profile boundary directly.
+                # Cleanup pass traces the offset boundary (fin_allowance outside
+                # the finished part). Both are derived from OCCT geometry.
+                # A small buffer handles densification sampling differences.
+                if move.pass_type in (PassType.FINISH, PassType.CLEANUP):
+                    fp_check = finished_part.buffer(-0.001)
+                    if fp_check.is_empty:
+                        fp_check = finished_part
+                else:
+                    fp_check = finished_part
+
                 for seg in sub_segments:
-                    if seg.crosses(finished_part):
+                    # crosses() returns True when a line enters and exits
+                    # the polygon interior. But it returns False when the line
+                    # runs along the polygon BOUNDARY (coincident edge). To catch
+                    # boundary-coincident gouges (e.g., a roughing pass running
+                    # along a profile vertex where the polygon has a vertical edge),
+                    # also check if the segment's intersection with the polygon
+                    # interior has non-zero length.
+                    gouge_detected = False
+                    if seg.crosses(fp_check):
+                        gouge_detected = True
+                    elif move.pass_type == PassType.ROUGH:
+                        # Extra check for roughing: a line that overlaps the
+                        # polygon boundary without crossing is still a gouge if
+                        # it has significant interior overlap. This catches the
+                        # case where a vertical roughing pass at a profile X
+                        # vertex coincides with the polygon edge.
+                        intersection = seg.intersection(fp_check)
+                        if not intersection.is_empty and intersection.length > TOLERANCE:
+                            gouge_detected = True
+
+                    if gouge_detected:
                         move_type_str = move.move_type.value.upper()
                         results.append(ValidationResult(
                             severity=Severity.ERROR,

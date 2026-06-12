@@ -43,6 +43,7 @@ def execute(
     tool: ToolDef,
     roughing_params: RoughingParams,
     finishing_params: FinishingParams,
+    finish_tool: ToolDef | None = None,
     verify_roundtrip: bool = False,
 ) -> PipelineResult:
     """Execute the full CAM pipeline.
@@ -125,12 +126,14 @@ def execute(
             zone_query, zone_set, tool, roughing_params, stock, profile.mode, profile,
         )
 
-    # Step 6: Plan cleanup pass (staircase only — offset-contour's last pass IS the cleanup)
-    if roughing_params.strategy == RoughingStrategy.STAIRCASE:
-        cleanup_planner = CleanupPlanner()
-        cleanup_passes = cleanup_planner.plan(zone_query, tool, roughing_params, stock, profile.mode, profile)
-    else:
-        cleanup_passes = []
+    # Step 6: Plan cleanup pass
+    # Both strategies need a cleanup pass. For staircase, the cleanup removes
+    # the stair-step material left between DOC levels. For offset-contour,
+    # the innermost roughing pass is at fin_allowance + DOC from the profile,
+    # so the cleanup removes that last DOC of material, leaving only
+    # fin_allowance for the finish pass.
+    cleanup_planner = CleanupPlanner()
+    cleanup_passes = cleanup_planner.plan(zone_query, tool, roughing_params, stock, profile.mode, profile)
 
     # Step 7: Plan finish pass
     finish_planner = FinishPlanner()
@@ -180,6 +183,7 @@ def execute(
         roughing_params=roughing_params,
         finishing_params=finishing_params,
         mode=profile.mode,
+        finish_tool=finish_tool,
         face_passes=face_passes,
         roughing_passes=roughing_passes,
         cleanup_passes=cleanup_passes,
@@ -365,8 +369,8 @@ def _assemble_moves(passes: List[TurningPass], transitions: list) -> List[ToolMo
     for move in all_moves[1:]:
         prev = filtered[-1]
         if abs(move.x - prev.x) < TOLERANCE and abs(move.z - prev.z) < TOLERANCE:
-            # Zero-length — skip unless it's an arc (arcs can start/end at same XZ)
-            if move.move_type not in (MoveType.ARC_CW, MoveType.ARC_CCW):
+            # Zero-length — skip unless it's an arc or dwell (both are intentionally stationary)
+            if move.move_type not in (MoveType.ARC_CW, MoveType.ARC_CCW, MoveType.DWELL):
                 continue
         filtered.append(move)
 

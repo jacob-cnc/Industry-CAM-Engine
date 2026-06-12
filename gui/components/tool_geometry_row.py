@@ -18,7 +18,7 @@ Signals:
 from PyQt5.QtWidgets import (
     QWidget, QGridLayout, QHBoxLayout, QVBoxLayout,
     QLabel, QLineEdit, QComboBox, QPushButton, QFrame,
-    QSizePolicy,
+    QSizePolicy, QSpinBox,
 )
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QFont, QMouseEvent
@@ -80,7 +80,7 @@ class ToolGeometryRow(QWidget):
             insert_code = self._custom_insert_edit.text().strip()
 
         return ToolCardData(
-            tool_number=self._tool_number,
+            tool_number=self._tool_number_spin.value(),
             tool_type=self._type_combo.currentText(),
             insert_code=insert_code,
             orientation=self._orientation_value(),
@@ -105,7 +105,9 @@ class ToolGeometryRow(QWidget):
         self._suppress_signals = True
         try:
             self._tool_number = data.tool_number
-            self._tool_label.setText(f"T{data.tool_number:02d}")
+            self._tool_number_spin.blockSignals(True)
+            self._tool_number_spin.setValue(data.tool_number)
+            self._tool_number_spin.blockSignals(False)
             self._desc_edit.setText(data.description)
 
             # Type dropdown — set first so cascade filtering can apply
@@ -121,12 +123,7 @@ class ToolGeometryRow(QWidget):
                 self._insert_combo.addItems(valid_inserts)
                 self._insert_combo.blockSignals(False)
 
-            valid_orientations = get_valid_orientations(data.tool_type)
-            if valid_orientations:
-                self._orient_combo.blockSignals(True)
-                self._orient_combo.clear()
-                self._orient_combo.addItems([f"Q{o}" for o in valid_orientations])
-                self._orient_combo.blockSignals(False)
+            self._set_orientation_options(data.tool_type, data.insert_code, preserve=False)
 
             # Insert code dropdown — if not in list, treat as custom
             idx = self._insert_combo.findText(data.insert_code)
@@ -193,7 +190,16 @@ class ToolGeometryRow(QWidget):
     def set_tool_number(self, number: int) -> None:
         """Update the displayed tool number."""
         self._tool_number = number
-        self._tool_label.setText(f"T{number:02d}")
+        self._tool_number_spin.blockSignals(True)
+        self._tool_number_spin.setValue(number)
+        self._tool_number_spin.blockSignals(False)
+
+    def _on_tool_number_changed(self) -> None:
+        """Handle manual tool number edit — update internal state and notify."""
+        value = self._tool_number_spin.value()
+        self._tool_number = value
+        if not self._suppress_signals:
+            self.field_changed.emit(value)
 
     # ------------------------------------------------------------------
     # Mouse event — emit clicked signal
@@ -215,10 +221,21 @@ class ToolGeometryRow(QWidget):
         main_layout.setSpacing(6)
 
         # === Row 0: Header row — T##, Type, Insert, Orient, Custom/Desc, Delete ===
-        self._tool_label = QLabel("T01")
-        self._tool_label.setFont(QFont(FONTS["mono_family"], FONTS["ui_size"] + 2, QFont.Bold))
-        self._tool_label.setStyleSheet(f"color: {COLORS['text_primary']}; background: transparent;")
-        main_layout.addWidget(self._tool_label, 0, 0)
+        self._tool_number_spin = QSpinBox()
+        self._tool_number_spin.setRange(1, 99999)
+        self._tool_number_spin.setValue(1)
+        self._tool_number_spin.setPrefix("T")
+        self._tool_number_spin.setFont(QFont(FONTS["mono_family"], FONTS["ui_size"] + 2, QFont.Bold))
+        self._tool_number_spin.setFixedWidth(90)
+        self._tool_number_spin.setStyleSheet(
+            f"QSpinBox {{ background-color: {COLORS['bg_panel']}; "
+            f"color: {COLORS['text_primary']}; "
+            f"border: 1px solid {COLORS['border_normal']}; "
+            f"border-radius: 3px; padding: 2px 4px; min-height: 28px; }}"
+            f"QSpinBox:focus {{ border-color: {COLORS['border_focused']}; }}"
+        )
+        self._tool_number_spin.editingFinished.connect(self._on_tool_number_changed)
+        main_layout.addWidget(self._tool_number_spin, 0, 0)
 
         self._type_combo = QComboBox()
         self._type_combo.addItems(TOOL_TYPES)
@@ -351,7 +368,8 @@ class ToolGeometryRow(QWidget):
         params_row.addWidget(front_label)
 
         self._front_angle_field = NumericField(NumericFieldConfig(
-            min_value=0.0, max_value=360.0, decimals=1, default_value=95.0
+            min_value=0.0, max_value=360.0, decimals=1, default_value=95.0,
+            unit_aware=False,
         ))
         self._front_angle_field.setFixedWidth(90)
         self._front_angle_field.value_changed.connect(self._on_geometry_changed)
@@ -362,7 +380,8 @@ class ToolGeometryRow(QWidget):
         params_row.addWidget(back_label)
 
         self._back_angle_field = NumericField(NumericFieldConfig(
-            min_value=0.0, max_value=360.0, decimals=1, default_value=175.0
+            min_value=0.0, max_value=360.0, decimals=1, default_value=175.0,
+            unit_aware=False,
         ))
         self._back_angle_field.setFixedWidth(90)
         self._back_angle_field.value_changed.connect(self._on_geometry_changed)
@@ -462,6 +481,28 @@ class ToolGeometryRow(QWidget):
         """Show blade width field only for Grooving/Parting tools."""
         self._blade_width_container.setVisible(tool_type == "Grooving/Parting")
 
+    def _set_orientation_options(self, tool_type: str, insert_code: str, preserve: bool = True) -> None:
+        """Populate orientation combo based on tool type and insert code.
+
+        When insert_code is "Custom", all Q1–Q9 are available regardless of tool type.
+        Otherwise, shows the valid orientations for the tool type.
+        If preserve=True, keeps the current selection when it remains valid.
+        """
+        current_text = self._orient_combo.currentText() if preserve else ""
+
+        if insert_code == "Custom":
+            options = [f"Q{i}" for i in range(1, 10)]
+        else:
+            valid = get_valid_orientations(tool_type)
+            options = [f"Q{o}" for o in valid] if valid else [f"Q{i}" for i in range(1, 10)]
+
+        self._orient_combo.blockSignals(True)
+        self._orient_combo.clear()
+        self._orient_combo.addItems(options)
+        idx = self._orient_combo.findText(current_text)
+        self._orient_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self._orient_combo.blockSignals(False)
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -537,17 +578,6 @@ class ToolGeometryRow(QWidget):
         if self._suppress_signals:
             return
 
-        # --- Filter orientation dropdown and auto-populate to first valid ---
-        valid_orientations = get_valid_orientations(tool_type)
-
-        self._orient_combo.blockSignals(True)
-        self._orient_combo.clear()
-        if valid_orientations:
-            self._orient_combo.addItems([f"Q{o}" for o in valid_orientations])
-            # Always set to first valid orientation for the new type
-            self._orient_combo.setCurrentIndex(0)
-        self._orient_combo.blockSignals(False)
-
         # --- Filter insert code dropdown ---
         valid_inserts = get_valid_inserts(tool_type)
         current_insert = self._insert_combo.currentText()
@@ -570,6 +600,10 @@ class ToolGeometryRow(QWidget):
             self._manual_angles_edited = False
             self._autofill_angles(new_insert)
 
+        # --- Filter orientation dropdown — reset to first since type changed ---
+        # Custom insert always expands to all Q options regardless of tool type
+        self._set_orientation_options(tool_type, new_insert, preserve=False)
+
         self._update_orientation_graphic()
         self._emit_field_changed()
 
@@ -587,6 +621,9 @@ class ToolGeometryRow(QWidget):
 
         # Show/hide custom insert name field
         self._custom_insert_edit.setVisible(insert_code == "Custom")
+
+        # Custom insert expands orientation options to all Q1–Q9; others re-filter by type
+        self._set_orientation_options(self._type_combo.currentText(), insert_code, preserve=True)
 
         # Insert code changed by user — reset manual edit tracking and auto-fill
         self._manual_angles_edited = False

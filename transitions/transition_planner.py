@@ -172,10 +172,10 @@ class TransitionPlanner:
     def _get_safe_x(self, mode: MachiningMode, stock: StockDef) -> float:
         """Safe retract X level parameterized by mode.
 
-        OD: stock_dia (retract to stock OD — outside material)
-        ID: pilot_hole_dia (retract to pilot hole — inside empty space)
+        OD: stock_dia + 0.010" clearance (0.005" per side in radius)
+        ID: pilot_hole_dia - 0.010" clearance (retract toward center)
         """
         if mode == MachiningMode.OD:
-            return stock.diameter
+            return stock.diameter + 0.010
         else:
-            return stock.pilot_hole_dia
+            return max(0.0, stock.pilot_hole_dia - 0.010)

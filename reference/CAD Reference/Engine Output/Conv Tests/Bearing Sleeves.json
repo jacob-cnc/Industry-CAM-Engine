@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "block_type": "ID Profile",
+  "stock": {
+    "diameter": 3.5,
+    "x_start": 3.23,
+    "z_start": 0.025,
+    "z_end": -0.8,
+    "x_park": 3.6,
+    "z_park": 2.0,
+    "pilot_hole_dia": 3.0,
+    "mode": "id"
+  },
+  "roughing": {
+    "tool_number": 1,
+    "doc_dia": 0.05,
+    "feed": 0.006,
+    "strategy": "staircase",
+    "fin_allowance": 0.005,
+    "peck_enabled": false,
+    "peck_length": null,
+    "spindle_rpm": 1200.0
+  },
+  "finishing": {
+    "tool_number": 1,
+    "passes": 1,
+    "doc_dia": 0.002,
+    "feed": 0.003,
+    "spindle_rpm": 1200.0,
+    "spring_pass": false
+  },
+  "segments": [
+    {
+      "type": "line",
+      "x": 3.23,
+      "z": 0.0,
+      "radius": 0.0
+    },
+    {
+      "type": "line",
+      "x": 3.2,
+      "z": 0.0,
+      "radius": 0.0
+    },
+    {
+      "type": "line",
+      "x": 3.2,
+      "z": -0.8,
+      "radius": 0.0
+    }
+  ],
+  "corner_breaks": [
+    null,
+    {
+      "type": "chamfer",
+      "size": 0.015,
+      "angle": 45.0,
+      "radius": 0.0
+    }
+  ]
+}

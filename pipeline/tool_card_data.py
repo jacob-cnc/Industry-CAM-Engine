@@ -72,15 +72,15 @@ TYPE_ORIENTATIONS: Dict[str, List[int]] = {
 }
 
 TYPE_INSERTS: Dict[str, List[str]] = {
-    "Turning RH": ["CNMG", "CCMT", "WNMG", "DNMG", "DCMT", "VNMG", "TNMG", "SNMG", "RCMT"],
-    "Turning LH": ["CNMG", "CCMT", "WNMG", "DNMG", "DCMT", "VNMG", "TNMG", "SNMG", "RCMT"],
-    "Boring Bar": ["CCMT", "DCMT", "VNMG", "RCMT"],
-    "Threading External": ["60° UN/Metric", "55° Whitworth", "ACME"],
-    "Threading Internal": ["60° UN/Metric", "55° Whitworth", "ACME"],
-    "Grooving/Parting": ["Grooving"],
+    "Turning RH": ["CNMG", "CCMT", "WNMG", "DNMG", "DCMT", "VNMG", "TNMG", "SNMG", "RCMT", "Custom"],
+    "Turning LH": ["CNMG", "CCMT", "WNMG", "DNMG", "DCMT", "VNMG", "TNMG", "SNMG", "RCMT", "Custom"],
+    "Boring Bar": ["CCMT", "DCMT", "VNMG", "RCMT", "Custom"],
+    "Threading External": ["60° UN/Metric", "55° Whitworth", "ACME", "Custom"],
+    "Threading Internal": ["60° UN/Metric", "55° Whitworth", "ACME", "Custom"],
+    "Grooving/Parting": ["Grooving", "Custom"],
     "Knurling": ["Custom"],
     "Custom": ["CNMG", "CCMT", "WNMG", "DNMG", "DCMT", "VNMG", "TNMG", "SNMG", "RCMT",
-               "60° UN/Metric", "55° Whitworth", "ACME", "Grooving"],
+               "60° UN/Metric", "55° Whitworth", "ACME", "Grooving", "Custom"],
 }
 
 

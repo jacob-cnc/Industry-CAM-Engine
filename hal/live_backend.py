@@ -191,10 +191,10 @@ class LiveBackend(HALBackend):
         task_mode = _TASK_MODE_MAP.get(s.task_mode, TaskMode.MANUAL)
         interp_state = _INTERP_MAP.get(s.interp_state, InterpState.IDLE)
 
-        # Axis positions (joint-based for 2-axis lathe)
-        # Joint 0 = X, Joint 1 = Z
-        x_pos = s.actual_position[0]  # X in diameter (lathe mode)
-        z_pos = s.actual_position[2]  # Z in inches (index 2 in XYZ tuple)
+        # Axis positions in active work coordinate system (G54 etc.)
+        # actual_position is G53 machine coords; subtract offsets to get work coords.
+        x_pos = s.actual_position[0] - s.g5x_offset[0] - s.g92_offset[0] - s.tool_offset[0]
+        z_pos = s.actual_position[2] - s.g5x_offset[2] - s.g92_offset[2] - s.tool_offset[2]
 
         x_cmd = s.joint[0]["output"] if len(s.joint) > 0 else 0.0
         z_cmd = s.joint[1]["output"] if len(s.joint) > 1 else 0.0
@@ -294,7 +294,12 @@ class LiveBackend(HALBackend):
         if self._stat.task_mode == mode:
             return True
         if self._stat.interp_state != linuxcnc.INTERP_IDLE:
-            return False
+            # Never abort a running AUTO program — jog/MDI requests silently fail
+            if self._stat.task_mode == linuxcnc.MODE_AUTO:
+                return False
+            # MDI stuck non-idle (e.g. after tool change) — safe to abort
+            self._cmd.abort()
+            self._cmd.wait_complete()
         self._cmd.mode(mode)
         return True
 
@@ -424,6 +429,7 @@ class LiveBackend(HALBackend):
                 return False
             self._cmd.mdi(command)
             self._cmd.wait_complete()
+            self._ensure_mode(linuxcnc.MODE_MANUAL)
             return True
         except linuxcnc.error:
             return False
@@ -542,6 +548,7 @@ class LiveBackend(HALBackend):
             self._cmd.wait_complete(60)  # Tool change may wait for operator
             self._cmd.mdi("G43")
             self._cmd.wait_complete()
+            self._ensure_mode(linuxcnc.MODE_MANUAL)
             return True
         except linuxcnc.error:
             return False
@@ -564,6 +571,7 @@ class LiveBackend(HALBackend):
             axis_letter = "X" if axis == 0 else "Z"
             self._cmd.mdi(f"G10 L20 P{system} {axis_letter}{value:.6f}")
             self._cmd.wait_complete()
+            self._ensure_mode(linuxcnc.MODE_MANUAL)
             return True
         except linuxcnc.error:
             return False

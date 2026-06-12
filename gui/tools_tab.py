@@ -28,6 +28,7 @@ from PyQt5.QtWidgets import (
 from gui.colors import COLORS
 from gui.components.top_button_bar import TopButtonBar
 from gui.components.tool_geometry_row import ToolGeometryRow
+from gui.unit_state import unit_state
 from pipeline.tool_card_data import ToolCardData
 from pipeline.tool_table_io import load_tool_table, save_tool_table, create_backup
 
@@ -86,6 +87,9 @@ class Tools_Tab(QWidget):
         self._setup_ui()
         self._connect_button_bar_signals()
         self._setup_offline_mode()
+
+        # Subscribe to unit mode changes to refresh displayed tool geometry
+        unit_state.unit_changed.connect(self._on_unit_changed)
 
         # Load settings and auto-load last table
         self._load_settings_and_auto_load()
@@ -148,6 +152,24 @@ class Tools_Tab(QWidget):
                 self._button_bar._current_tool_label.setText("Offline")
         else:
             self._button_bar._current_tool_label.setText("Offline")
+
+    # ------------------------------------------------------------------
+    # Unit Mode Change
+    # ------------------------------------------------------------------
+
+    def _on_unit_changed(self, mode: str) -> None:
+        """Refresh all displayed tool geometry values on unit mode change.
+
+        The NumericField widgets in each ToolGeometryRow handle their own
+        display conversion (nose radius, X offset, Z offset are unit_aware).
+        This method ensures any additional tab-level displays are refreshed.
+
+        Stored tool data is never modified — only the display is updated.
+        """
+        # NumericField widgets already re-display via their own unit_changed
+        # subscription. Force a repaint of all cards to ensure visual consistency.
+        for card in self._cards:
+            card.update()
 
     # ------------------------------------------------------------------
     # Card Management
@@ -302,7 +324,7 @@ class Tools_Tab(QWidget):
         reply = QMessageBox.question(
             self,
             "Delete Tool",
-            f"Delete tool T{tool_number}? Remaining tools will be renumbered.",
+            f"Delete tool T{tool_number}?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
@@ -322,10 +344,6 @@ class Tools_Tab(QWidget):
 
         if card_to_remove is None:
             return
-
-        # Renumber all remaining tools sequentially from T1
-        for i, card in enumerate(self._cards):
-            card.set_tool_number(i + 1)
 
         # Update selection
         if self._selected_index >= len(self._cards):
@@ -408,11 +426,11 @@ class Tools_Tab(QWidget):
 
         Appends a new blank tool card with the next available tool number.
         """
-        # Determine next tool number
-        if self._cards:
-            next_number = len(self._cards) + 1
-        else:
-            next_number = 1
+        # Determine next tool number — first unused integer starting from 1
+        existing = {card.get_data().tool_number for card in self._cards}
+        next_number = 1
+        while next_number in existing:
+            next_number += 1
 
         # Create blank ToolCardData with defaults
         new_tool = ToolCardData(
@@ -452,8 +470,8 @@ class Tools_Tab(QWidget):
             return
 
         tool_number = selected_tool.tool_number
-        # G10 L1 P<tool> X<diameter_value>
-        command = f"G10 L1 P{tool_number} X{value:.6f}"
+        # G10 L20 P<tool> X<diameter>: sets offset so current position reads <value>
+        command = f"G10 L20 P{tool_number} X{value:.6f}"
         self._send_mdi_command(command)
 
     def _on_set_z_clicked(self, value: float) -> None:
@@ -473,8 +491,8 @@ class Tools_Tab(QWidget):
             return
 
         tool_number = selected_tool.tool_number
-        # G10 L1 P<tool> Z<value>
-        command = f"G10 L1 P{tool_number} Z{value:.6f}"
+        # G10 L20 P<tool> Z<value>: sets offset so current position reads <value>
+        command = f"G10 L20 P{tool_number} Z{value:.6f}"
         self._send_mdi_command(command)
 
     # ------------------------------------------------------------------

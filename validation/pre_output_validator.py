@@ -58,9 +58,9 @@ def validate_gcode_geometry(moves: List[ToolMove]) -> List[ValidationResult]:
                     move_index=i,
                 ))
 
-        # Check zero-length moves
+        # Check zero-length moves (skip DWELL — they're intentionally stationary)
         if prev_x is not None and prev_z is not None:
-            if abs(move.x - prev_x) < TOLERANCE and abs(move.z - prev_z) < TOLERANCE:
+            if move.move_type != MoveType.DWELL and abs(move.x - prev_x) < TOLERANCE and abs(move.z - prev_z) < TOLERANCE:
                 results.append(ValidationResult(
                     severity=Severity.ERROR,
                     category="system",

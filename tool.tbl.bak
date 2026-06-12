@@ -1,0 +1,5 @@
+T1 P1 X+0.000000 Z+0.000000 D0.032000 I95.0 J175.0 Q2 ;type=turning_rh|insert=CNMG|blade=0.000|desc=
+T2 P2 X+0.000000 Z+0.000000 D0.032000 I60.0 J120.0 Q2 ;type=threading_external|insert=60° UN/Metric|blade=0.000|desc=
+T3 P3 X+0.000000 Z+0.000000 D0.032000 I95.0 J175.0 Q5 ;type=boring_bar|insert=CCMT|blade=0.000|desc=
+T4 P4 X+0.000000 Z+0.000000 D0.032000 I95.0 J175.0 Q1 ;type=turning_rh|insert=CNMG|blade=0.000|desc=
+T5 P5 X+0.000000 Z+0.000000 D0.032000 I95.0 J175.0 Q1 ;type=turning_rh|insert=CNMG|blade=0.000|desc=

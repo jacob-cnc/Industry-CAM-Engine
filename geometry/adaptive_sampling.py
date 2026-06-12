@@ -53,21 +53,38 @@ def arc_midpoint(
     end: Tuple[float, float],
     center: Tuple[float, float],
     radius: float,
+    is_cw: bool = None,
 ) -> Tuple[float, float]:
     """Compute the point on the arc halfway between start and end (angle bisection).
 
     The midpoint is found by bisecting the angle from center to start and center to end,
     then projecting outward by radius from center.
+
+    Args:
+        is_cw: If provided, determines arc direction (True=CW=negative sweep,
+               False=CCW=positive sweep). If None, takes the shorter arc.
     """
     angle_start = math.atan2(start[1] - center[1], start[0] - center[0])
     angle_end = math.atan2(end[1] - center[1], end[0] - center[0])
 
-    # Handle angle wrapping — choose the shorter arc
     diff = angle_end - angle_start
-    if diff > math.pi:
-        diff -= 2 * math.pi
-    elif diff < -math.pi:
-        diff += 2 * math.pi
+
+    if is_cw is not None:
+        # Use explicit direction
+        if is_cw:
+            # CW = negative sweep
+            if diff > 0:
+                diff -= 2 * math.pi
+        else:
+            # CCW = positive sweep
+            if diff < 0:
+                diff += 2 * math.pi
+    else:
+        # Default: choose the shorter arc
+        if diff > math.pi:
+            diff -= 2 * math.pi
+        elif diff < -math.pi:
+            diff += 2 * math.pi
 
     angle_mid = angle_start + diff / 2.0
 
@@ -84,6 +101,7 @@ def adaptive_densify_arc(
     radius: float,
     cos_limit: float = SHAPELY_COS_LIMIT,
     max_depth: int = MAX_DENSIFICATION_DEPTH,
+    is_cw: bool = None,
 ) -> List[Tuple[float, float]]:
     """Recursively bisect an arc until the cosine-limit flatness predicate is satisfied.
 
@@ -103,12 +121,14 @@ def adaptive_densify_arc(
         radius: Arc radius (positive, absolute value)
         cos_limit: Flatness threshold (higher = more points, tighter tolerance)
         max_depth: Maximum recursion depth (safety limit)
+        is_cw: If provided, determines arc direction (True=CW, False=CCW).
+               If None, takes the shorter arc (backward compatible).
 
     Returns:
         List of (x, y) points from start to end (inclusive).
     """
     result = [start]
-    _densify_recursive(start, end, center, radius, cos_limit, max_depth, 0, result)
+    _densify_recursive(start, end, center, radius, cos_limit, max_depth, 0, result, is_cw)
     result.append(end)
     return result
 
@@ -122,9 +142,10 @@ def _densify_recursive(
     max_depth: int,
     depth: int,
     result: List[Tuple[float, float]],
+    is_cw: bool = None,
 ) -> None:
     """Internal recursive densification. Appends intermediate points to result."""
-    mid = arc_midpoint(start, end, center, radius)
+    mid = arc_midpoint(start, end, center, radius, is_cw)
 
     if depth >= max_depth:
         # Force at least one bisection at max depth
@@ -136,6 +157,6 @@ def _densify_recursive(
         return
 
     # Not flat — bisect both halves
-    _densify_recursive(start, mid, center, radius, cos_limit, max_depth, depth + 1, result)
+    _densify_recursive(start, mid, center, radius, cos_limit, max_depth, depth + 1, result, is_cw)
     result.append(mid)
-    _densify_recursive(mid, end, center, radius, cos_limit, max_depth, depth + 1, result)
+    _densify_recursive(mid, end, center, radius, cos_limit, max_depth, depth + 1, result, is_cw)

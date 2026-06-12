@@ -10,6 +10,7 @@
     "mode": "od"
   },
   "roughing": {
+    "tool_number": 1,
     "doc_dia": 0.05,
     "feed": 0.008,
     "strategy": "offset_contour",
@@ -19,9 +20,11 @@
     "spindle_rpm": 1200.0
   },
   "finishing": {
+    "tool_number": 1,
     "passes": 1,
     "doc_dia": 0.002,
-    "feed": 0.003
+    "feed": 0.003,
+    "spring_pass": false
   },
   "segments": [
     {
