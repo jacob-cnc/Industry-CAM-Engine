@@ -54,7 +54,11 @@ class SimMove:
 # ---------------------------------------------------------------------------
 
 def parse_gcode_for_sim(gcode_text: str) -> List[SimMove]:
-    """Parse G-code into SimMoves, each stamped with its source line index."""
+    """Parse G-code into SimMoves, each stamped with its source line index.
+
+    Recognizes G0/G1/G2/G3 motion and expands G76 threading cycles into
+    their constituent rapid/feed passes for visualization.
+    """
     moves: List[SimMove] = []
     x = 0.0
     z = 0.0
@@ -75,6 +79,16 @@ def parse_gcode_for_sim(gcode_text: str) -> List[SimMove]:
             continue
 
         tokens = line.split()
+
+        # --- G76 threading cycle expansion ---
+        if any(t == "G76" for t in tokens):
+            expanded = _expand_g76_for_sim(tokens, x, z, line_idx)
+            if expanded:
+                moves.extend(expanded)
+                x = expanded[-1].end_x
+                z = expanded[-1].end_z
+            continue
+
         new_motion = None
         for token in tokens:
             if token in ("G00", "G0"):
@@ -135,6 +149,118 @@ def parse_gcode_for_sim(gcode_text: str) -> List[SimMove]:
         z = end_z
 
     return moves
+
+
+def _expand_g76_for_sim(tokens: list, current_x: float, current_z: float,
+                        line_idx: int) -> List[SimMove]:
+    """Expand a G76 threading cycle into SimMoves for visualization.
+
+    G76 parameters (LinuxCNC):
+        P = pitch (lead for multi-start)
+        Z = thread end Z
+        I = taper amount
+        J = first pass depth (radius)
+        K = full thread depth (radius)
+        H = spring passes
+        L = chamfer (threads)
+        Q = compound angle (degrees)
+
+    The tool is at (current_x, current_z) when G76 is called.
+    current_x is the retract position; the cycle cuts inward from there.
+    """
+    # Parse G76 word values
+    params = {}
+    for token in tokens:
+        if token == "G76":
+            continue
+        if len(token) > 1 and token[0].isalpha():
+            try:
+                params[token[0]] = float(token[1:])
+            except ValueError:
+                pass
+
+    pitch = params.get('P', 0.05)
+    z_end = params.get('Z', current_z - 1.0)
+    first_cut_r = params.get('J', 0.005)
+    full_depth_r = params.get('K', 0.020)
+    spring_passes = int(params.get('H', 1))
+    chamfer_threads = params.get('L', 1.0)
+
+    safe_x = current_x
+    z_start = current_z
+
+    # Compute number of passes from first_cut and full_depth
+    if first_cut_r > 0.0001:
+        num_passes = max(2, int(round((full_depth_r / first_cut_r) ** 2)))
+    else:
+        num_passes = 6
+
+    # Constant-area (sqrt) pass depths
+    pass_depths_r = []
+    for n in range(1, num_passes + 1):
+        pass_depths_r.append(full_depth_r * math.sqrt(n / num_passes))
+
+    result: List[SimMove] = []
+    chamfer_z_dist = chamfer_threads * pitch
+
+    for depth_r in pass_depths_r:
+        depth_dia = depth_r * 2.0
+        pass_x = safe_x - depth_dia  # External: cut inward
+
+        # Rapid to pass depth at Z start
+        result.append(SimMove(
+            move_type="rapid", start_x=safe_x, start_z=z_start,
+            end_x=pass_x, end_z=z_start, line_idx=line_idx,
+        ))
+        # Feed along thread body
+        thread_body_z = z_end + chamfer_z_dist
+        result.append(SimMove(
+            move_type="feed", start_x=pass_x, start_z=z_start,
+            end_x=pass_x, end_z=thread_body_z, line_idx=line_idx,
+            feed_rate=pitch,
+        ))
+        # Chamfer lead-out
+        if chamfer_z_dist > 0.0001:
+            result.append(SimMove(
+                move_type="feed", start_x=pass_x, start_z=thread_body_z,
+                end_x=safe_x, end_z=z_end, line_idx=line_idx,
+                feed_rate=pitch,
+            ))
+        # Rapid retract to Z start
+        retract_z = z_end if chamfer_z_dist > 0.0001 else thread_body_z
+        result.append(SimMove(
+            move_type="rapid", start_x=safe_x, start_z=retract_z,
+            end_x=safe_x, end_z=z_start, line_idx=line_idx,
+        ))
+
+    # Spring passes at full depth
+    full_depth_dia = full_depth_r * 2.0
+    spring_x = safe_x - full_depth_dia
+
+    for _ in range(spring_passes):
+        result.append(SimMove(
+            move_type="rapid", start_x=safe_x, start_z=z_start,
+            end_x=spring_x, end_z=z_start, line_idx=line_idx,
+        ))
+        thread_body_z = z_end + chamfer_z_dist
+        result.append(SimMove(
+            move_type="feed", start_x=spring_x, start_z=z_start,
+            end_x=spring_x, end_z=thread_body_z, line_idx=line_idx,
+            feed_rate=pitch,
+        ))
+        if chamfer_z_dist > 0.0001:
+            result.append(SimMove(
+                move_type="feed", start_x=spring_x, start_z=thread_body_z,
+                end_x=safe_x, end_z=z_end, line_idx=line_idx,
+                feed_rate=pitch,
+            ))
+        retract_z = z_end if chamfer_z_dist > 0.0001 else thread_body_z
+        result.append(SimMove(
+            move_type="rapid", start_x=safe_x, start_z=retract_z,
+            end_x=safe_x, end_z=z_start, line_idx=line_idx,
+        ))
+
+    return result
 
 
 # ---------------------------------------------------------------------------

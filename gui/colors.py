@@ -55,6 +55,7 @@ COLORS = {
     "graph_warning_region": "#E56E7233",
     "graph_roundtrip": "#A8D8CC80",
     "graph_tool_dot": "#FFFFFF",
+    "graph_threading": "#E5B84C",
 
     # Tabs
     "tab_active": "#5E9E91",

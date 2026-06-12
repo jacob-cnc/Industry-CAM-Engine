@@ -385,6 +385,7 @@ class ProgramTab(QWidget):
         self._section_blocks = CS("Blocks", expanded=True)
         self._block_list = BlockListWidget()
         self._section_blocks.add_widget(self._block_list)
+        self._section_blocks.setMinimumHeight(240)
         panel_layout.addWidget(self._section_blocks)
 
         # Scrollable area for the accordion sections
@@ -1626,8 +1627,10 @@ class ProgramTab(QWidget):
                 block.params_data = bd.get("params", {})
                 blocks.append(block)
 
-            # Load into block list
+            # Load into block list (disconnect signal to prevent premature restore)
+            self._block_list.block_selected.disconnect(self._on_block_selected)
             self._block_list.set_blocks(blocks)
+            self._block_list.block_selected.connect(self._on_block_selected)
             # Select the first block and restore its data
             if blocks:
                 self._active_block_id = blocks[0].block_id

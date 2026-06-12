@@ -11,6 +11,7 @@ from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QListWidget,
     QListWidgetItem, QMenu, QAction, QLabel, QAbstractItemView,
+    QSizePolicy,
 )
 from PyQt5.QtGui import QColor, QFont
 
@@ -61,7 +62,6 @@ class BlockListWidget(QWidget):
         super().__init__(parent)
         self._blocks: list = []  # List[ProgramBlock]
         self._next_id: int = 1
-        self.setMinimumHeight(140)
         self._setup_ui()
 
     def _setup_ui(self):
@@ -101,8 +101,8 @@ class BlockListWidget(QWidget):
         self._list = QListWidget()
         self._list.setDragDropMode(QAbstractItemView.InternalMove)
         self._list.setDefaultDropAction(Qt.MoveAction)
-        self._list.setMinimumHeight(50)
-        self._list.setMaximumHeight(150)
+        self._list.setMinimumHeight(80)
+        self._list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._list.setStyleSheet(
             f"QListWidget {{"
             f"  background-color: {COLORS['bg_panel']};"
@@ -289,7 +289,7 @@ class BlockListWidget(QWidget):
         info = BLOCK_TYPE_INFO.get(block.block_type, {"label": block.block_type})
         label = block.label if block.label else info["label"]
         vis = "  [hidden]" if not block.visible else ""
-        return f"{index + 1}. {label}  (T{block.tool_number}){vis}"
+        return f"{index + 1}. {label}{vis}"
 
     def _default_tool_for_type(self, block_type: str) -> int:
         """Sensible default tool number for each block type."""

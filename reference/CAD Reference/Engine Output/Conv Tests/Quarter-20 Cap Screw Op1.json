@@ -1,0 +1,108 @@
+{
+  "version": 2,
+  "blocks": [
+    {
+      "block_id": 1,
+      "block_type": "od_profile",
+      "tool_number": 1,
+      "label": "Turn thread OD + undercut",
+      "enabled": true,
+      "visible": true,
+      "params": {
+        "stock": {
+          "diameter": 0.5,
+          "x_start": 0.0,
+          "z_start": 0.05,
+          "z_end": -1.0,
+          "x_park": 3.0,
+          "z_park": 3.0,
+          "pilot_hole_dia": 0.0,
+          "mode": "od"
+        },
+        "roughing": {
+          "tool_number": 1,
+          "doc_dia": 0.04,
+          "feed": 0.006,
+          "strategy": "staircase",
+          "fin_allowance": 0.004,
+          "peck_enabled": false,
+          "peck_length": null,
+          "spindle_rpm": 1800.0
+        },
+        "finishing": {
+          "tool_number": 1,
+          "passes": 1,
+          "doc_dia": 0.002,
+          "feed": 0.003,
+          "spindle_rpm": 1800.0,
+          "spring_pass": true
+        },
+        "segments": [
+          {
+            "type": "line",
+            "x": 0.2448,
+            "z": 0.0,
+            "radius": 0
+          },
+          {
+            "type": "line",
+            "x": 0.2448,
+            "z": -0.72,
+            "radius": 0
+          },
+          {
+            "type": "line",
+            "x": 0.19,
+            "z": -0.72,
+            "radius": 0
+          },
+          {
+            "type": "line",
+            "x": 0.19,
+            "z": -0.78,
+            "radius": 0
+          },
+          {
+            "type": "line",
+            "x": 0.5,
+            "z": -0.78,
+            "radius": 0
+          },
+          {
+            "type": "line",
+            "x": 0.5,
+            "z": -1.0,
+            "radius": 0
+          }
+        ]
+      }
+    },
+    {
+      "block_id": 2,
+      "block_type": "threading_od",
+      "tool_number": 2,
+      "label": "1/4-20 UNC Thread",
+      "enabled": true,
+      "visible": true,
+      "params": {
+        "thread_standard": "UN",
+        "designation": "1/4-20 UNC",
+        "major_diameter": 0.2448,
+        "pitch": 0.05,
+        "thread_depth": 0.02706,
+        "start_z": 0.05,
+        "end_z": -0.77,
+        "infeed_method": "modified_flank",
+        "num_passes": 6,
+        "spring_passes": 2,
+        "chamfer_threads": 1.0,
+        "num_starts": 1,
+        "spindle_rpm": 400.0,
+        "tool_number": 2,
+        "is_internal": false,
+        "fit": "mid",
+        "thread_class": "2A"
+      }
+    }
+  ]
+}

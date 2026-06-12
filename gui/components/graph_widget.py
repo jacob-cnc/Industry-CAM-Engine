@@ -343,7 +343,9 @@ class MachiningGraphWidget(pg.PlotWidget):
         self._graph_data = None
 
     def _get_segment_color(self, segment: ToolpathSegment) -> str:
-        """Get color for a toolpath segment based on move type."""
+        """Get color for a toolpath segment based on move type and pass type."""
+        if segment.pass_type.value == 'threading' and segment.move_type.value != 'rapid':
+            return COLORS.get('graph_threading', COLORS['graph_feed'])
         move_type = segment.move_type.value
         if move_type == 'rapid':
             return COLORS['graph_rapid']
