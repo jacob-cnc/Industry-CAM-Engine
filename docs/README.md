@@ -11,6 +11,7 @@ agents, and machines.
 | `DEPLOYMENT.md` | Lathe deployment, preservation, verification, and rollback |
 | `RISK_REGISTER.md` | Known technical and machine-safety risks |
 | `decisions/README.md` | Durable architectural and operational decisions |
+| `handoffs/ACTIVE.md` | Owner-requested work that the next agent must review |
 | `handoffs/TEMPLATE.md` | Standard session handoff format |
 | `prompts/` | Durable prompts for queued cross-machine or agent work |
 
