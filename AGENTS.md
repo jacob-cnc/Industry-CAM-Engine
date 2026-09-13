@@ -8,11 +8,12 @@ machine safety, traceability, and verified behavior as primary requirements.
 Before substantial work, read:
 
 1. `docs/CURRENT_STATE.md`
-2. `docs/WORKFLOW.md`
-3. `docs/RISK_REGISTER.md`
-4. `CLAUDE.md` for detailed machine context
-5. `ARCHITECTURE.md` and relevant `.kiro/steering/` files for the area changed
-6. The newest relevant file in `session-notes/`
+2. `docs/handoffs/ACTIVE.md` for owner-requested work awaiting implementation
+3. `docs/WORKFLOW.md`
+4. `docs/RISK_REGISTER.md`
+5. `CLAUDE.md` for detailed machine context
+6. `ARCHITECTURE.md` and relevant `.kiro/steering/` files for the area changed
+7. The newest relevant file in `session-notes/`
 
 When documents conflict, prefer measured facts in the newest dated session note
 and the checked-in machine configuration. Record and resolve the conflict rather
