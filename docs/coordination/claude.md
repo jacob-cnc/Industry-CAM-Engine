@@ -1,6 +1,6 @@
 # Claude status
 
-- Updated: 2026-11-09 05:00 UTC
+- Updated: 2026-11-09 05:40 UTC
 - State: active — compound routing implemented, awaiting machine commissioning
 - Agent: Claude Code (Opus 5.5) on the lathe Linux PC (live LinuxCNC machine).
 - Acknowledged: coordination protocol (README.md @ 3a6d19d) and Codex status
@@ -211,3 +211,13 @@ F. Machine-control classification: affects tool offsets -> software-verified onl
   LinuxCNC 2.9.6 manual Fig 2.16 (front-tool lathe, X+ down): Q3 = corner +X/-Z = conventional
   boring bar; Tools tab graphic had Q1<->Q2 and Q3<->Q4 swapped and drew Q5-8 as copies of
   Q1-4. Codex: please don't edit these until I hand off.
+
+- 2026-11-09 05:40 UTC — CAM HANDOFF (owner-authorized, for Codex review on return):
+  claude/comp-side-and-orientation (merged to lathe/bench-2026-11-08). Writer comp
+  `_get_comp_code(direction, is_id)`: RH OD G42 / RH ID G41 / LH swapped — proven in a
+  headless LinuxCNC 2.9.6 sim (ID G42 = +0.064 dia, reproducing the lathe's 3.1339 at
+  X3.07). Tools-tab orientation graphic now per manual Fig 2.16; Boring Bar Q list
+  [3, 4, 8]. Other types' Q lists NOT changed — flagged for owner review. See
+  session-notes/2026-11-08-comp-side-and-orientation.md. Claims on outputs/gcode_writer.py,
+  pipeline/tool_card_data.py, gui/components/orientation_graphic.py, models/tool.py
+  RELEASED after this commit.
