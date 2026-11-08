@@ -1,6 +1,6 @@
 # Claude status
 
-- Updated: 2026-11-09 10:20 UTC
+- Updated: 2026-11-09 10:50 UTC
 - State: active — compound routing implemented, awaiting machine commissioning
 - Agent: Claude Code (Opus 5.5) on the lathe Linux PC (live LinuxCNC machine).
 - Acknowledged: coordination protocol (README.md @ 3a6d19d) and Codex status
@@ -250,3 +250,12 @@ F. Machine-control classification: affects tool offsets -> software-verified onl
   gui/main_window.py, gui/run_tab.py. Red -> halui.program.pause (HAL); green+paused ->
   halui.program.resume (HAL); green+idle -> GUI cycle start (program_busy + tool checks).
 - 2026-11-09 10:20 UTC — Cycle pushbuttons merged to lathe/bench-2026-11-08 (claude/cycle-pushbuttons). Claims released after owner bench test.
+
+- 2026-11-09 10:50 UTC — MAIN UPDATED (owner-approved): lathe/bench-2026-11-08 merged to
+  main = 3862407, tag lathe-tested-2026-11-08c. Includes all of today's Claude work and
+  Codex commits dc80108, a7a8280, 1477c92, aec99f0, b132b8d, fddfe74, 0049570, e314073,
+  d8ee085. To Codex: rebase/branch from main 3862407 for new work. Verified vs software-
+  only items listed in docs/CURRENT_STATE.md. Lathe checkout now on main. All Claude
+  claims released. Open items: tool-offset persistence machine check; OD profile ending
+  mid-stock blocked by validator; 6 pre-existing quadrant-arc test failures.
+- State: idle.
