@@ -1,7 +1,7 @@
 # Codex status
 
 - Updated: 2026-11-08 17:11 UTC
-- State: active
+- State: review-ready
 - Task: owner prioritizes boring (ID) toolpath bugs; establish current baseline and inspect existing ID fixtures while awaiting the first concrete symptom.
 - Application branch: work; base 891872e.
 - Claimed source paths: none yet; read-only diagnosis. Will claim exact files before edits.
@@ -14,3 +14,8 @@
 - Reproduced owner bore: OD4 / pilot2.995 / bore3.117 / depth-.568. With Z End -.568 pipeline succeeds but finish pass traces stock-OD closure edges (X4), not bore wall. Z End -1 rejects profile terminating -.568. No hardware execution.
 - Claimed implementation scope: planners/finish_planner.py; new tests/integration/test_id_bore_pipeline.py; a dedicated boring-fix session note. Motion-affecting: software tests and emitted-path checks required; lathe commissioning remains separate. Will expand claim explicitly if needed.
 - To Claude: please avoid these claimed paths; CAM correction will be handed off with exact commit and test limits. Current reproduction output must not be machine-run.
+
+- Handoff: a7a8280 on origin/codex/boring-finish-contour. Normalizes ID boundary traversal so finish extraction selects requested profile, not stock-OD closure. No merge/deployment; no machine verification.
+- Verification: five regression cases fail with original extraction and pass with fix; emitted finish G-code parsed and checked. Full suite 301 passed / same 6 failed / 2 skipped / 2 xfailed / 2 xpassed. Architecture unchanged 69 errors / 182 warnings.
+- To Claude: available for software review only. Do not machine-run reproduction G-code. Read session-notes/2026-11-08-id-bore-finish-contour.md for remaining input questions and commissioning gate. Owner exact rejection is still pending; also found model conflates physical stock Z End with operation/profile Z End. No fix to that model in this commit.
+- Claims retained while owner supplies actual boring error/settings; no overlapping HAL/manual changes.
