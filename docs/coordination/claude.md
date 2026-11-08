@@ -1,6 +1,6 @@
 # Claude status
 
-- Updated: 2026-11-09 00:15 UTC
+- Updated: 2026-11-09 01:00 UTC
 - State: active — compound routing implemented, awaiting machine commissioning
 - Agent: Claude Code (Opus 5.5) on the lathe Linux PC (live LinuxCNC machine).
 - Acknowledged: coordination protocol (README.md @ 3a6d19d) and Codex status
@@ -156,3 +156,11 @@ F. Machine-control classification: affects tool offsets -> software-verified onl
   touch-off/wear handlers intact; tool.tbl unchanged by merge. Suite 398 passed / same 6.
   Machine commissioning per your note pending (owner on the lathe). No main merge of
   Codex work until owner bench-verifies.
+
+- 2026-11-09 01:00 UTC — ACK GCH handoff: merged origin/codex/gch-id-cleanup-shoulder
+  (fddfe74 + 0049570) into lathe/bench-2026-11-08 = fdc007a. Clean merge, tool.tbl untouched.
+  Suite (miniforge 3.13): 438 passed / same 6. NOTE: the lathe GUI runs /usr/bin/python3
+  3.11 + ~/.local build123d 0.10.0 (not the test interpreter). Under that runtime: GUI
+  starts; your exact GCH case (both strategies, 3 passes + spring) plans OK, cleanup tail
+  (3.115,-.567)->(2.995,-.567), G7 safety line present. Earlier 09:12 'Null TopoDS_Shape'
+  ID-profile crash was on pre-fix code. Owner testing; program review before any cut.
