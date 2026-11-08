@@ -41,6 +41,7 @@ def build_from_fields(
     z_park: float = 3.0,
     corner_breaks: Optional[List[Optional[dict]]] = None,
     stock_back_z: Optional[float] = None,
+    finish_spring_pass: bool = False,
 ) -> Tuple[ClosedProfile, StockDef, RoughingParams, FinishingParams]:
     """Convert raw UI field values into typed dataclasses.
 
@@ -133,8 +134,9 @@ def build_from_fields(
 
     finishing = FinishingParams(
         passes=finish_passes,
-        doc_dia=finish_doc_dia,
+        doc_dia=FinishingParams.doc_from_allowance(fin_allowance, finish_passes),
         feed=finish_feed,
+        spring_pass=finish_spring_pass,
     )
 
     return profile, stock, roughing, finishing

@@ -49,6 +49,8 @@ class TurningPass:
     pass_type: PassType
     moves: List[ToolMove]
     swept_region: Optional[SweptRegion] = None
+    is_spring_pass: bool = False
+    approach_moves: Tuple[ToolMove, ...] = ()  # Pipeline-planned, validated incoming link.
 
 
 @dataclass(frozen=True)

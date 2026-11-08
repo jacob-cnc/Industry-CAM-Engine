@@ -7,13 +7,14 @@ Imports from: all modules above in the dependency chain.
 """
 
 import time
+from dataclasses import replace
 from typing import List, Tuple
 
 from models.profile import ClosedProfile, MachiningMode
 from models.stock import StockDef
 from models.tool import ToolDef
 from models.params import RoughingParams, FinishingParams, RoughingStrategy
-from models.moves import ToolMove, MoveType
+from models.moves import ToolMove, MoveType, PassType
 from models.results import PlanResult, TurningPass
 from models.validation import ValidationResult, PipelineResult, PipelineStatus, Severity
 from models.constants import TOLERANCE
@@ -66,6 +67,8 @@ def execute(
 
     Returns PipelineResult with status indicating success/failure.
     """
+    finishing_params = replace(finishing_params, doc_dia=FinishingParams.doc_from_allowance(
+        roughing_params.fin_allowance, finishing_params.passes))
     start_time = time.time()
     all_validations: List[ValidationResult] = []
 
@@ -137,7 +140,7 @@ def execute(
 
     # Step 7: Plan finish pass
     finish_planner = FinishPlanner()
-    finish_passes = finish_planner.plan(zone_query, tool, finishing_params, stock, profile.mode, profile)
+    finish_passes = finish_planner.plan(zone_query, finish_tool or tool, finishing_params, stock, profile.mode, profile, roughing_params.fin_allowance)
 
     # Step 8: Plan transitions
     all_passes = face_passes + roughing_passes + cleanup_passes + finish_passes
@@ -145,6 +148,13 @@ def execute(
     transitions = transition_planner.plan_all(
         all_passes, profile.mode, stock, zone_query, roughing_params.strategy
     )
+
+    # Store the exact incoming links for finish output; the writer must not
+    # invent a return cut between consecutive finishing contours.
+    for index, pass_obj in enumerate(all_passes):
+        if pass_obj.pass_type == PassType.FINISH and index > 0:
+            all_passes[index] = replace(pass_obj, approach_moves=tuple(transitions[index - 1].moves))
+    finish_passes = [p for p in all_passes if p.pass_type == PassType.FINISH]
 
     # Step 9: Assemble complete move list
     tool_moves = _assemble_moves(all_passes, transitions)
