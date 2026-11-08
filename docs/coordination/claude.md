@@ -1,6 +1,6 @@
 # Claude status
 
-- Updated: 2026-11-08 22:30 UTC
+- Updated: 2026-11-08 22:50 UTC
 - State: active — compound routing implemented, awaiting machine commissioning
 - Agent: Claude Code (Opus 5.5) on the lathe Linux PC (live LinuxCNC machine).
 - Acknowledged: coordination protocol (README.md @ 3a6d19d) and Codex status
@@ -85,3 +85,60 @@
   Also .tool_tab_settings.json holds a Windows path, so on the lathe the Tools tab
   loads no table at startup. models/tool.py docstring says x_offset is DIAMETER while
   tools tab stores radius. Raising with owner; please don't change these until agreed.
+
+## HANDOFF TO CODEX — tool table X units + table path (owner-authorized 2026-11-08 22:45 UTC)
+
+Owner decision: the GUI DISPLAYS and ACCEPTS X geometry/wear offsets as DIAMETER;
+the code hands LinuxCNC whatever it needs, in the cleanest way you find. Owner will
+ask you to implement. I release any interest in these paths; they are yours:
+pipeline/tool_table_io.py, pipeline/tool_card_data.py, models/tool.py (docstring),
+gui/tools_tab.py **except** `_on_set_x_clicked`, `_on_set_z_clicked`,
+`_send_mdi_command`, `_on_wear_offset_changed` (mine, see below; ask before editing),
+gui/components/tool_geometry_row.py, .tool_tab_settings.json, .gitignore, tests.
+Base on lathe/bench-2026-11-08 (549bcc4) or claude/compound-slide-routing (ac59684)
+— both contain my tools_tab.py touch-off/wear changes; avoid conflicts there.
+
+### Facts (verified against LinuxCNC 2.9.6 source + installed manual)
+1. Tool table values are MACHINE UNITS (manual, Tool Table: "The units used for the
+   length, diameter, etc., are in machine units"). This lathe: X machine unit = RADIUS.
+   So tool.tbl X must be RADIUS. D (nose diameter) is a real diameter.
+2. LinuxCNC loads tool.tbl only at startup or on `linuxcnc.command().load_tool_table()`.
+   Editing the file while LinuxCNC runs has no effect until reloaded.
+3. `G10 L1 P<n> X.. Z..` rewrites the WHOLE tool.tbl from LinuxCNC's in-memory table
+   ("A valid G10 L1 rewrites and reloads the tool table"). Please verify whether the
+   rewrite preserves the `;comment` (our metadata lives there) — check tooldata save
+   code in a 2.9.x source, don't assume.
+4. In G7, X words are halved at read time (interp_read.cc read_x) — incl. G10 L1.
+   Controller now starts `G7 G18` (INI). Wear handler sends `G7 G10 L1 P<n> X<dia> Z<z>`.
+
+### Current bugs
+- pipeline/tool_table_io.py writes X as diameter (x_offset*2) and reads X/2; LinuxCNC
+  reads/writes the same file as radius -> nonzero X offsets double/halve between
+  writers. GUI autosave can also overwrite a G10-L1-written value (and wear is not
+  persisted at all, so geometry-only autosave silently drops applied wear).
+- models/tool.py docstring says x_offset/x_wear are DIAMETER; tools tab stores RADIUS
+  internally (tool_geometry_row.py /2.0 on read, *2.0 on display).
+- .tool_tab_settings.json is tracked in git and holds
+  "C:/Users/jhonick/linuxcnc/Industry CAM Engine/tool.tbl"; on the lathe the Tools tab
+  therefore loads nothing at startup and autosave is a no-op.
+
+### Requirements / acceptance
+A. tool.tbl X written and read as RADIUS (machine units). Display/entry stays DIAMETER.
+   Pick ONE source of truth for the offsets LinuxCNC applies (X/Z in file = what
+   LinuxCNC uses, i.e. geometry + wear) and persist the geometry/wear split somewhere
+   that survives a LinuxCNC rewrite (comment metadata if preserved, else sidecar).
+B. Live mode: never leave LinuxCNC and the file disagreeing. Either write via G10 L1
+   (LinuxCNC rewrites the file) or write the file then call load_tool_table() — your
+   call; document which. Never write tool.tbl while a program is running.
+C. Table path: in live mode use the INI's [EMCIO]TOOL_TABLE resolved against the INI
+   directory (INI path available via linuxcnc.ini / env INI_FILE_NAME); the settings
+   file is a per-machine convenience only — untrack it (.gitignore) and fall back
+   gracefully when its path doesn't exist (e.g. Windows path on Linux).
+D. Migration: existing tool.tbl on the lathe has all X = 0 (safe). Any table saved
+   by the old diameter writer with nonzero X must not be silently reinterpreted —
+   detect/flag (e.g. version key in metadata) rather than guess.
+E. Tests: round-trip radius-in-file / diameter-in-GUI; G10-rewritten file re-loads
+   with the same displayed values; Windows path fallback; no change to G-code output.
+F. Machine-control classification: affects tool offsets -> software-verified only;
+   I will commission on the lathe (touch-off a turned diameter, apply a 0.002 dia wear,
+   measure). Please hand off exact commit + test results here.
