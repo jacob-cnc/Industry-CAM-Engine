@@ -209,7 +209,12 @@ class LiveBackend(HALBackend):
 
         # Axis positions in active work coordinate system (G54 etc.)
         # actual_position is G53 machine coords; subtract offsets to get work coords.
-        x_pos = s.actual_position[0] - s.g5x_offset[0] - s.g92_offset[0] - s.tool_offset[0]
+        # Project convention: X is RADIUS in machine/HAL units and DIAMETER in the
+        # GUI and G-code (G7). AxisState.position is documented as diameter and
+        # every GUI consumer treats it that way, so convert here. (Before
+        # 2026-11-08 this passed radius through, so the DRO showed radius.)
+        x_pos = 2.0 * (s.actual_position[0] - s.g5x_offset[0]
+                       - s.g92_offset[0] - s.tool_offset[0])
         z_pos = s.actual_position[2] - s.g5x_offset[2] - s.g92_offset[2] - s.tool_offset[2]
 
         x_cmd = s.joint[0]["output"] if len(s.joint) > 0 else 0.0

@@ -456,7 +456,7 @@ class Tools_Tab(QWidget):
     def _on_set_x_clicked(self, value: float) -> None:
         """Handle Set X touch-off button click — sets the G54 X origin.
 
-        Sends `G10 L20 P1 X<value>` which shifts the G54 work coordinate system
+        Sends `G7 G10 L20 P1 X<value>` (diameter mode) which shifts the G54 work coordinate system
         so that the current machine position reads `<value>` in X (diameter).
         This is a WCS origin edit — it does NOT modify the tool table and does
         NOT command any motion.
@@ -471,7 +471,9 @@ class Tools_Tab(QWidget):
         if self._linuxcnc_command is None:
             return
 
-        command = f"G10 L20 P1 X{value:.6f}"
+        # G7 in the same block guarantees the value is read as DIAMETER even if
+        # something left the interpreter in G8 (radius) mode.
+        command = f"G7 G10 L20 P1 X{value:.6f}"
         self._send_mdi_command(command)
 
     def _on_set_z_clicked(self, value: float) -> None:

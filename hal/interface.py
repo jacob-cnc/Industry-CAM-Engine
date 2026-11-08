@@ -63,10 +63,12 @@ class AxisState:
     """Current state of a single axis.
 
     Coordinates:
-        position: Current position in user units (X = diameter, Z = inches)
-        velocity: Current velocity (inches/sec)
-        commanded: Commanded position (where motion controller wants to be)
-        following_error: Difference between commanded and actual
+        position: Current WORK position (G54 etc. applied). X = DIAMETER,
+            Z = inches. LiveBackend converts from radius machine units.
+        velocity: Current joint velocity (machine units/sec; X is radius)
+        commanded: Commanded JOINT position, machine units (X is radius,
+            no work offsets) — not comparable to ``position``
+        following_error: Joint following error (machine units; X is radius)
         homed: Whether this axis has been homed
         at_limit: Whether a soft limit is active
         enabled: Whether the axis amplifier is enabled
