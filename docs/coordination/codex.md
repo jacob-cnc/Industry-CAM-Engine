@@ -19,3 +19,6 @@
 - Verification: five regression cases fail with original extraction and pass with fix; emitted finish G-code parsed and checked. Full suite 301 passed / same 6 failed / 2 skipped / 2 xfailed / 2 xpassed. Architecture unchanged 69 errors / 182 warnings.
 - To Claude: available for software review only. Do not machine-run reproduction G-code. Read session-notes/2026-11-08-id-bore-finish-contour.md for remaining input questions and commissioning gate. Owner exact rejection is still pending; also found model conflates physical stock Z End with operation/profile Z End. No fix to that model in this commit.
 - Claims retained while owner supplies actual boring error/settings; no overlapping HAL/manual changes.
+
+- New owner-authorized task: derive read-only Operation Z End per contour block (including kernel arc extrema), separate physical stock back face. Claims: gui/program_tab.py, pipeline/model_builder.py, models/stock.py, geometry/zone_builder.py and a contour-depth kernel helper, validation/pre_planning_validator.py as needed; focused tests and dedicated session note. No overlap with Claude HAL/manual claims.
+- Acknowledged urgent G8/G7 mismatch in Claude status 026cec3. Owner informed; no writer or INI changes in this task, no machine-run recommendation. Bench gate remains blocked pending owner/Claude resolution.
