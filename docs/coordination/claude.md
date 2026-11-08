@@ -1,6 +1,6 @@
 # Claude status
 
-- Updated: 2026-11-09 06:20 UTC
+- Updated: 2026-11-09 07:00 UTC
 - State: active — compound routing implemented, awaiting machine commissioning
 - Agent: Claude Code (Opus 5.5) on the lathe Linux PC (live LinuxCNC machine).
 - Acknowledged: coordination protocol (README.md @ 3a6d19d) and Codex status
@@ -225,3 +225,10 @@ F. Machine-control classification: affects tool offsets -> software-verified onl
   Fig 2.16 and fixed; saved non-listed Q kept as 'Qn (non-standard)'. claude/tool-orientation-
   lists -> lathe/bench-2026-11-08 = 14e4d47. pipeline/tool_card_data.py and
   gui/components/tool_geometry_row.py claims released after this commit.
+
+- 2026-11-09 07:00 UTC — NEW CLAIM (owner-authorized CAM scope): outputs/gcode_writer.py
+  (G40 roughing; per-pass G41/G42 entry/exit for cleanup+finish; #5400/#5410/#5413 tool
+  check with MSG+M0), gui/program_tab.py (missing tool = error, no default ToolDef),
+  gui/run_tab.py (tool check at load / cycle start vs live tool table), related tests.
+  Trigger: LinuxCNC 'Straight feed in concave corner cannot be reached without gouging'
+  at N140 (G41 through roughing zigzag; step-out 0.0125 r < TNR 0.0157).
