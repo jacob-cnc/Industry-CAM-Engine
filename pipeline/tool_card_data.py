@@ -60,16 +60,21 @@ TOOL_TYPES: List[str] = [
     "Custom",
 ]
 
+# Valid LinuxCNC orientations (Q) per tool type, first = default. Per the
+# LinuxCNC 2.9.6 manual Fig 2.16 for a FRONT-TOOL lathe, cutting corner relative
+# to the nose centre: 1 -X+Z, 2 -X-Z, 3 +X-Z, 4 +X+Z, 5 +Z, 6 -X, 7 -Z, 8 +X,
+# 9 centre. Reviewed 2026-11-08 (previous lists offered inside corners for OD
+# tools, Q6 for internal threading, Q5 for grooving).
 TYPE_ORIENTATIONS: Dict[str, List[int]] = {
-    "Turning RH": [2, 1, 3, 4],
-    "Turning LH": [4, 3, 1, 2],
+    "Turning RH": [2, 6],          # 2 = corner toward chuck; 6 = neutral holder
+    "Turning LH": [1, 6],          # 1 = corner toward tailstock; 6 = neutral
     # LinuxCNC Fig 2.16, front-tool lathe: Q3 = corner +X/-Z (conventional
     # boring bar cutting toward the chuck), Q4 = +X/+Z (back-boring toward the
     # tailstock), Q8 = straight +X. Was [8, 6, 5, 7] (Q5-8 are axis-aligned).
     "Boring Bar": [3, 4, 8],
-    "Threading External": [2, 1],
-    "Threading Internal": [6, 5],
-    "Grooving/Parting": [2, 6, 1, 5],
+    "Threading External": [6],     # symmetric insert pointing at the centreline
+    "Threading Internal": [8],     # symmetric insert pointing at the bore wall
+    "Grooving/Parting": [2, 1, 6], # OD blade: chuck-side, tailstock-side corner, centre
     "Knurling": [9],
     "Custom": [1, 2, 3, 4, 5, 6, 7, 8, 9],
 }

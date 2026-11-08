@@ -39,3 +39,14 @@ Grooving [2,6,1,5]) predate this mapping and should be reviewed against Fig 2.16
 ## Verification
 Unit tests (8 new) + full suite 461 passed / same 6 quadrant-arc failures.
 Machine verification pending: re-touch with Q3, regenerate, air run, read X.
+
+## Follow-up: all tool types reviewed (owner-approved)
+TYPE_ORIENTATIONS now: Turning RH [2, 6], Turning LH [1, 6], Boring Bar [3, 4, 8],
+Threading External [6], Threading Internal [8], Grooving/Parting [2, 1, 6],
+Knurling [9], Custom all. (Before: RH [2,1,3,4], LH [4,3,1,2], ext thread [2,1],
+int thread [6,5], grooving [2,6,1,5].)
+Safeguard: a saved Q not in its type's list is now kept and shown as
+"Qn (non-standard)" instead of silently falling back to the first option (which the
+next autosave would have written). Lathe tool.tbl today: T1 boring Q8 (-> Q3),
+T2 ext thread Q2 (-> Q6), T4 turning RH Q1 (-> Q2) — owner to change in the Tools tab.
+scripts/preview_tool_orientations.py prints the options as ASCII art.
