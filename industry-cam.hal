@@ -160,12 +160,22 @@ setp hm2_7i96s.0.encoder.04.scale  [SPINDLE_0]ENCODER_SCALE
 setp hm2_7i96s.0.encoder.04.filter 1
 
 net spindle-pos      hm2_7i96s.0.encoder.04.position    => spindle.0.revs
-net spindle-vel      hm2_7i96s.0.encoder.04.velocity     => spindle.0.speed-in near-spindle.in1
+net spindle-vel      hm2_7i96s.0.encoder.04.velocity     => spindle.0.speed-in near-spindle.in2
 net spindle-index    hm2_7i96s.0.encoder.04.index-enable <=> spindle.0.index-enable
 
-setp near-spindle.scale 1.1
+# Spindle at-speed (manual-gearbox spindle; motion holds the first feed move
+# after M3/S change until TRUE).
+#   in1 = commanded speed, rev/s, SIGNED (+M3 / -M4)   spindle.0.speed-out-rps
+#   in2 = measured speed,  rev/s, signed (+ in M3, verified 2026-11-08)
+#   scale 2.0 -> TRUE when 0.5x <= measured/commanded <= 2x (near: in1/scale <= in2 <= in1*scale)
+#   Wrong direction gives the opposite sign and can never be in the window.
+#   Stopped + nothing commanded: |0-0| <= difference(0) -> TRUE.
+# Before 2026-11-08 in2 was speed-out-abs (RPM) vs encoder rev/s, so at-speed
+# was never TRUE with the spindle running and programs held at the first G1.
+# Window chosen by owner: gearbox "64" position measured 80.3 RPM (1.25x).
+setp near-spindle.scale 2.0
 setp near-spindle.difference 0
-net spindle-cmd      spindle.0.speed-out-abs => near-spindle.in2
+net spindle-cmd      spindle.0.speed-out-rps => near-spindle.in1
 net spindle-at-speed near-spindle.out        => spindle.0.at-speed
 
 # ============================================================================
