@@ -100,7 +100,7 @@ class FinishPlanner:
                 pass_moves = moves
             else:
                 remaining = finish_allowance_dia * (finishing_params.passes - index - 1) / finishing_params.passes
-                edges = zone_query.finish_offset_edges(profile, remaining)
+                edges = zone_query.profile_offset_edges(profile, remaining)
                 pass_moves = self._moves_from_edges(edges, finishing_params)
             pass_moves = [replace(move, pass_index=index) for move in pass_moves]
             if not pass_moves:

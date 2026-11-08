@@ -82,9 +82,12 @@ def test_zero_allowance_does_not_invent_multiple_cutting_passes():
 def test_invalid_kernel_contour_is_still_blocked_by_validation(monkeypatch):
     from geometry.zone_query import ZoneQueryAPI, EdgeData
     from models.validation import PipelineStatus
-    monkeypatch.setattr(ZoneQueryAPI, "finish_offset_edges", lambda *args: [
-        EdgeData("LINE", (3.217, 0), (3.217, -.568)),
-    ])
+    original = ZoneQueryAPI.profile_offset_edges
+    def invalid_finish(self, profile, allowance, **kwargs):
+        if "z_min" in kwargs:
+            return original(self, profile, allowance, **kwargs)
+        return [EdgeData("LINE", (3.217, 0), (3.217, -.568))]
+    monkeypatch.setattr(ZoneQueryAPI, "profile_offset_edges", invalid_finish)
     fields = bore_fields(finish_passes=3, fin_allowance=.006)
     p, s, r, f = build_from_fields(**fields)
     result = execute(p, s, fields["tool_def"], r, f)

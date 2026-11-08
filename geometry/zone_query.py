@@ -304,25 +304,48 @@ class ZoneQueryAPI:
 
         return raw_edges
 
-    def finish_offset_edges(self, profile, remaining_allowance_dia: float):
-        """Kernel offset of the open user contour, never the stock closure."""
+    def profile_offset_edges(self, profile, remaining_allowance_dia: float, *, z_min: float | None = None):
+        """Offset the open user contour; optionally clip the wire to stock/depth.
+
+        This is a contour query, not a complete removal-pocket or access model.
+        See docs/handoffs/2026-11-08-id-pocket-removal-model.md.
+        """
         from build123d import Kind, Side, Vertex
         from geometry.zone_builder import _profile_to_radius_coords, _build_face_from_coords
-        if remaining_allowance_dia <= 0:
-            raise ValueError("Intermediate finish offset must be positive.")
+        if not math.isfinite(remaining_allowance_dia) or remaining_allowance_dia < 0:
+            raise ValueError("Profile allowance must be finite and nonnegative.")
         coords = _profile_to_radius_coords(profile)
         original = _build_face_from_coords(coords, profile, closed=False)
         wires = original.wires()
         if len(wires) != 1:
-            raise RuntimeError("Finish contour must be one connected open wire.")
+            raise RuntimeError("Profile contour must be one connected open wire.")
         wire = wires[0]
         anchor = Vertex(coords[0]["x_radius"], coords[0]["z"], 0)
         if Vertex(*tuple(wire.position_at(1))).distance_to(anchor) < Vertex(*tuple(wire.position_at(0))).distance_to(anchor):
             wire = Wire(TopoDS.Wire_s(wire.wrapped.Reversed()))
         side = Side.LEFT if profile.mode == MachiningMode.OD else Side.RIGHT
-        offset = wire.offset_2d(remaining_allowance_dia / 2.0,
-                                kind=Kind.INTERSECTION, side=side, closed=False).clean()
-        offset_wire = Wire(offset.edges())
+        if remaining_allowance_dia == 0:
+            offset_wire = wire
+        else:
+            offset = wire.offset_2d(remaining_allowance_dia / 2.0,
+                                    kind=Kind.INTERSECTION, side=side, closed=False).clean()
+            offset_wire = Wire(offset.edges())
+        if z_min is not None:
+            from build123d import Compound
+            from OCP.BRepAlgoAPI import BRepAlgoAPI_Common
+            from geometry.zone_builder import _build_stock_face
+            bounds = self._zones.stock_face.bounding_box()
+            clip = _build_stock_face(bounds.max.X, bounds.max.Y, z_min,
+                                     profile.mode, bounds.min.X)
+            common = BRepAlgoAPI_Common(offset_wire.wrapped, clip.faces()[0].wrapped)
+            common.Build()
+            if not common.IsDone():
+                raise RuntimeError("Cleanup contour clipping failed.")
+            clipped_edges = Compound(common.Shape()).edges()
+            clipped_wires = Wire.combine(clipped_edges)
+            if len(clipped_wires) != 1:
+                raise RuntimeError("Cleanup clipping did not produce one connected contour.")
+            offset_wire = clipped_wires[0]
         # OCCT can reverse an offset wire. Align endpoints with the source using
         # kernel distances rather than manual coordinate translation or geometry.
         def vertex(point):
@@ -336,7 +359,7 @@ class ZoneQueryAPI:
             ocp_wire = TopoDS.Wire_s(ocp_wire.Reversed())
         edges = self._edge_data_from_wire(ocp_wire)
         if not edges:
-            raise RuntimeError("Kernel produced no intermediate finish contour.")
+            raise RuntimeError("Kernel produced no profile offset contour.")
         return edges
 
     def _get_face(self, zone_name: str) -> Optional[object]:
