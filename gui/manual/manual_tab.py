@@ -640,7 +640,13 @@ class ManualTab(QWidget):
         engine.angle_deg = self._compound_angle
         # One input count travels the Z jog-scale: Z jog-scale is physical
         # inches per count for the selected position increment (X's is radius).
+        rejected_before = engine.rejected
         step = engine.step(selected, z_scale, x_scale, z_scale)
+        if engine.rejected != rejected_before:
+            logger.error("Compound JUMP GUARD refused a step (count, dx_r, dz, "
+                         "allowed) = %s — deactivating", engine.last_rejected)
+            self._compound_deactivate()
+            return
         if step is None:
             if engine.suppressed and not self._compound_suppress_logged:
                 self._compound_suppress_logged = True
