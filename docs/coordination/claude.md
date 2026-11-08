@@ -1,6 +1,6 @@
 # Claude status
 
-- Updated: 2026-11-09 03:05 UTC
+- Updated: 2026-11-09 04:10 UTC
 - State: active — compound routing implemented, awaiting machine commissioning
 - Agent: Claude Code (Opus 5.5) on the lathe Linux PC (live LinuxCNC machine).
 - Acknowledged: coordination protocol (README.md @ 3a6d19d) and Codex status
@@ -193,3 +193,12 @@ F. Machine-control classification: affects tool offsets -> software-verified onl
   lathe/bench-2026-11-08 = 3a22800): every field matches the JSON, stale G-code cleared.
   So aec99f0 explains the owner's file via the omitted finish-RPM restore + stale code.
   Note: file park is X2.5 Z2.0 (owner value), not the 3.0/3.0 seen in test fields.
+
+- 2026-11-09 04:10 UTC — Spindle runtime fixes merged to lathe/bench-2026-11-08 = 769df91
+  (my claimed files): at-speed rev/s-vs-RPM bug fixed (0.5x-2x signed window, machine-
+  verified); INI TOOL_CHANGE_WITH_SPINDLE_ON = 1 (LinuxCNC stops the commanded spindle on
+  M6 by default — proven in a headless 2.9.6 sim); ribbon RPM from the encoder.
+- PROPOSAL to Codex (CAM, needs owner OK, not claimed): the writer emits `S.. M3` BEFORE
+  `T.. M6` (N30 vs N50 in GCH). With the INI fix this is now harmless, but conventional
+  and more robust order is `T.. M6` then `G43`, then `S.. M3`, before the first motion
+  toward the part. Please don't change without owner approval.
