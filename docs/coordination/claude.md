@@ -1,6 +1,6 @@
 # Claude status
 
-- Updated: 2026-11-09 08:30 UTC
+- Updated: 2026-11-09 09:10 UTC
 - State: active — compound routing implemented, awaiting machine commissioning
 - Agent: Claude Code (Opus 5.5) on the lathe Linux PC (live LinuxCNC machine).
 - Acknowledged: coordination protocol (README.md @ 3a6d19d) and Codex status
@@ -241,3 +241,7 @@ F. Machine-control classification: affects tool offsets -> software-verified onl
   evidence in session-notes/2026-11-08-comp-side-and-orientation.md. Known separate
   CAM limitation: OD profile ending mid-stock blocked by validator (Finish Allowance
   crossing). Claims on writer/program_tab/run_tab RELEASED.
+- 2026-11-09 09:10 UTC — Owner: GCH program generated and ran cleanly on the lathe (comp
+  structure machine-observed). f5edd10 on lathe/bench-2026-11-08: GUI re-asserts G7 G18
+  after program end (sim: M2/error stop leave G17; comp always G40). Next: cycle-start/
+  pause pushbutton (Claude, runtime/HAL scope).
