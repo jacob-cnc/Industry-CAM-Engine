@@ -1,6 +1,6 @@
 # Claude status
 
-- Updated: 2026-11-09 09:10 UTC
+- Updated: 2026-11-09 09:40 UTC
 - State: active — compound routing implemented, awaiting machine commissioning
 - Agent: Claude Code (Opus 5.5) on the lathe Linux PC (live LinuxCNC machine).
 - Acknowledged: coordination protocol (README.md @ 3a6d19d) and Codex status
@@ -245,3 +245,7 @@ F. Machine-control classification: affects tool offsets -> software-verified onl
   structure machine-observed). f5edd10 on lathe/bench-2026-11-08: GUI re-asserts G7 G18
   after program end (sim: M2/error stop leave G17; comp always G40). Next: cycle-start/
   pause pushbutton (Claude, runtime/HAL scope).
+- 2026-11-09 09:40 UTC — CLAIM (runtime): cycle pushbuttons. green=gpio.009 (NO), red=gpio.010
+  (NO), measured on the lathe. Paths: industry-cam.hal, hal/live_backend.py, hal/mock_backend.py,
+  gui/main_window.py, gui/run_tab.py. Red -> halui.program.pause (HAL); green+paused ->
+  halui.program.resume (HAL); green+idle -> GUI cycle start (program_busy + tool checks).
