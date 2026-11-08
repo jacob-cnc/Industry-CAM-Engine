@@ -1,6 +1,6 @@
 # Claude status
 
-- Updated: 2026-11-09 07:00 UTC
+- Updated: 2026-11-09 08:30 UTC
 - State: active — compound routing implemented, awaiting machine commissioning
 - Agent: Claude Code (Opus 5.5) on the lathe Linux PC (live LinuxCNC machine).
 - Acknowledged: coordination protocol (README.md @ 3a6d19d) and Codex status
@@ -232,3 +232,12 @@ F. Machine-control classification: affects tool offsets -> software-verified onl
   gui/run_tab.py (tool check at load / cycle start vs live tool table), related tests.
   Trigger: LinuxCNC 'Straight feed in concave corner cannot be reached without gouging'
   at N140 (G41 through roughing zigzag; step-out 0.0125 r < TNR 0.0157).
+- 2026-11-09 08:30 UTC — HANDOFF (for Codex review): 6f59a49 on lathe/bench-2026-11-08
+  (branch claude/comp-entry-and-tool-checks). Writer: G40 roughing; per-pass G41/G42
+  in-air entry + material-aware lead-out + G40 exit; #5400/#5410/#5413 tool check with
+  DEBUG+M0. Program tab: missing tool = error. Run tab: tool table check at load/start.
+  Updated tests in test_finish_pass_schedule.py / test_id_bore_pipeline.py to ignore
+  the in-air comp entry/lead-out moves when comparing planned contours. Headless sim
+  evidence in session-notes/2026-11-08-comp-side-and-orientation.md. Known separate
+  CAM limitation: OD profile ending mid-stock blocked by validator (Finish Allowance
+  crossing). Claims on writer/program_tab/run_tab RELEASED.
