@@ -10,6 +10,13 @@ from models.moves import MoveType
 from pipeline.model_builder import build_from_fields
 from pipeline.pipeline import execute
 
+def _without_comp_entries(gcode: str) -> str:
+    """Drop the in-air cutter-comp entry/lead-out moves (added 2026-11-08)
+    so tests compare only the planned contour moves."""
+    return "\n".join(l for l in gcode.splitlines()
+                     if "Comp entry" not in l and "Comp lead-out" not in l)
+
+
 
 @pytest.mark.parametrize("strategy", ["staircase", "offset_contour"])
 @pytest.mark.parametrize("x_start", [2.995, 3.117])
@@ -39,7 +46,7 @@ def test_counterbore_finish_stays_on_requested_wall(strategy, x_start):
     finish_section = code.split("; === FINISH PASS")[1].split("; === PROGRAM END")[0]
     assert "X4.0000" not in finish_section
     assert "Z-0.5680" in finish_section
-    emitted_finish = [m for m in parse(finish_section) if m.move_type == MoveType.FEED]
+    emitted_finish = [m for m in parse(_without_comp_entries(finish_section)) if m.move_type == MoveType.FEED]
     assert len(emitted_finish) == 2
     assert [m.x for m in emitted_finish] == pytest.approx([3.117, 3.117])
     assert [m.z for m in emitted_finish] == pytest.approx([0.0, -0.568])

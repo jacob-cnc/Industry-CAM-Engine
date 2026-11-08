@@ -10,6 +10,13 @@ from pipeline.model_builder import build_from_fields
 from pipeline.pipeline import execute
 from tests.integration.test_operation_depth import bore_fields
 
+def _without_comp_entries(gcode: str) -> str:
+    """Drop the in-air cutter-comp entry/lead-out moves (added 2026-11-08)
+    so tests compare only the planned contour moves."""
+    return "\n".join(l for l in gcode.splitlines()
+                     if "Comp entry" not in l and "Comp lead-out" not in l)
+
+
 
 def shape(moves):
     return [(m.move_type, m.x, m.z, m.feed, m.center_i, m.center_k, m.radius) for m in moves]
@@ -43,7 +50,7 @@ def test_cutting_passes_remove_allowance_and_spring_repeats_final(mode, strategy
         assert springs[0].pass_index != cuts[-1].pass_index
     code = GCodeWriter().write(plan)
     section = code.split("; === FINISH PASS")[1].split("; === PROGRAM END")[0]
-    emitted = parse(section)
+    emitted = parse(_without_comp_entries(section))
     emitted_cuts = [m for m in emitted if m.move_type == MoveType.FEED]
     expected_moves = [m for p in plan.finish_passes for m in p.moves]
     assert [m.x for m in emitted_cuts] == pytest.approx([m.x for m in expected_moves])
@@ -160,6 +167,6 @@ def test_kernel_offsets_preserve_steps_arcs_and_spring_geometry(mode, segments):
     final_cut = code.split("; Finish cutting pass 3\n")[1].split("; Spring pass (repeat final contour)\n")[0]
     spring_cut = code.split("; Spring pass (repeat final contour)\n")[1].split("; === PROGRAM END")[0]
     cutting_types = (MoveType.FEED, MoveType.ARC_CW, MoveType.ARC_CCW)
-    parsed_final = [m for m in parse(final_cut) if m.move_type in cutting_types]
-    parsed_spring = [m for m in parse(spring_cut) if m.move_type in cutting_types]
+    parsed_final = [m for m in parse(_without_comp_entries(final_cut)) if m.move_type in cutting_types]
+    parsed_spring = [m for m in parse(_without_comp_entries(spring_cut)) if m.move_type in cutting_types]
     assert shape(parsed_final) == shape(parsed_spring)

@@ -704,6 +704,18 @@ class LiveBackend(HALBackend):
         c = self._hal_comp
         return (c["mpg-x-in"], c["mpg-z-in"], c["x-jog-scale"], c["z-jog-scale"])
 
+    def get_tool_entry(self, tool_number: int):
+        """(diameter, orientation) from LinuxCNC's LOADED tool table, or None
+        if the tool is not in it. Machine units (inch)."""
+        try:
+            self._stat.poll()
+            for t in self._stat.tool_table:
+                if t.id == tool_number:
+                    return (float(t.diameter), int(t.orientation))
+        except Exception as e:
+            logger.warning("tool table read failed: %s", e)
+        return None
+
     def get_machine_position(self) -> Tuple[float, float]:
         """(x_radius, z) commanded joint positions, machine units (fresh poll)."""
         self._stat.poll()

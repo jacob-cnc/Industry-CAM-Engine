@@ -50,3 +50,40 @@ Safeguard: a saved Q not in its type's list is now kept and shown as
 next autosave would have written). Lathe tool.tbl today: T1 boring Q8 (-> Q3),
 T2 ext thread Q2 (-> Q6), T4 turning RH Q1 (-> Q2) — owner to change in the Tools tab.
 scripts/preview_tool_orientations.py prints the options as ASCII art.
+
+## Compensated contours only; G40 roughing; tool checks (owner decisions)
+
+Trigger: LinuxCNC "Straight feed in concave corner cannot be reached by the tool
+without gouging" on the GCH program. Source (interp_queue.cc): at an inside corner
+comp shortens the incoming move; it errors when the move is shorter than the cut-back
+(tool would reverse). G41 through the roughing zigzag treated each X step-out as an
+inside corner; pass-2 step 0.0125 r < TNR 0.0157.
+
+Writer changes:
+- Roughing G40 (owner OK): exact on straight X/Z; angled surfaces leave
+  R(|sin|+|cos|-1) <= 0.414 R extra (never less).
+- Cleanup/finish: G40 -> rapid above contour start -> G41/G42 -> entry G01 down
+  the contour's line in air (> 2R) -> contour -> [lead-out] -> G40 -> exit.
+  ID face-lead moves (pilot -> wall along Z0+fin) dropped (air, wrong side).
+- Lead-out: comp ends with the nose centre on the last endpoint (overhang R). If
+  the overhang point is material (finished part, or stock beyond the profile's
+  Z span), a compensated lead-out toward the air side makes LinuxCNC stop the
+  nose at the endpoint. Into air (pilot hole, past bar end) no lead-out.
+- Tool check after every T M6/G43: #5400/#5410/#5413 vs generated T/D/Q; on
+  mismatch (DEBUG, values) + M0 pause (owner: pause with message).
+- Program tab: tool missing from the table is a generation error (no default
+  ToolDef / active-tool substitution). Run tab: compares the program's tool
+  checks with LinuxCNC's loaded table at load (warning) and at Cycle Start /
+  Run From Line (Run anyway? default No).
+
+Simulator (headless 2.9.6, scratchpad simlathe/run3):
+- old GCH program: reproduces the concave-corner error (line 64), no motion.
+- new GCH (T1 D0.0314 Q3): runs to completion; walls 3.1150/3.1160/3.1170,
+  final shoulder Z -0.5680.
+- new GCH with table T1 D0.032 Q8: pauses at the tool check with message.
+- OD sample: runs; face Z0.0000, walls 0.5000/0.8000, shoulder -0.3000.
+- OD wall ending into material: no lead-out Z -0.6156, with lead-out Z -0.6000.
+
+Known, not changed: an OD profile ending mid-stock (bar continuing past the
+profile) is blocked earlier by the validator ("CLEANUP ... CROSSES the Finish
+Allowance zone") — separate CAM limitation.

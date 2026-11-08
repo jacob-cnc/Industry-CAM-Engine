@@ -12,6 +12,7 @@ Architecture:
 """
 
 import os
+import re
 import logging
 from typing import Optional, List
 
@@ -247,6 +248,55 @@ class RunTab(QWidget):
         else:
             self._poll_timer.stop()
 
+    _TOOL_CHECK_RE = re.compile(
+        r";\s*--- tool check: program generated for T(\d+) D([0-9.]+) Q(\d+)")
+
+    def tool_table_problems(self) -> List[str]:
+        """Compare the program's expected tools with LinuxCNC's loaded table.
+
+        The writer records each tool it used ('; --- tool check: ...'). Comp
+        and offsets use LinuxCNC's table at run time, so a missing tool or a
+        changed nose diameter / orientation would change the cut. Returns
+        human-readable problems (empty = OK or not checkable offline).
+        """
+        if not self._gcode_text or not hasattr(self._backend, "get_tool_entry"):
+            return []
+        metric = bool(re.search(r"^\s*N\d+\s+G21\b", self._gcode_text, re.M))
+        problems, seen = [], set()
+        for m in self._TOOL_CHECK_RE.finditer(self._gcode_text):
+            t, dia, q = int(m.group(1)), float(m.group(2)), int(m.group(3))
+            if (t, dia, q) in seen:
+                continue
+            seen.add((t, dia, q))
+            if metric:
+                dia /= 25.4
+            entry = self._backend.get_tool_entry(t)
+            if entry is None:
+                problems.append(f"T{t} is not in LinuxCNC's tool table.")
+                continue
+            live_dia, live_q = entry
+            if abs(live_dia - dia) > 0.00005 or live_q != q:
+                problems.append(
+                    f"T{t}: program expects D{dia:.4f} Q{q}, LinuxCNC has "
+                    f"D{live_dia:.4f} Q{live_q}.")
+        return problems
+
+    def _warn_tool_problems(self, problems: List[str], at_start: bool) -> bool:
+        """Show tool problems. At cycle start, ask to continue (default No)."""
+        text = ("The tool table does not match what this program was generated "
+                "for:\n\n  " + "\n  ".join(problems) +
+                "\n\nFix the tool table (Tools tab) and regenerate the program. "
+                "The program will also pause at the tool check if run as is.")
+        logger.warning("Tool check: %s", "; ".join(problems))
+        self.show_error("Tool table mismatch - " + " ".join(problems))
+        if not at_start:
+            QMessageBox.warning(self, "Tool table mismatch", text)
+            return True
+        answer = QMessageBox.question(
+            self, "Tool table mismatch", text + "\n\nRun anyway?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        return answer == QMessageBox.Yes
+
     def show_error(self, msg: str):
         """Show a LinuxCNC error in the Run tab status bar until the next start."""
         self._status_error.setText(f"! {msg}")
@@ -308,6 +358,10 @@ class RunTab(QWidget):
         # Auto-preview on load
         self._on_preview()
 
+        problems = self.tool_table_problems()
+        if problems:
+            self._warn_tool_problems(problems, at_start=False)
+
         self.program_loaded.emit(path)
         logger.info("Loaded G-code: %s (%d lines)", filename, line_count)
 
@@ -357,6 +411,9 @@ class RunTab(QWidget):
         if not self._gcode_path:
             return
         self.clear_error()
+        problems = self.tool_table_problems()
+        if problems and not self._warn_tool_problems(problems, at_start=True):
+            return
         success = self._backend.program_run(start_line=0)
         if success:
             self._set_running_state()
@@ -384,6 +441,9 @@ class RunTab(QWidget):
             return
         line = self._line_spin.value() - 1  # Convert 1-based to 0-based
         self.clear_error()
+        problems = self.tool_table_problems()
+        if problems and not self._warn_tool_problems(problems, at_start=True):
+            return
         success = self._backend.program_run(start_line=max(0, line))
         if success:
             self._set_running_state()

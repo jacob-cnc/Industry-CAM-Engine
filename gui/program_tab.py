@@ -1186,7 +1186,9 @@ class ProgramTab(QWidget):
         tool_num = roughing.get("tool_number", block.tool_number)
         tool_def = None
         if self._tool_resolver:
-            tool_def = self._tool_resolver(tool_num)
+            # The tool table is authoritative: never substitute another tool or
+            # a built-in default (TNR would silently differ from the machine).
+            tool_def = self._require_tool(tool_num, block, "roughing")
         if tool_def is None:
             tool_def = self._active_tool
         if tool_def is None:
@@ -1233,7 +1235,7 @@ class ProgramTab(QWidget):
         finish_tool_num = finishing.get("tool_number", tool_num)
         if finish_tool_num != tool_def.tool_number:
             if self._tool_resolver:
-                finish_tool_def = self._tool_resolver(finish_tool_num)
+                finish_tool_def = self._require_tool(finish_tool_num, block, "finishing")
             if finish_tool_def is None:
                 finish_tool_def = ToolDef(
                     tool_number=finish_tool_num,
@@ -1351,11 +1353,21 @@ class ProgramTab(QWidget):
         ))
         return lines
 
+    def _require_tool(self, tool_number: int, block, role: str):
+        """Resolve a tool from the Tools tab table or fail generation clearly."""
+        tool_def = self._tool_resolver(tool_number)
+        if tool_def is None:
+            raise ValueError(
+                f"Tool T{tool_number} ({role}) for block '{block.display_label}' is not in "
+                f"the tool table. Add it in the Tools tab or choose another tool, then "
+                f"regenerate.")
+        return tool_def
+
     def _resolve_tool_for_block(self, block):
         """Look up ToolDef for a block from the tool table."""
         tool_def = None
         if self._tool_resolver:
-            tool_def = self._tool_resolver(block.tool_number)
+            tool_def = self._require_tool(block.tool_number, block, "block")
         if tool_def is None:
             from models.tool import ToolType as TT
             tool_def = ToolDef(
