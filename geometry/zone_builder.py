@@ -70,6 +70,15 @@ def build_zones(
     # Build the finished part face from closed contour
     finished_part_face = _build_face_from_coords(all_coords, profile)
 
+    # Preserve unmachined stock behind this operation in the protected part zone.
+    # The operation depth must not truncate the physical workpiece for validation.
+    if stock.physical_z_end < stock.z_end:
+        retained_stock = _build_stock_face(
+            stock.diameter / 2.0, stock.z_end, stock.physical_z_end,
+            mode, stock.pilot_hole_dia / 2.0,
+        )
+        finished_part_face = finished_part_face + retained_stock
+
     # Step 2: Compute fin_allowance in radius
     fin_allowance_radius = roughing_params.fin_allowance / 2.0  # diameter to radius
 
@@ -84,7 +93,7 @@ def build_zones(
 
     # Clip the keep zone to stock boundaries (offset may extend beyond Z_end or below X=0)
     # Build a clipping rectangle matching the stock extent
-    clip_face = _build_stock_face(stock.diameter / 2.0, stock.z_start, stock.z_end, mode, stock.pilot_hole_dia / 2.0)
+    clip_face = _build_stock_face(stock.diameter / 2.0, stock.z_start, stock.physical_z_end, mode, stock.pilot_hole_dia / 2.0)
     
     # Intersect keep_zone with clip to remove anything outside stock
     clip_faces = clip_face.faces() if hasattr(clip_face, 'faces') else []
@@ -105,7 +114,7 @@ def build_zones(
     x_start_radius = stock.x_start / 2.0
     
     # Full stock face (for reference)
-    stock_face = _build_stock_face(stock_radius, stock.z_start, stock.z_end, mode, stock.pilot_hole_dia / 2.0)
+    stock_face = _build_stock_face(stock_radius, stock.z_start, stock.physical_z_end, mode, stock.pilot_hole_dia / 2.0)
     
     # MTR stock: only the turning area (below face, between roughing boundary X and stock OD)
     # For OD: from the first roughing boundary X to stock OD, Z=fin_allowance to Z_end
@@ -379,7 +388,7 @@ def _compute_closure_coords(profile: ClosedProfile, stock: StockDef,
     return closure
 
 
-def _build_face_from_coords(coords: List[dict], profile: ClosedProfile) -> object:
+def _build_face_from_coords(coords: List[dict], profile: ClosedProfile, *, closed: bool = True) -> object:
     """Build a Build123d Face from coordinate descriptors.
 
     Uses BuildSketch + BuildLine + make_face pattern.
@@ -399,11 +408,11 @@ def _build_face_from_coords(coords: List[dict], profile: ClosedProfile) -> objec
     from models.constants import TOLERANCE
 
     with BuildSketch() as sketch:
-        with BuildLine():
+        with BuildLine() as contour:
             if not coords:
                 raise ValueError("Empty coordinate list for face construction")
 
-            for i in range(len(coords)):
+            for i in range(len(coords) if closed else len(coords) - 1):
                 next_i = (i + 1) % len(coords)
                 current = coords[i]
                 target = coords[next_i]
@@ -477,6 +486,8 @@ def _build_face_from_coords(coords: List[dict], profile: ClosedProfile) -> objec
                 else:
                     Line((cx, cz), (tx, tz))
 
+        if not closed:
+            return contour.line
         make_face()
 
     return sketch.sketch
@@ -539,3 +550,14 @@ def _build_true_face(stock: StockDef, mode: MachiningMode) -> object:
             Line((x_min, z_start), (x_min, 0.0))
         make_face()
     return sketch.sketch
+
+
+def contour_z_end(profile: ClosedProfile) -> float:
+    """Most negative Z on the actual open contour, including kernel arc extrema."""
+    coords = _profile_to_radius_coords(profile)
+    if not coords:
+        raise ValueError("At least one profile point is required.")
+    if len(coords) == 1:
+        return coords[0]["z"]
+    contour = _build_face_from_coords(coords, profile, closed=False)
+    return contour.bounding_box().min.Y

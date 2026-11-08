@@ -332,15 +332,15 @@ def _compute_stock_boundary(stock: StockDef) -> List[Tuple[float, float]]:
         return [
             (0.0, stock.z_start),
             (stock.diameter, stock.z_start),
-            (stock.diameter, stock.z_end),
-            (0.0, stock.z_end),
+            (stock.diameter, stock.physical_z_end),
+            (0.0, stock.physical_z_end),
         ]
     else:
         return [
             (stock.pilot_hole_dia, stock.z_start),
             (stock.diameter, stock.z_start),
-            (stock.diameter, stock.z_end),
-            (stock.pilot_hole_dia, stock.z_end),
+            (stock.diameter, stock.physical_z_end),
+            (stock.pilot_hole_dia, stock.physical_z_end),
         ]
 
 

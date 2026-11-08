@@ -261,6 +261,7 @@ class ProgramTab(QWidget):
             "x_start": self._stock_x_start.value(),
             "z_start": self._stock_z_start.value(),
             "z_end": self._stock_z_end.value(),
+            "back_face_z": self._stock_back_z.value(),
             "x_park": self._stock_x_park.value(),
             "z_park": self._stock_z_park.value(),
             "pilot_hole_dia": self._stock_pilot_hole.value(),
@@ -533,10 +534,20 @@ class ProgramTab(QWidget):
         form.addRow("Z Start:", self._stock_z_start)
 
         self._stock_z_end = NumericField(NumericFieldConfig(
-            min_value=-10.0, max_value=0.0, decimals=4,
+            min_value=-1000.0, max_value=0.0, decimals=4,
+            default_value=0.0, suffix="in",
+        ))
+        self._stock_z_end.setReadOnly(True)
+        self._stock_z_end.setToolTip("Derived from the active block contour, including arc extrema.")
+        self._stock_z_end.set_value(0.0)
+        form.addRow("Operation Z End:", self._stock_z_end)
+
+        self._stock_back_z = NumericField(NumericFieldConfig(
+            min_value=-1000.0, max_value=0.0, decimals=4,
             default_value=-1.0, suffix="in",
         ))
-        form.addRow("Z End:", self._stock_z_end)
+        self._stock_back_z.setToolTip("Physical back face of the stock, independent of cutting depth.")
+        form.addRow("Stock Back Face:", self._stock_back_z)
 
         self._stock_x_park = NumericField(NumericFieldConfig(
             min_value=0.0, max_value=20.0, decimals=4,
@@ -770,7 +781,7 @@ class ProgramTab(QWidget):
         self._stock_diameter.value_changed.connect(self._on_field_changed)
         self._stock_x_start.value_changed.connect(self._on_field_changed)
         self._stock_z_start.value_changed.connect(self._on_field_changed)
-        self._stock_z_end.value_changed.connect(self._on_field_changed)
+        self._stock_back_z.value_changed.connect(self._on_field_changed)
         self._stock_x_park.value_changed.connect(self._on_field_changed)
         self._stock_z_park.value_changed.connect(self._on_field_changed)
         self._stock_pilot_hole.value_changed.connect(self._on_field_changed)
@@ -792,7 +803,7 @@ class ProgramTab(QWidget):
 
         # Segment list
         self._segment_list.segments_changed.connect(self._on_segments_changed)
-        self._segment_list.corner_breaks_changed.connect(self._on_field_changed)
+        self._segment_list.corner_breaks_changed.connect(lambda *_: self._on_segments_changed(self.get_segments()))
         self._segment_list.selection_changed.connect(self._on_segment_selection_changed)
 
         # Generate button
@@ -910,6 +921,7 @@ class ProgramTab(QWidget):
             # No saved data — clear fields to defaults for new blocks
             if block.is_profile:
                 self._segment_list.clear()
+                self._refresh_operation_z_end([])
             return
 
         if block.is_profile:
@@ -921,8 +933,6 @@ class ProgramTab(QWidget):
                 self._stock_x_start.set_value(stock["x_start"])
             if "z_start" in stock:
                 self._stock_z_start.set_value(stock["z_start"])
-            if "z_end" in stock:
-                self._stock_z_end.set_value(stock["z_end"])
             if "x_park" in stock:
                 self._stock_x_park.set_value(stock["x_park"])
             if "z_park" in stock:
@@ -958,6 +968,7 @@ class ProgramTab(QWidget):
             segments = data.get("segments", [])
             corner_breaks = data.get("corner_breaks", [])
             self._segment_list.set_segments(segments, corner_breaks)
+            self._refresh_operation_z_end(segments)
 
         elif block.is_threading:
             self._threading_panel.set_values(data)
@@ -993,12 +1004,26 @@ class ProgramTab(QWidget):
 
     def _on_segments_changed(self, segments: list):
         """Profile segments changed — auto-populate Z End from most negative Z."""
-        if segments:
-            z_values = [seg.get("z", 0.0) for seg in segments]
-            min_z = min(z_values)
-            if min_z < 0:
-                self._stock_z_end.set_value(min_z)
+        self._refresh_operation_z_end(segments)
         self._on_field_changed()
+
+    def _refresh_operation_z_end(self, segments=None):
+        from pipeline.model_builder import profile_from_fields
+        from geometry.zone_builder import contour_z_end
+        if segments is None:
+            segments = self.get_segments()
+        if not segments:
+            self._stock_z_end.set_value(0.0)
+            self._stock_z_end.setText("—")
+            return
+        try:
+            profile = profile_from_fields(segments, self._get_machining_mode(), self.get_corner_breaks())
+            self._stock_z_end.set_value(contour_z_end(profile))
+            self._stock_z_end.setToolTip("Derived from the active block contour, including arc extrema.")
+        except (ValueError, RuntimeError) as exc:
+            self._stock_z_end.set_value(0.0)
+            self._stock_z_end.setText("Invalid contour")
+            self._stock_z_end.setToolTip(str(exc))
 
     def _on_segment_selection_changed(self, seg_index: int):
         """Segment selection changed in the builder — highlight on graph."""
@@ -1178,6 +1203,7 @@ class ProgramTab(QWidget):
             x_start=stock.get("x_start", 0.0),
             z_start=stock.get("z_start", 0.1),
             z_end=stock.get("z_end", -1.0),
+            stock_back_z=self._stock_back_z.value(),
             mode=mode,
             pilot_hole_dia=stock.get("pilot_hole_dia", 0.0),
             doc_dia=roughing.get("doc_dia", 0.030),
@@ -1388,7 +1414,7 @@ class ProgramTab(QWidget):
         # Check all numeric fields are valid
         numeric_fields = [
             self._stock_diameter, self._stock_x_start,
-            self._stock_z_start, self._stock_z_end,
+            self._stock_z_start, self._stock_z_end, self._stock_back_z,
             self._stock_x_park, self._stock_z_park,
             self._rough_doc, self._rough_feed, self._rough_fin_allowance,
             self._rough_rpm,
@@ -1579,6 +1605,7 @@ class ProgramTab(QWidget):
 
         data = {
             "version": 2,
+            "stock_back_face_z": self._stock_back_z.value(),
             "blocks": blocks_data,
         }
 
@@ -1616,6 +1643,12 @@ class ProgramTab(QWidget):
         if version >= 2 and "blocks" in data:
             # Multi-block format — rebuild the block list
             blocks_data = data["blocks"]
+            # Older files stored a single ambiguous Z End in each block. Keep
+            # their deepest stored extent as stock, then rederive each contour.
+            legacy_depths = [bd.get("params", {}).get("stock", {}).get("back_face_z",
+                bd.get("params", {}).get("stock", {}).get("z_end", -1.0))
+                for bd in blocks_data if bd.get("block_type") in ("od_profile", "id_profile")]
+            self._stock_back_z.set_value(data.get("stock_back_face_z", min(legacy_depths, default=-1.0)))
             blocks = []
             for bd in blocks_data:
                 block = ProgramBlock(
@@ -1684,7 +1717,7 @@ class ProgramTab(QWidget):
         if "z_start" in stock:
             self._stock_z_start.set_value(stock["z_start"])
         if "z_end" in stock:
-            self._stock_z_end.set_value(stock["z_end"])
+            self._stock_back_z.set_value(stock.get("back_face_z", stock["z_end"]))
         if "x_park" in stock:
             self._stock_x_park.set_value(stock["x_park"])
         if "z_park" in stock:
@@ -2087,7 +2120,7 @@ class ProgramTab(QWidget):
         try:
             stock_dia = self._stock_diameter.value()
             z_start = self._stock_z_start.value()
-            z_end = self._stock_z_end.value()
+            z_end = self._stock_back_z.value()
             stock_r = stock_dia / 2.0
 
             if stock_r > 0 and z_start != z_end:
@@ -2242,7 +2275,8 @@ class ProgramTab(QWidget):
         field_labels = [
             (self._stock_diameter, "Stock Diameter"),
             (self._stock_z_start, "Z Start"),
-            (self._stock_z_end, "Z End"),
+            (self._stock_z_end, "Operation Z End"),
+            (self._stock_back_z, "Stock Back Face"),
             (self._rough_doc, "Roughing DOC"),
             (self._rough_feed, "Roughing Feed"),
             (self._rough_fin_allowance, "Finish Allowance"),
