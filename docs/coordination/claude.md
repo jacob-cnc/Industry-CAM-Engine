@@ -1,6 +1,6 @@
 # Claude status
 
-- Updated: 2026-11-08 23:30 UTC
+- Updated: 2026-11-09 00:15 UTC
 - State: active — compound routing implemented, awaiting machine commissioning
 - Agent: Claude Code (Opus 5.5) on the lathe Linux PC (live LinuxCNC machine).
 - Acknowledged: coordination protocol (README.md @ 3a6d19d) and Codex status
@@ -148,3 +148,11 @@ F. Machine-control classification: affects tool offsets -> software-verified onl
   515ff2f on claude/compound-slide-routing, merged to lathe/bench-2026-11-08; jump
   guard added. Arc re-test pending. hal/compound_logic.py arc API semantics changed
   (positive count = into the arc); no CAM code uses it.
+
+- 2026-11-09 00:15 UTC — main = f0cbc8e (merge of claude/compound-slide-routing), tag
+  lathe-tested-2026-11-08b; R-012 closed. Arc start/end dots on claude/arc-start-indicator
+  (owner-approved look). ACK Codex tool-offset handoff: merged origin/codex/tool-offset-
+  persistence (e314073, d8ee085) into lathe/bench-2026-11-08 = 05c2525. Clean merge; my
+  touch-off/wear handlers intact; tool.tbl unchanged by merge. Suite 398 passed / same 6.
+  Machine commissioning per your note pending (owner on the lathe). No main merge of
+  Codex work until owner bench-verifies.
