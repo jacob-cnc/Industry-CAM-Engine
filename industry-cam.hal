@@ -36,11 +36,18 @@ loadrt pid names=pid.x,pid.z
 # Spindle near/at-speed detection
 loadrt near names=near-spindle
 
-# Mux for MPG jog scale selection (sel0/sel1/sel2 driven by compound-slide HAL pins via postgui.hal)
+# Mux for MPG jog scale selection (sel0/sel1/sel2 driven by compound-slide pins, netted at runtime by LiveBackend)
 loadrt mux8 names=mux8.jogscale-x,mux8.jogscale-z
 
 # OR gate for jog-vel-mode: velocity mode when sel1 OR sel2 is HIGH
 loadrt or2 names=or2.jog-vel-mode
+
+# Compound-slide jog routing (see section 11 below)
+#   mux-gen.00 = X jog-counts mux, mux-gen.01 = Z jog-counts mux (s32 in -> s32 out)
+#   and2/not gate jog-enable so the GUI can switch mux inputs without a count jump
+loadrt mux_generic config="ss2,ss2"
+loadrt and2 names=and2.mpg-jog-gate
+loadrt not names=not.compound-jog-inhibit
 
 # Debounce for switches and buttons
 loadrt debounce cfg=12
@@ -50,6 +57,12 @@ setp debounce.0.delay 5
 # 2. Add functions to servo thread
 # ----------------------------------------------------------------------------
 addf hm2_7i96s.0.read          servo-thread
+# Jog routing must run between hm2 read and motion-controller so the joints see
+# this cycle's MPG counts and the current jog-enable gate.
+addf mux-gen.00                     servo-thread
+addf mux-gen.01                     servo-thread
+addf not.compound-jog-inhibit       servo-thread
+addf and2.mpg-jog-gate              servo-thread
 addf motion-command-handler         servo-thread
 addf motion-controller              servo-thread
 addf debounce.0                     servo-thread
@@ -251,20 +264,41 @@ setp mux8.jogscale-z.in5  0.000263672
 setp mux8.jogscale-z.in6  0.000263672
 setp mux8.jogscale-z.in7  0.000263672
 
-# sel0/sel1/sel2 are driven by compound-slide HAL pins via postgui.hal (GUI controls mode)
+# sel0/sel1/sel2 are driven by compound-slide pins, netted at runtime by LiveBackend.
+# postgui.hal is NOT loaded by this config (no POSTGUI_HALFILE; display_gui.sh is
+# a plain DISPLAY program). All MPG routing lives here.
 
-# MPG connections
-# Direct route from encoder counts to joint jog-counts. The INI does not load
-# postgui.hal (no POSTGUI_HALFILE; display_gui.sh is a plain DISPLAY program),
-# so the mux2 path in postgui.hal is not active. Keep the direct route until
-# LiveBackend wires the full mux2 chain at runtime.
-net mpg-x-counts   hm2_7i96s.0.encoder.03.count  =>  joint.0.jog-counts  axis.x.jog-counts
+# MPG jog-counts routing — direct MPG (default) or compound-slide (GUI)
+#
+#   encoder.03 --mpg-x-counts--> mux-gen.00.in-s32-00 --+
+#   compound-slide.x-jog-counts --compound-x-jog--> in-s32-01 --+--> joint.0/axis.x.jog-counts
+#   (Z identical with encoder.02 and mux-gen.01)
+#
+# compound-x-jog, compound-z-jog, compound-enable and compound-jog-inhibit have
+# no writer here; LiveBackend attaches the compound-slide OUT pins at runtime.
+# With no GUI attached they read 0/FALSE: mux selects input 0 (direct MPG),
+# jog stays enabled. A GUI crash therefore falls back to normal MPG jogging.
+#
+# Switching the mux changes jog-counts discontinuously. Motion applies only the
+# per-cycle count delta and updates its old-count copy even while jog-enable is
+# FALSE (control.c, LinuxCNC 2.9.6), so the GUI raises compound-jog-inhibit
+# around every switch and the jump is absorbed with no motion.
+net mpg-x-counts      hm2_7i96s.0.encoder.03.count => mux-gen.00.in-s32-00
+net compound-x-jog    => mux-gen.00.in-s32-01
+net x-jog-final       mux-gen.00.out-s32 => joint.0.jog-counts axis.x.jog-counts
+net mpg-z-counts      hm2_7i96s.0.encoder.02.count => mux-gen.01.in-s32-00
+net compound-z-jog    => mux-gen.01.in-s32-01
+net z-jog-final       mux-gen.01.out-s32 => joint.1.jog-counts axis.z.jog-counts
+net compound-enable   => mux-gen.00.sel-bit-00 mux-gen.01.sel-bit-00
+
 net mpg-x-scale    mux8.jogscale-x.out            =>  joint.0.jog-scale   axis.x.jog-scale
-net mpg-z-counts   hm2_7i96s.0.encoder.02.count  =>  joint.1.jog-counts  axis.z.jog-counts
 net mpg-z-scale    mux8.jogscale-z.out            =>  joint.1.jog-scale   axis.z.jog-scale
 
-# Jog enable — machine must be ON for MPG to move axes
-net mpg-jog-enable halui.machine.is-on => joint.0.jog-enable joint.1.jog-enable axis.x.jog-enable axis.z.jog-enable
+# Jog enable — machine must be ON, and the GUI must not be mid-switch
+net machine-is-on        halui.machine.is-on => and2.mpg-jog-gate.in0
+net compound-jog-inhibit => not.compound-jog-inhibit.in
+net jog-not-inhibited    not.compound-jog-inhibit.out => and2.mpg-jog-gate.in1
+net mpg-jog-enable       and2.mpg-jog-gate.out => joint.0.jog-enable joint.1.jog-enable axis.x.jog-enable axis.z.jog-enable
 
 # jog-vel-mode driven by or2 (set dynamically from postgui.hal)
 

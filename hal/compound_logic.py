@@ -18,11 +18,17 @@ from typing import Tuple
 from hal.constants import X_MIN_LIMIT, X_MAX_LIMIT, Z_MIN_LIMIT, Z_MAX_LIMIT
 
 
-# Soft limits in radius for X (INI values are diameter)
+# Default soft limits (legacy constants). Live compound jogging passes the
+# machine's real joint limits via the ``limits`` argument instead, because
+# these constants do not match the INI (see CompoundJogEngine).
 _X_MIN_R = X_MIN_LIMIT / 2.0
 _X_MAX_R = X_MAX_LIMIT / 2.0
 _Z_MIN = Z_MIN_LIMIT
 _Z_MAX = Z_MAX_LIMIT
+
+# (x_min_radius, x_max_radius, z_min, z_max)
+Limits = Tuple[float, float, float, float]
+_DEFAULT_LIMITS: Limits = (_X_MIN_R, _X_MAX_R, _Z_MIN, _Z_MAX)
 
 
 # ======================================================================
@@ -109,7 +115,8 @@ class CompoundLinearLogic:
 
     @staticmethod
     def check_soft_limits(current_x: float, current_z: float,
-                          x_delta: float, z_delta: float) -> Tuple[float, float, bool]:
+                          x_delta: float, z_delta: float,
+                          limits: Limits = None) -> Tuple[float, float, bool]:
         """Check if motion would exceed soft limits.
 
         If EITHER axis would exceed, BOTH are suppressed (no partial motion).
@@ -119,13 +126,15 @@ class CompoundLinearLogic:
             current_z: Current Z position.
             x_delta: Proposed X motion (radius).
             z_delta: Proposed Z motion.
+            limits: (x_min_r, x_max_r, z_min, z_max); defaults to legacy constants.
 
         Returns:
             (x_delta, z_delta, suppressed).
         """
-        if (current_x + x_delta) < _X_MIN_R or (current_x + x_delta) > _X_MAX_R:
+        x_min, x_max, z_min, z_max = limits or _DEFAULT_LIMITS
+        if (current_x + x_delta) < x_min or (current_x + x_delta) > x_max:
             return (0.0, 0.0, True)
-        if (current_z + z_delta) < _Z_MIN or (current_z + z_delta) > _Z_MAX:
+        if (current_z + z_delta) < z_min or (current_z + z_delta) > z_max:
             return (0.0, 0.0, True)
         return (x_delta, z_delta, False)
 
@@ -166,6 +175,7 @@ class CompoundArcLogic:
         self.radius: float = 0.25
         self.quadrant: Quadrant = Quadrant.SE
         self.current_angle: float = 0.0
+        self._direction: float = 1.0   # +1: positive counts increase angle
         self.angle_start: float = 0.0
         self.angle_end: float = 0.0
         self.cumulative_distance: float = 0.0
@@ -229,6 +239,10 @@ class CompoundArcLogic:
         """Activate arc mode — compute center and initial angle.
 
         Must be called with the tool's current position at activation time.
+        By construction the tool sits exactly on one END of the quadrant's
+        arc (ARC_TOP / ARC_BOTTOM are the two tangent points), so the angle is
+        snapped to that boundary and the travel direction is chosen so that a
+        POSITIVE MPG count always moves INTO the quadrant.
         """
         self.radius = radius
         self.quadrant = quadrant
@@ -237,99 +251,65 @@ class CompoundArcLogic:
         )
         self.angle_start, self.angle_end = self.get_quadrant_angle_range(quadrant)
 
-        # Initial angle from tool position relative to center
         dx = current_x - self.arc_center_x
         dz = current_z - self.arc_center_z
-        self.current_angle = math.atan2(dx, dz)
-        if self.current_angle < 0:
-            self.current_angle += 2 * math.pi
-        # Handle 0/2π wrap for SE quadrant
-        if self.current_angle < self.angle_start and abs(self.current_angle) < 1e-10:
-            self.current_angle = 2 * math.pi
+        raw = math.atan2(dx, dz)
+
+        def ang_dist(a, b):
+            d = (a - b) % (2 * math.pi)
+            return min(d, 2 * math.pi - d)
+
+        if ang_dist(raw, self.angle_start) <= ang_dist(raw, self.angle_end):
+            self.current_angle = self.angle_start
+            self._direction = 1.0
+        else:
+            self.current_angle = self.angle_end
+            self._direction = -1.0
 
         self.cumulative_distance = 0.0
 
     def process_pulse(self, count_delta: int, jog_scale: float,
-                      current_x: float, current_z: float
+                      current_x: float, current_z: float,
+                      limits: Limits = None
                       ) -> Tuple[float, float, bool, bool]:
-        """Process a single MPG pulse through the full arc pipeline.
+        """Advance along the arc by ``count_delta * jog_scale`` of path length.
 
-        Pipeline:
-            1. Tangent decomposition
-            2. Soft limit check
-            3. Apply motion + re-project onto arc
-            4. Angle update + angular clamping
+        The angle is tracked directly (no atan2 re-derivation, so no 0/2pi
+        wrap) and clamped to the quadrant, so one pulse can never move the
+        tool more than the arc length it commanded. (2026-11-08: the previous
+        tangent + re-projection + atan2 version wrapped at the start boundary
+        and clamped to the FAR end — one MPG click ran the whole quadrant.)
 
         Args:
-            count_delta: Encoder count delta (signed).
-            jog_scale: Distance per count (inches).
-            current_x: Current X (radius).
+            count_delta: Encoder count delta (signed). Positive = into the arc.
+            jog_scale: Path length per count (inches).
+            current_x: Current X (radius) — the commanded/virtual position.
             current_z: Current Z.
+            limits: (x_min_r, x_max_r, z_min, z_max); defaults to legacy constants.
 
         Returns:
-            (x_delta, z_delta, suppressed, clamped).
+            (x_delta, z_delta, suppressed, clamped) — deltas move the tool from
+            (current_x, current_z) to the new point on the arc.
         """
-        # 1. Decompose along tangent
-        tangent_x = math.cos(self.current_angle)
-        tangent_z = -math.sin(self.current_angle)
-        x_delta = count_delta * jog_scale * tangent_x
-        z_delta = count_delta * jog_scale * tangent_z
+        if count_delta == 0 or self.radius <= 0.0:
+            return (0.0, 0.0, False, False)
 
-        # 2. Soft limits
-        new_x = current_x + x_delta
-        new_z = current_z + z_delta
-        if new_x < _X_MIN_R or new_x > _X_MAX_R or new_z < _Z_MIN or new_z > _Z_MAX:
+        direction = getattr(self, "_direction", 1.0)
+        target = self.current_angle + direction * count_delta * jog_scale / self.radius
+        new_angle = min(max(target, self.angle_start), self.angle_end)
+        clamped = new_angle != target
+        if abs(new_angle - self.current_angle) < 1e-15:
+            return (0.0, 0.0, False, clamped)
+
+        new_x = self.arc_center_x + self.radius * math.sin(new_angle)
+        new_z = self.arc_center_z + self.radius * math.cos(new_angle)
+
+        x_min, x_max, z_min, z_max = limits or _DEFAULT_LIMITS
+        if new_x < x_min or new_x > x_max or new_z < z_min or new_z > z_max:
             return (0.0, 0.0, True, False)
 
-        # 3. Re-project onto arc
-        dx = new_x - self.arc_center_x
-        dz = new_z - self.arc_center_z
-        dist = math.sqrt(dx * dx + dz * dz)
-        if dist < 1e-15:
-            return (0.0, 0.0, False, False)
-        scale = self.radius / dist
-        reproj_x = self.arc_center_x + dx * scale
-        reproj_z = self.arc_center_z + dz * scale
-
-        # 4. Compute new angle and clamp
-        dx2 = reproj_x - self.arc_center_x
-        dz2 = reproj_z - self.arc_center_z
-        new_angle = math.atan2(dx2, dz2)
-        if new_angle < 0:
-            new_angle += 2 * math.pi
-        if new_angle < self.angle_start and abs(new_angle) < 1e-10:
-            new_angle = 2 * math.pi
-        # Wrap detection for SE quadrant
-        if (self.angle_end >= 2 * math.pi - 1e-10 and
-                self.current_angle > self.angle_start and
-                new_angle < self.angle_start):
-            new_angle = 2 * math.pi
-
-        # Clamp to quadrant boundaries
-        clamped = False
-        if new_angle < self.angle_start:
-            new_angle = self.angle_start
-            clamped = True
-        elif new_angle > self.angle_end:
-            new_angle = self.angle_end
-            clamped = True
-
-        if clamped:
-            # Move to boundary position
-            clamped_x = self.arc_center_x + self.radius * math.sin(new_angle)
-            clamped_z = self.arc_center_z + self.radius * math.cos(new_angle)
-            if abs(new_angle - self.current_angle) < 1e-12:
-                return (0.0, 0.0, False, True)
-            final_x = clamped_x - current_x
-            final_z = clamped_z - current_z
-            self.current_angle = new_angle
-            return (final_x, final_z, False, True)
-
-        # Normal motion
-        final_x = reproj_x - current_x
-        final_z = reproj_z - current_z
         self.current_angle = new_angle
-        return (final_x, final_z, False, False)
+        return (new_x - current_x, new_z - current_z, False, clamped)
 
     def accumulate_distance(self, x_delta: float, z_delta: float) -> float:
         """Add to cumulative arc distance."""

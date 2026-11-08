@@ -12,6 +12,8 @@ Also creates a userspace HAL component for compound slide muxing.
 import logging
 import importlib.util as _ilu
 import subprocess
+import time
+from typing import Tuple
 import linuxcnc
 
 # Load system hal.so explicitly so the project's hal/ package in PYTHONPATH
@@ -88,7 +90,12 @@ class LiveBackend(HALBackend):
             # Input pins — MPG encoder counts
             self._hal_comp.newpin("mpg-x-in", hal_module.HAL_S32, hal_module.HAL_IN)
             self._hal_comp.newpin("mpg-z-in", hal_module.HAL_S32, hal_module.HAL_IN)
-            self._hal_comp.newpin("jog-scale", hal_module.HAL_FLOAT, hal_module.HAL_IN)
+            # Per-joint jog scales (from mux8) — compound converts path motion
+            # to each joint's counts with that joint's own scale.
+            self._hal_comp.newpin("x-jog-scale", hal_module.HAL_FLOAT, hal_module.HAL_IN)
+            self._hal_comp.newpin("z-jog-scale", hal_module.HAL_FLOAT, hal_module.HAL_IN)
+            # Gates joint/axis jog-enable FALSE while the jog-counts mux switches
+            self._hal_comp.newpin("jog-inhibit", hal_module.HAL_BIT, hal_module.HAL_OUT)
             # Control pins — written by GUI
             self._hal_comp.newpin("compound-enable", hal_module.HAL_BIT, hal_module.HAL_OUT)
             self._hal_comp.newpin("compound-angle", hal_module.HAL_FLOAT, hal_module.HAL_OUT)
@@ -100,6 +107,11 @@ class LiveBackend(HALBackend):
             self._hal_comp.newpin("mpg-scale-sel1", hal_module.HAL_BIT, hal_module.HAL_OUT)
             self._hal_comp.newpin("mpg-scale-sel2", hal_module.HAL_BIT, hal_module.HAL_OUT)
             self._hal_comp.ready()
+            # Start inhibited: if a previous GUI instance died with compound
+            # enabled, attaching our compound-enable=FALSE writer flips the mux
+            # back to direct MPG — that count jump must be absorbed.
+            self._hal_comp["jog-inhibit"] = True
+            self._hal_comp["compound-enable"] = False
             # Default to index 1 = 0.001" per MPG click (sel0=1, sel1=0, sel2=0)
             self._hal_comp["mpg-scale-sel0"] = True
             self._hal_comp["mpg-scale-sel1"] = False
@@ -108,8 +120,12 @@ class LiveBackend(HALBackend):
             # If component already exists or HAL not ready, continue without it
             self._hal_comp = None
 
+        self._compound_routing_ok = False
         if self._hal_comp is not None:
             self._connect_scale_select_pins()
+            self._compound_routing_ok = self._connect_compound_routing()
+            time.sleep(self._SWITCH_SETTLE_S)
+            self._hal_comp["jog-inhibit"] = False
 
         try:
             self._stat.poll()
@@ -193,7 +209,12 @@ class LiveBackend(HALBackend):
 
         # Axis positions in active work coordinate system (G54 etc.)
         # actual_position is G53 machine coords; subtract offsets to get work coords.
-        x_pos = s.actual_position[0] - s.g5x_offset[0] - s.g92_offset[0] - s.tool_offset[0]
+        # Project convention: X is RADIUS in machine/HAL units and DIAMETER in the
+        # GUI and G-code (G7). AxisState.position is documented as diameter and
+        # every GUI consumer treats it that way, so convert here. (Before
+        # 2026-11-08 this passed radius through, so the DRO showed radius.)
+        x_pos = 2.0 * (s.actual_position[0] - s.g5x_offset[0]
+                       - s.g92_offset[0] - s.tool_offset[0])
         z_pos = s.actual_position[2] - s.g5x_offset[2] - s.g92_offset[2] - s.tool_offset[2]
 
         x_cmd = s.joint[0]["output"] if len(s.joint) > 0 else 0.0
@@ -585,20 +606,73 @@ class LiveBackend(HALBackend):
     # Compound Slide HAL Pins
     # ------------------------------------------------------------------
 
-    def set_compound_enable(self, enabled: bool):
-        """Set the compound-enable HAL pin.
+    # Time to hold jog-inhibit before/after a mux switch. Servo period is 2 ms;
+    # 20 ms gives ~10 servo cycles for motion to latch the new count value.
+    _SWITCH_SETTLE_S = 0.02
 
-        When enabled, postgui.hal routes the compound-slide component's
-        output jog-counts to the joints instead of raw MPG counts.
+    @property
+    def compound_routing_available(self) -> bool:
+        """True when every compound-slide net was attached at startup."""
+        return self._hal_comp is not None and self._compound_routing_ok
 
-        Args:
-            enabled: True to enable compound slide muxing.
+    def set_compound_routing(self, enabled: bool) -> bool:
+        """Switch joint jog-counts between direct MPG and compound output.
+
+        Jump-free sequence: inhibit jog-enable, zero the compound outputs, flip
+        the mux, wait, release. Motion keeps updating its previous-count copy
+        while jog-enable is FALSE, so the discontinuity causes no motion.
+
+        Blocks the caller for ~40 ms.
+
+        Returns:
+            True if the switch was performed.
         """
-        if self._hal_comp is not None:
+        if not self.compound_routing_available:
+            return False
+        comp = self._hal_comp
+        try:
+            comp["jog-inhibit"] = True
+            time.sleep(self._SWITCH_SETTLE_S)
+            comp["x-jog-counts"] = 0
+            comp["z-jog-counts"] = 0
+            comp["compound-enable"] = bool(enabled)
+            time.sleep(self._SWITCH_SETTLE_S)
+            return True
+        except Exception as e:
+            logger.error("compound routing switch failed: %s", e)
+            return False
+        finally:
             try:
-                self._hal_comp["compound-enable"] = enabled
+                comp["jog-inhibit"] = False
             except Exception:
                 pass
+
+    def read_compound_inputs(self) -> Tuple[int, int, float, float]:
+        """Fresh read of (mpg_x_counts, mpg_z_counts, x_jog_scale, z_jog_scale)."""
+        if self._hal_comp is None:
+            return (0, 0, 0.0, 0.0)
+        c = self._hal_comp
+        return (c["mpg-x-in"], c["mpg-z-in"], c["x-jog-scale"], c["z-jog-scale"])
+
+    def get_machine_position(self) -> Tuple[float, float]:
+        """(x_radius, z) commanded joint positions, machine units (fresh poll)."""
+        self._stat.poll()
+        return (self._stat.joint[0]["output"], self._stat.joint[1]["output"])
+
+    def get_joint_limits(self) -> Tuple[float, float, float, float]:
+        """(x_min, x_max, z_min, z_max) wheel-jog limits, machine units.
+
+        Mirrors LinuxCNC: position limits when homed, otherwise a window of
+        +/- full travel around the current position (see compound_router.jog_window).
+        """
+        from hal.compound_router import jog_window
+        self._stat.poll()
+        s = self._stat
+        x = jog_window(bool(s.homed[0]), s.joint[0]["output"],
+                       s.joint[0]["min_position_limit"], s.joint[0]["max_position_limit"])
+        z = jog_window(bool(s.homed[1]), s.joint[1]["output"],
+                       s.joint[1]["min_position_limit"], s.joint[1]["max_position_limit"])
+        return (x[0], x[1], z[0], z[1])
 
     def set_compound_angle(self, angle: float):
         """Set the compound-angle HAL pin (informational, for HAL scope).
@@ -613,14 +687,10 @@ class LiveBackend(HALBackend):
                 pass
 
     def set_compound_jog_counts(self, x_counts: int, z_counts: int):
-        """Write decomposed jog counts to the compound-slide HAL output pins.
+        """Write cumulative compound jog counts to the HAL output pins.
 
-        These are the final jog counts that get routed to the joints
-        when compound mode is active.
-
-        Args:
-            x_counts: Cumulative X jog count output.
-            z_counts: Cumulative Z jog count output.
+        industry-cam.hal muxes these onto joint.N.jog-counts while
+        compound-enable is TRUE.
         """
         if self._hal_comp is not None:
             try:
@@ -629,11 +699,63 @@ class LiveBackend(HALBackend):
             except Exception:
                 pass
 
+    def _halcmd_net(self, net_args) -> bool:
+        result = subprocess.run(["halcmd", "net"] + net_args,
+                                capture_output=True, text=True)
+        if result.returncode != 0:
+            logger.warning("halcmd net %s failed: %s",
+                           " ".join(net_args), result.stderr.strip())
+            return False
+        logger.info("HAL net established: %s", " ".join(net_args))
+        return True
+
+    def _connect_compound_routing(self) -> bool:
+        """Attach compound-slide pins to the routing signals in industry-cam.hal.
+
+        The signals already exist (declared with readers only); this adds the
+        GUI as writer/reader. All nets must succeed or compound mode stays
+        disabled — a partial chain could route counts without the inhibit gate.
+        """
+        # `halcmd net` silently CREATES a missing signal, so first prove the
+        # routing exists in the loaded HAL (an older industry-cam.hal would
+        # otherwise leave compound outputs connected to nothing while the raw
+        # MPG still jogs its own axis).
+        required = {
+            "compound-jog-inhibit": "not.compound-jog-inhibit.in",
+            "compound-enable": "mux-gen.00.sel-bit-00",
+            "compound-x-jog": "mux-gen.00.in-s32-01",
+            "compound-z-jog": "mux-gen.01.in-s32-01",
+        }
+        for sig, reader in required.items():
+            out = subprocess.run(["halcmd", "show", "sig", sig],
+                                 capture_output=True, text=True).stdout
+            if reader not in out:
+                logger.error("Compound-slide routing unavailable: HAL signal %s "
+                             "is not connected to %s (old industry-cam.hal?)",
+                             sig, reader)
+                return False
+
+        nets = [
+            ["compound-jog-inhibit", "compound-slide.jog-inhibit"],
+            ["compound-enable", "compound-slide.compound-enable"],
+            ["compound-x-jog", "compound-slide.x-jog-counts"],
+            ["compound-z-jog", "compound-slide.z-jog-counts"],
+            ["mpg-x-counts", "compound-slide.mpg-x-in"],
+            ["mpg-z-counts", "compound-slide.mpg-z-in"],
+            ["mpg-x-scale", "compound-slide.x-jog-scale"],
+            ["mpg-z-scale", "compound-slide.z-jog-scale"],
+        ]
+        ok = all([self._halcmd_net(n) for n in nets])
+        if not ok:
+            logger.error("Compound-slide routing unavailable (HAL nets failed); "
+                         "normal MPG jogging is unaffected")
+        return ok
+
     def _connect_scale_select_pins(self):
         """Wire compound-slide scale-select OUT pins to mux8 sel inputs and or2.
 
-        Equivalent to the postgui.hal 'net' commands, but run here because
-        display_gui.sh is a plain DISPLAY program (no POSTGUI_HALFILE support).
+        Run here because the compound-slide component only exists once the GUI
+        starts, and display_gui.sh is a plain DISPLAY program (no POSTGUI_HALFILE).
         Called once at startup after the component is ready.
         """
         nets = [
@@ -687,8 +809,8 @@ class LiveBackend(HALBackend):
             3 = Vel Med
             4 = Vel Fast
 
-        Drives compound-slide.mpg-scale-sel0/sel1/sel2, which postgui.hal
-        routes to mux8.jogscale-x/z.sel0/sel1/sel2 and or2.jog-vel-mode.
+        Drives compound-slide.mpg-scale-sel0/sel1/sel2, which are netted
+        at startup to mux8.jogscale-x/z.sel0/sel1/sel2 and or2.jog-vel-mode.
 
         Args:
             index: 0–4 selecting the jog mode.

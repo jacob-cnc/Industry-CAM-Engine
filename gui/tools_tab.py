@@ -456,7 +456,7 @@ class Tools_Tab(QWidget):
     def _on_set_x_clicked(self, value: float) -> None:
         """Handle Set X touch-off button click — sets the G54 X origin.
 
-        Sends `G10 L20 P1 X<value>` which shifts the G54 work coordinate system
+        Sends `G7 G10 L20 P1 X<value>` (diameter mode) which shifts the G54 work coordinate system
         so that the current machine position reads `<value>` in X (diameter).
         This is a WCS origin edit — it does NOT modify the tool table and does
         NOT command any motion.
@@ -471,7 +471,9 @@ class Tools_Tab(QWidget):
         if self._linuxcnc_command is None:
             return
 
-        command = f"G10 L20 P1 X{value:.6f}"
+        # G7 in the same block guarantees the value is read as DIAMETER even if
+        # something left the interpreter in G8 (radius) mode.
+        command = f"G7 G10 L20 P1 X{value:.6f}"
         self._send_mdi_command(command)
 
     def _on_set_z_clicked(self, value: float) -> None:
@@ -511,11 +513,18 @@ class Tools_Tab(QWidget):
         if tool_data is None:
             return
 
-        # Combined X = (geometry_x + wear_x) in radius, convert to diameter for G10
+        # Combined X = (geometry_x + wear_x) in radius, convert to diameter for G10.
+        # LinuxCNC halves X words while G7 is active (interp_read.cc read_x), so
+        # G10 L1 stores this as a RADIUS machine-unit offset, which is what the
+        # tool table holds ("units ... are in machine units", 2.9.6 manual).
+        # Under G8 the same command would store 2x the intended offset, so G7
+        # is put in the same block (G7 executes before G10 in one block,
+        # interp_convert.cc convert_g).
         combined_x_diameter = (tool_data.x_offset + tool_data.x_wear) * 2.0
         combined_z = tool_data.z_offset + tool_data.z_wear
 
-        command = f"G10 L1 P{tool_number} X{combined_x_diameter:.6f} Z{combined_z:.6f}"
+        command = (f"G7 G10 L1 P{tool_number} "
+                   f"X{combined_x_diameter:.6f} Z{combined_z:.6f}")
         self._send_mdi_command(command)
 
     # ------------------------------------------------------------------

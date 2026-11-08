@@ -380,23 +380,41 @@ class MockBackend(HALBackend):
         elif axis == "z":
             self._mpg_z_counts += counts
 
-    def set_compound_enable(self, enabled: bool):
-        """Set compound-enable state (no-op in mock, no HAL pins)."""
-        pass
+    # Mock jog scales mirror industry-cam.hal mux8 index 1 (0.001"/click).
+    _MOCK_X_SCALE = 0.000125   # radius per count
+    _MOCK_Z_SCALE = 0.00025
+
+    @property
+    def compound_routing_available(self) -> bool:
+        return True
+
+    def set_compound_routing(self, enabled: bool) -> bool:
+        """Mock: no mux to switch; reset output baseline."""
+        self._compound_out = (0, 0)
+        return True
+
+    def read_compound_inputs(self):
+        return (self._mpg_x_counts, self._mpg_z_counts,
+                self._MOCK_X_SCALE, self._MOCK_Z_SCALE)
+
+    def get_joint_limits(self):
+        return (X_MIN_LIMIT / 2.0, X_MAX_LIMIT / 2.0, Z_MIN_LIMIT, Z_MAX_LIMIT)
+
+    def get_machine_position(self):
+        """(x_radius, z) — mock stores X as diameter."""
+        return (self._x_pos / 2.0, self._z_pos)
 
     def set_compound_angle(self, angle: float):
         """Set compound angle (no-op in mock, no HAL pins)."""
         pass
 
     def set_compound_jog_counts(self, x_counts: int, z_counts: int):
-        """Write compound jog counts (mock: apply as position delta).
-
-        In mock mode, directly update position to simulate the effect
-        of the HAL mux2 routing jog counts to the joints.
-        """
-        # In mock mode, the jog_increment fallback handles motion.
-        # This method exists for interface compatibility.
-        pass
+        """Mock: apply the change in cumulative counts as a position delta,
+        emulating motion's per-cycle jog-counts delta handling."""
+        last_x, last_z = getattr(self, "_compound_out", (0, 0))
+        self._x_pos += (x_counts - last_x) * self._MOCK_X_SCALE * 2.0
+        self._z_pos += (z_counts - last_z) * self._MOCK_Z_SCALE
+        self._compound_out = (x_counts, z_counts)
 
     def set_mpg_scale_index(self, index: int):
         """Set MPG jog mode index (no-op in mock — no HAL mux8 pins)."""

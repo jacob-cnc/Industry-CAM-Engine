@@ -28,8 +28,9 @@ from gui.manual.sections import (
 )
 from gui.unit_state import unit_state
 from hal import get_backend, HALBackend
-from hal.interface import TaskState, HomingState
-from hal.constants import JOG_MODES, DEFAULT_JOG_MODE_INDEX, JOG_INCREMENTS, DEFAULT_JOG_VELOCITY
+from hal.interface import TaskState, HomingState, TaskMode, InterpState
+from hal.compound_router import CompoundJogEngine
+from hal.constants import JOG_MODES, DEFAULT_JOG_MODE_INDEX, DEFAULT_JOG_VELOCITY
 from hal.compound_logic import (
     CompoundLinearLogic, CompoundArcLogic,
     Quadrant, ArcStartType,
@@ -63,14 +64,17 @@ class ManualTab(QWidget):
         self._compound_mode = "linear"  # "linear" or "arc"
         self._compound_angle = 45.0
         self._compound_mpg = "x"  # "x" or "z"
-        self._compound_last_counts = 0
-        self._compound_first_cycle = True  # Snapshot encoder on first poll
-        self._compound_x_accum = 0.0
-        self._compound_z_accum = 0.0
-        self._compound_x_out_total = 0  # Cumulative HAL output counts
-        self._compound_z_out_total = 0
         self._linear_logic = CompoundLinearLogic()
         self._arc_logic = CompoundArcLogic()
+        # Live compound engine (machine-frame); created on activation
+        self._compound_engine: Optional[CompoundJogEngine] = None
+        self._compound_suppress_logged = False
+        # Display-frame minus machine-frame offset, for drawing the arc overlay
+        self._compound_display_offset = (0.0, 0.0)
+        # Fast loop: reads the selected MPG every 20 ms while compound is active
+        self._compound_timer = QTimer(self)
+        self._compound_timer.setInterval(20)
+        self._compound_timer.timeout.connect(self._compound_tick)
 
         self._setup_ui()
         self._connect_signals()
@@ -339,6 +343,11 @@ class ManualTab(QWidget):
 
     def _on_jog_inc_changed(self, index: int):
         """Update MPG mode selection — updates both GUI state and HAL mux8."""
+        if self._compound_active and JOG_MODES[index][1]:
+            # Velocity mode drops excess counts per joint, which would bend
+            # the compound path. Leave compound mode before switching.
+            self._compound_deactivate()
+            logger.info("Compound slide deactivated: velocity MPG mode selected")
         self._jog_increment_idx = index
         if hasattr(self._backend, 'set_mpg_scale_index'):
             self._backend.set_mpg_scale_index(index)
@@ -477,35 +486,61 @@ class ManualTab(QWidget):
         else:
             self._compound_deactivate()
 
+    def _compound_refuse(self, reason: str):
+        """Revert the activate button and flash the reason for 2 s."""
+        self._compound["btn_activate"].blockSignals(True)
+        self._compound["btn_activate"].setChecked(False)
+        self._compound["btn_activate"].blockSignals(False)
+        self._compound["btn_activate"].setText(reason)
+        QTimer.singleShot(2000, lambda: self._compound["btn_activate"].setText("OFF"))
+        logger.info("Compound slide activation refused: %s", reason)
+
+    def _compound_interlock_reason(self, s) -> Optional[str]:
+        """Return why compound mode may not run, or None if it may.
+
+        Homing is intentionally NOT required (owner decision 2026-11-08: no
+        home switches yet; joint position limits still apply).
+        """
+        if s.task_state == TaskState.ESTOP:
+            return "E-STOP"
+        if not s.machine_on:
+            return "MACHINE OFF"
+        if s.task_mode != TaskMode.MANUAL:
+            return "NOT MANUAL"
+        if s.interp_state != InterpState.IDLE:
+            return "PROGRAM RUNNING"
+        return None
+
     def _compound_activate(self):
         """Activate compound slide mode."""
-        # Check interlocks
+        self._backend.poll()
         s = self._backend.state
-        if s.task_state == TaskState.ESTOP or not s.all_homed or not s.machine_on:
-            # Revert button without triggering toggled signal again
-            self._compound["btn_activate"].blockSignals(True)
-            self._compound["btn_activate"].setChecked(False)
-            self._compound["btn_activate"].blockSignals(False)
-            # Flash reason on button text for 2 seconds
-            reason = "E-STOP" if s.task_state == TaskState.ESTOP else \
-                     "NOT HOMED" if not s.all_homed else "MACHINE OFF"
-            self._compound["btn_activate"].setText(reason)
-            QTimer.singleShot(2000, lambda: self._compound["btn_activate"].setText("OFF"))
+        reason = self._compound_interlock_reason(s)
+        if reason is None and not getattr(self._backend, "compound_routing_available", False):
+            reason = "NO HAL ROUTE"
+        if reason is None and JOG_MODES[self._jog_increment_idx][1]:
+            # Force a position increment; velocity mode would distort the path.
+            self._jog["jog_inc_combo"].setCurrentIndex(DEFAULT_JOG_MODE_INDEX)
+        if reason is not None:
+            self._compound_refuse(reason)
             return
 
-        self._compound_active = True
-        self._compound_last_counts = 0
-        self._compound_first_cycle = True  # Will snapshot on next poll
-        self._compound_x_accum = 0.0
-        self._compound_z_accum = 0.0
-        self._compound_x_out_total = 0  # Cumulative output counts for HAL
-        self._compound_z_out_total = 0
-        self._linear_logic.reset()
-        self._arc_logic.reset()
+        # Switch jog-counts mux to compound output (jump-free, ~40 ms)
+        if not self._backend.set_compound_routing(True):
+            self._compound_refuse("HAL ERROR")
+            return
 
-        # Snapshot current position for arc center computation
-        current_x_r = s.x.position / 2.0  # Convert diameter to radius
-        current_z = s.z.position
+        # Machine-frame start position and real joint limits
+        mx, mz = self._backend.get_machine_position()
+        engine = CompoundJogEngine(self._backend.get_joint_limits())
+        self._arc_logic = engine.arc
+        self._linear_logic = engine.linear
+        # Graph draws (s.x.position / 2, s.z.position); keep that offset so the
+        # machine-frame arc can be drawn in the same place as the tool marker.
+        self._compound_display_offset = (s.x.position / 2.0 - mx, s.z.position - mz)
+
+        self._compound_active = True
+        current_x_r, current_z = mx, mz
 
         if self._compound_mode == "arc":
             radius_text = self._compound["input_radius"].text()
@@ -545,20 +580,33 @@ class ManualTab(QWidget):
         self._compound["btn_activate"].setText("ACTIVE")
         self._compound["btn_activate"].setChecked(True)
 
-        # Set HAL compound-enable pin (live backend only)
-        if hasattr(self._backend, 'set_compound_enable'):
-            self._backend.set_compound_enable(True)
-            self._backend.set_compound_angle(self._compound_angle)
+        # Snapshot the selected MPG and start the engine + fast loop
+        mpg_x, mpg_z, _, _ = self._backend.read_compound_inputs()
+        engine.start(mx, mz, mpg_x if self._compound_mpg == "x" else mpg_z,
+                     mode=self._compound_mode, angle_deg=self._compound_angle)
+        self._compound_engine = engine
+        self._compound_suppress_logged = False
+        self._backend.set_compound_angle(self._compound_angle)
+        self._compound_timer.start()
+        logger.info(
+            "Compound ACTIVE: mode=%s angle=%.2f mpg=%s machine x_r=%.4f z=%.4f "
+            "limits=(%.4f..%.4f, %.4f..%.4f) start_counts x=%d z=%d",
+            self._compound_mode, self._compound_angle, self._compound_mpg,
+            mx, mz, *engine.limits, mpg_x, mpg_z)
 
     def _compound_deactivate(self):
         """Deactivate compound slide mode."""
+        was_active = self._compound_active
         self._compound_active = False
+        self._compound_timer.stop()
+        if self._compound_engine is not None:
+            self._compound_engine.stop()
+            self._compound_engine = None
+        if was_active and hasattr(self._backend, "set_compound_routing"):
+            # Back to direct MPG (jump-free)
+            self._backend.set_compound_routing(False)
         self._linear_logic.reset()
         self._arc_logic.reset()
-        self._compound_x_accum = 0.0
-        self._compound_z_accum = 0.0
-        self._compound_x_out_total = 0
-        self._compound_z_out_total = 0
         self._compound["lbl_distance"].setText("0.0000\"")
 
         # Unlock selectors
@@ -572,142 +620,43 @@ class ManualTab(QWidget):
         self._compound["btn_activate"].setChecked(False)
         self._compound["btn_activate"].blockSignals(False)
 
-        # Clear HAL compound-enable pin (live backend only)
-        if hasattr(self._backend, 'set_compound_enable'):
-            self._backend.set_compound_enable(False)
-            self._backend.set_compound_jog_counts(0, 0)
-
         # Clear graph overlay
         self._clear_compound_overlay()
 
     def _update_compound(self, s):
-        """Process compound slide motion each poll cycle.
-
-        Called from _on_poll() when compound mode is active.
-        Reads MPG encoder counts, decomposes into X+Z motion,
-        and writes cumulative jog counts to HAL output pins.
-
-        The mux2 components in postgui.hal route these output counts
-        to the joints when compound-enable is true.
-
-        Also checks interlocks and force-deactivates if violated.
-
-        Args:
-            s: Current MachineState snapshot.
-        """
-        # Interlock check — force deactivate if unsafe
-        if s.task_state == TaskState.ESTOP or not s.machine_on or not s.all_homed:
+        """Interlock watchdog, called from the 100 ms poll while active."""
+        reason = self._compound_interlock_reason(s)
+        if reason is not None:
             self._compound_deactivate()
-            logger.warning("Compound slide force-deactivated: interlock violated")
+            logger.warning("Compound slide force-deactivated: %s", reason)
+
+    def _compound_tick(self):
+        """20 ms loop: selected MPG counts -> engine -> HAL compound outputs."""
+        engine = self._compound_engine
+        if not self._compound_active or engine is None:
             return
-
-        # Read MPG encoder counts from backend
-        # In live mode these come from HAL pins; in mock mode they're simulated
-        mpg_x_counts, mpg_z_counts = self._read_mpg_counts()
-
-        # Select which MPG is the input source
-        selected_counts = mpg_x_counts if self._compound_mpg == "x" else mpg_z_counts
-
-        # First cycle after activation: snapshot counts, no motion
-        if self._compound_first_cycle:
-            self._compound_last_counts = selected_counts
-            self._compound_first_cycle = False
+        mpg_x, mpg_z, x_scale, z_scale = self._backend.read_compound_inputs()
+        selected = mpg_x if self._compound_mpg == "x" else mpg_z
+        engine.angle_deg = self._compound_angle
+        # One input count travels the Z jog-scale: Z jog-scale is physical
+        # inches per count for the selected position increment (X's is radius).
+        rejected_before = engine.rejected
+        step = engine.step(selected, z_scale, x_scale, z_scale)
+        if engine.rejected != rejected_before:
+            logger.error("Compound JUMP GUARD refused a step (count, dx_r, dz, "
+                         "allowed) = %s — deactivating", engine.last_rejected)
+            self._compound_deactivate()
             return
-
-        # Compute delta
-        count_delta = selected_counts - self._compound_last_counts
-        self._compound_last_counts = selected_counts
-
-        if count_delta == 0:
+        if step is None:
+            if engine.suppressed and not self._compound_suppress_logged:
+                self._compound_suppress_logged = True
+                logger.warning(
+                    "Compound pulse suppressed (limit/arc end): x_r=%.4f z=%.4f "
+                    "limits=%s scales x=%g z=%g", engine.x_r, engine.z,
+                    engine.limits, x_scale, z_scale)
             return
-
-        # Current position in radius
-        current_x_r = s.x.position / 2.0
-        current_z = s.z.position
-
-        # Get jog scale (MPG increment)
-        jog_scale = JOG_INCREMENTS[self._jog_increment_idx]
-
-        # Dispatch to logic layer
-        if self._compound_mode == "arc":
-            x_delta, z_delta, suppressed, clamped = self._arc_logic.process_pulse(
-                count_delta, jog_scale, current_x_r, current_z
-            )
-            if suppressed or (clamped and x_delta == 0.0 and z_delta == 0.0):
-                return
-            self._arc_logic.accumulate_distance(x_delta, z_delta)
-            dist = self._arc_logic.cumulative_distance
-        else:
-            x_delta, z_delta = self._linear_logic.decompose_pulse(
-                count_delta, jog_scale, abs(self._compound_angle)
-            )
-            # Apply axis coupling based on angle sign:
-            # Positive angle: cross (X−Z+) — negate X only
-            # Negative angle: same (X−Z−) — negate both
-            if self._compound_angle > 0:
-                x_delta = -x_delta  # X toward center, Z away from chuck
-            else:
-                x_delta = -x_delta  # X toward center
-                z_delta = -z_delta  # Z toward chuck
-            x_delta, z_delta, suppressed = self._linear_logic.check_soft_limits(
-                current_x_r, current_z, x_delta, z_delta
-            )
-            if suppressed:
-                return
-            self._linear_logic.accumulate_distance(x_delta, z_delta)
-            dist = self._linear_logic.cumulative_distance
-
-        # Update distance display
-        self._compound["lbl_distance"].setText(f"{dist:.4f}\"")
-
-        # Convert distance deltas to integer jog counts via fractional accumulators
-        if jog_scale > 0:
-            self._compound_x_accum += x_delta / jog_scale
-            self._compound_z_accum += z_delta / jog_scale
-
-        x_counts_out = int(self._compound_x_accum)
-        z_counts_out = int(self._compound_z_accum)
-        self._compound_x_accum -= x_counts_out
-        self._compound_z_accum -= z_counts_out
-
-        # Accumulate total output counts and write to HAL pins
-        self._compound_x_out_total += x_counts_out
-        self._compound_z_out_total += z_counts_out
-
-        if hasattr(self._backend, 'set_compound_jog_counts'):
-            # HAL pin-based output (live mode with mux2 routing)
-            self._backend.set_compound_jog_counts(
-                self._compound_x_out_total,
-                self._compound_z_out_total
-            )
-        else:
-            # Fallback: jog_increment commands (mock mode / no HAL component)
-            if x_counts_out != 0:
-                direction = 1.0 if x_counts_out > 0 else -1.0
-                for _ in range(abs(x_counts_out)):
-                    self._backend.jog_increment(0, direction, self._jog_velocity, jog_scale)
-
-            if z_counts_out != 0:
-                direction = 1.0 if z_counts_out > 0 else -1.0
-                for _ in range(abs(z_counts_out)):
-                    self._backend.jog_increment(1, direction, self._jog_velocity, jog_scale)
-
-    def _read_mpg_counts(self) -> tuple:
-        """Read MPG encoder counts from the backend.
-
-        In live mode: reads HAL pins encoder.03.count and encoder.04.count.
-        In mock mode: returns simulated counts (0 unless externally driven).
-
-        Returns:
-            (mpg_x_counts, mpg_z_counts) — raw integer encoder counts.
-        """
-        # The mock backend doesn't simulate MPG counts directly.
-        # In live mode, these would come from HAL pin reads.
-        # For now, return the backend's internal MPG state if available,
-        # otherwise 0 (no MPG motion in offline mode unless simulated).
-        if hasattr(self._backend, '_mpg_x_counts'):
-            return (self._backend._mpg_x_counts, self._backend._mpg_z_counts)
-        return (0, 0)
+        self._backend.set_compound_jog_counts(step.x_total, step.z_total)
+        self._compound["lbl_distance"].setText(f"{step.distance:.4f}\"")
 
     def _on_compound_mode_changed(self, index: int):
         """Handle mode switch between Linear and Arc."""
@@ -870,8 +819,9 @@ class ManualTab(QWidget):
         elif self._compound_mode == "arc":
             points = self._arc_logic.get_arc_points(40)
             if points:
-                z_coords = [p[1] for p in points]
-                x_coords = [p[0] for p in points]
+                off_x, off_z = self._compound_display_offset
+                z_coords = [p[1] + off_z for p in points]
+                x_coords = [p[0] + off_x for p in points]
                 item = self._graph.plot(z_coords, x_coords, pen=pen)
                 self._compound_overlay_items = [item]
 

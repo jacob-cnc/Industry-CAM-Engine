@@ -1,54 +1,14 @@
 # ============================================================================
-# postgui.hal — MPG routing with compound-slide mux support
+# postgui.hal — NOT LOADED BY THIS CONFIG
 #
-# Two routing modes controlled by compound-slide.compound-enable:
-#   OFF (default): MPG encoder counts go directly to joints (normal jog)
-#   ON:  compound-slide component outputs go to joints (compound jog)
+# industry-cam.ini has no POSTGUI_HALFILE and DISPLAY = display_gui.sh is a
+# plain program, so LinuxCNC never runs this file.
 #
-# The compound-slide HAL component is created by the GUI's LiveBackend.
-# If it doesn't exist (offline mode or component creation fails), the
-# mux2 components fall through to their default (input 0 = direct MPG).
+# The MPG / compound-slide jog routing now lives in industry-cam.hal
+# (section "MPG jog-counts routing"), and hal/live_backend.py attaches the
+# compound-slide component's pins to those signals at GUI startup.
+#
+# The previous contents used mux2 (float-only) on s32 jog-counts pins and
+# could not have loaded; see
+# session-notes/2026-11-08-compound-slide-routing.md and RISK_REGISTER R-012.
 # ============================================================================
-
-# --- Load mux2 components for X and Z jog count routing ---
-loadrt mux2 names=mux2.x-jog,mux2.z-jog
-addf mux2.x-jog servo-thread
-addf mux2.z-jog servo-thread
-
-# --- MPG jog scale (mux8 for increment/velocity selection) ---
-# Index 0: 0.0002" pos  (sel2=0, sel1=0, sel0=0)
-# Index 1: 0.001"  pos  (sel2=0, sel1=0, sel0=1) — default
-# Index 2: Vel Slow     (sel2=0, sel1=1, sel0=0)
-# Index 3: Vel Med      (sel2=0, sel1=1, sel0=1)
-# Index 4: Vel Fast     (sel2=1, sel1=0, sel0=0)
-net mpg-scale-sel0 compound-slide.mpg-scale-sel0 => mux8.jogscale-x.sel0 mux8.jogscale-z.sel0
-net mpg-scale-sel1 compound-slide.mpg-scale-sel1 => mux8.jogscale-x.sel1 mux8.jogscale-z.sel1
-net mpg-scale-sel2 compound-slide.mpg-scale-sel2 => mux8.jogscale-x.sel2 mux8.jogscale-z.sel2
-
-# --- jog-vel-mode: velocity mode when sel1 OR sel2 is HIGH ---
-net mpg-scale-sel1 => or2.jog-vel-mode.in0
-net mpg-scale-sel2 => or2.jog-vel-mode.in1
-net jog-vel-mode-sig or2.jog-vel-mode.out => joint.0.jog-vel-mode axis.x.jog-vel-mode joint.1.jog-vel-mode axis.z.jog-vel-mode
-
-# --- Feed MPG encoder counts to compound-slide component ---
-net mpg-x-counts => compound-slide.mpg-x-in
-net mpg-z-counts => compound-slide.mpg-z-in
-
-# --- Feed jog scale to compound-slide (from mux8 output) ---
-net mpg-x-scale => compound-slide.jog-scale
-
-# --- Mux2 routing: select between direct MPG and compound output ---
-# Input 0 (sel=0, default): direct MPG counts (normal jog)
-# Input 1 (sel=1): compound-slide decomposed counts (compound jog)
-
-# X axis mux
-net mpg-x-counts      => mux2.x-jog.in0
-net compound-x-jog    compound-slide.x-jog-counts => mux2.x-jog.in1
-net compound-enable   compound-slide.compound-enable => mux2.x-jog.sel
-net x-jog-final       mux2.x-jog.out => joint.0.jog-counts axis.x.jog-counts
-
-# Z axis mux
-net mpg-z-counts      => mux2.z-jog.in0
-net compound-z-jog    compound-slide.z-jog-counts => mux2.z-jog.in1
-net compound-enable   => mux2.z-jog.sel
-net z-jog-final       mux2.z-jog.out => joint.1.jog-counts axis.z.jog-counts

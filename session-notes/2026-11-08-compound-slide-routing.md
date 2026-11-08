@@ -1,0 +1,91 @@
+# 2026-11-08 — Compound-slide MPG routing (machine-control)
+
+Branch `claude/compound-slide-routing`. Owner decision: no homing requirement.
+
+## Findings on the previous design
+
+1. `postgui.hal` is never loaded (no `POSTGUI_HALFILE`), and its `mux2` is
+   float-only — `net` of s32 jog-counts into it fails. It never ran.
+2. Motion applies `jog-counts` **deltas** each servo cycle
+   (`reference/linuxcnc-2.9.6-source/src/emc/motion/control.c:1063-1066`).
+   Switching a mux between raw MPG (e.g. 12000) and a compound total starting at
+   0 is a -12000-count step = ~1.5" X jog. The old design had no protection.
+3. The GUI converted with one scale for both axes; X (radius, 0.000125/count)
+   and Z (0.00025/count) differ, so 45 deg ran at ~27 deg and 4-8x per-click travel.
+4. Compound soft limits used `hal/constants.py` values that disagree with the
+   INI (Z -3..3 in INI vs 0..23.5), and required homing.
+5. Python loop ran at 10 Hz.
+
+## Design implemented
+
+- `industry-cam.hal`: `mux_generic config="ss2,ss2"` per joint; in0 = encoder
+  count (default), in1 = `compound-x/z-jog` (writer attached by GUI);
+  `compound-enable` selects. jog-enable = `halui.machine.is-on` AND NOT
+  `compound-jog-inhibit`. Motion copies the new count into its old-count while
+  jog-enable is FALSE (control.c 1066 precedes the enable check at 1088; same
+  pattern for axis jogwheels), so a switch made while inhibited causes no motion.
+  Routing functions run between `hm2 read` and `motion-command-handler`.
+- `hal/live_backend.py`: verifies the routing signals exist (halcmd would
+  otherwise silently create them), nets compound-slide pins with inhibit held,
+  `set_compound_routing()` = inhibit -> zero outputs -> flip mux -> 20 ms -> release.
+- `hal/compound_router.py` `CompoundJogEngine`: machine-frame, per-joint scales,
+  fractional accumulators, virtual position tracks emitted counts, real joint limits.
+- `gui/manual/manual_tab.py`: interlocks = not E-stop, machine on, MANUAL, interp
+  idle; forces position MPG increment; 20 ms loop; velocity selection exits compound.
+- One input count travels the Z jog-scale (0.001"/click at index 1) along the path.
+
+## Software verification
+
+- 20 new unit tests (`tests/unit/test_compound_routing.py`), 64 existing compound
+  tests pass. Full suite: 316 passed, 6 failed (pre-existing quadrant-arc
+  failures, same as Codex baseline at 1f490eb), 2 skipped, 2 xfailed, 2 xpassed.
+- Mock end-to-end (offscreen ManualTab): 30 deg request -> 29.97 deg, 400 counts
+  -> 0.0998" path; velocity mode forced to 0.001; interlocks refuse.
+
+## Commissioning plan (NOT yet run)
+
+Rollback: `git checkout lathe-tested-2026-11-08 -- industry-cam.hal` restores the
+direct MPG nets; GUI then logs "Compound-slide routing unavailable" and normal
+jogging is unaffected.
+
+1. LinuxCNC closed: `scripts/check_compound_hal_routing.sh` -> ALL CHECKS PASSED.
+2. Start LinuxCNC. Log shows compound nets established, no "unavailable" error.
+   `halcmd show sig compound-enable` / `x-jog-final` / `mpg-jog-enable` wired as designed.
+3. Machine ON, compound OFF: normal MPG jog both axes at .0002 — must feel identical.
+4. Motors-on, tool clear, compound ACTIVATE/DEACTIVATE 5x without turning MPGs
+   while watching DRO X/Z: **zero motion** at each switch (the jump test).
+5. Turn MPGs before/between switches to build large raw counts, repeat step 4.
+6. Linear 45 deg, .0002 increment, X MPG: small rotations; X and Z DRO change by
+   equal radius amounts (X DRO shows the G8/G7 issue — compare raw joint
+   positions via `halcmd getp joint.0.pos-cmd` / `joint.1.pos-cmd`). Reverse returns.
+7. 29.5 deg and -45 deg direction check; E-stop while active deactivates.
+8. Arc mode, small radius, clear air.
+
+## Machine evidence
+
+- Routing check script: ALL CHECKS PASSED (LinuxCNC closed).
+- Normal MPG jog through the new mux: owner reports unchanged.
+- Jump test: activate/deactivate in linear and arc mode -> no motion (owner).
+- First compound run: no motion — INI joint limits applied to unhomed (arbitrary)
+  machine coordinates suppressed every pulse. Fixed 2472d4b (LinuxCNC
+  refresh_jog_limits semantics).
+- Linear 45 deg: joint X -0.2001 r / Z +0.2003 -> true 45 deg. DRO showed radius
+  -> fixed e7945e6 (diameter display, G7 startup). Owner: angle + display correct.
+- Arc (R 0.5, GUI SE + Arc Top, 0.001 mode): ran the whole quadrant in one click
+  at jog speed (log: x_r 0.0945 -> 0.5945, z 0 -> -0.5). Cause: inherited
+  atan2 wrap at the start boundary clamped to the FAR end. Fixed: arc angle is
+  tracked directly and clamped; MPG forward always moves into the arc from the
+  start point; engine jump guard refuses any step larger than the commanded path
+  (GUI deactivates compound and logs an error).
+- Arc re-test after 515ff2f (owner: all 4 quadrants x Arc Top/Bottom "looked
+  good", R 0.25, 0.001 mode). Log evidence, machine joint units (X radius):
+    start (0.0001, 0.0000)  -> end (-0.2499, 0.2500)   d = (-0.2500, +0.2500)
+    start (-0.2498, 0.2500) -> end (0.0002, 0.5000)    d = (+0.2500, +0.2500)
+    start (-0.3489, 0.4800) -> end (-0.5989, 0.2300)   d = (-0.2500, -0.2500)
+    start (-0.3490, 0.4800) -> end (-0.0990, 0.7300)   d = (+0.2500, +0.2500)
+  i.e. exactly R in X (radius) and Z, stopping at the quadrant end. Four other
+  activations: first backward click at the start produced no motion (logged
+  as suppressed at the start position). No jump-guard errors. Remaining
+  activations were ended before the arc end, so their totals are not logged.
+- Status: compound linear + arc MACHINE-VERIFIED 2026-11-08 (owner observation +
+  log). R-012 can close once merged to main.

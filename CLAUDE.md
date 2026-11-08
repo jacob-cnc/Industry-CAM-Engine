@@ -99,7 +99,7 @@ Triggered = `.in` HIGH = `.in_not` LOW (sourcing type)
 **HAL flags:**
 - `HOME_SEARCH_VEL=0` — home-in-place, no switch search
 - `NO_FORCE_HOMING=1` — can run without homing
-- `postgui.hal` is **NOT loaded** — the INI has no `POSTGUI_HALFILE` and `DISPLAY = display_gui.sh` is a plain program. MPG counts route directly in `industry-cam.hal` (`mpg-x/z-counts => joint.N.jog-counts`). `hal/live_backend.py` wires only the mpg-scale-sel / jog-vel-mode nets at runtime via `halcmd`. Do not move the jog-counts route to `postgui.hal`/mux2 until LiveBackend wires that full chain (this broke MPGs on 2026-11-07).
+- `postgui.hal` is **NOT loaded** (stub only) — the INI has no `POSTGUI_HALFILE` and `DISPLAY = display_gui.sh` is a plain program. All MPG routing is in `industry-cam.hal`: `mux_generic` (`mux-gen.00` X, `mux-gen.01` Z, s32) selects direct MPG counts (default) or `compound-slide.x/z-jog-counts`; jog-enable = `halui.machine.is-on` AND NOT `compound-jog-inhibit`. `hal/live_backend.py` attaches the compound-slide pins to those signals at GUI startup and holds the inhibit while switching the mux (jump-free). With no GUI attached, routing falls back to direct MPG.
 - `custom.hal` listed in INI (must exist or LinuxCNC fails to start)
 
 ---
