@@ -99,7 +99,7 @@ Triggered = `.in` HIGH = `.in_not` LOW (sourcing type)
 **HAL flags:**
 - `HOME_SEARCH_VEL=0` — home-in-place, no switch search
 - `NO_FORCE_HOMING=1` — can run without homing
-- `postgui.hal` active (direct MPG routing, no compound-slide)
+- `postgui.hal` is **NOT loaded** — the INI has no `POSTGUI_HALFILE` and `DISPLAY = display_gui.sh` is a plain program. MPG counts route directly in `industry-cam.hal` (`mpg-x/z-counts => joint.N.jog-counts`). `hal/live_backend.py` wires only the mpg-scale-sel / jog-vel-mode nets at runtime via `halcmd`. Do not move the jog-counts route to `postgui.hal`/mux2 until LiveBackend wires that full chain (this broke MPGs on 2026-11-07).
 - `custom.hal` listed in INI (must exist or LinuxCNC fails to start)
 
 ---
@@ -140,7 +140,7 @@ Industry CAM Engine/
 │
 ├── industry-cam.*     LinuxCNC machine config (deployed to Linux)
 ├── custom.hal         HAL additions
-├── postgui.hal        Post-GUI HAL connections
+├── postgui.hal        Post-GUI HAL connections (NOT loaded by this config)
 ├── tool.tbl           Tool table
 ├── *.sh               Linux launcher/utility scripts
 ├── *.bat              Windows dev launchers

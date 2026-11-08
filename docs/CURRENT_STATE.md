@@ -57,6 +57,10 @@ Based on the latest commissioning notes:
 - Spindle encoder reads.
 - Physical E-stop input is connected.
 - Manual operation is stable with the settled May 26 tuning values.
+- 2026-11-08: Tools-tab Set X/Set Z set the G54 origin (`G10 L20 P1`) and MPG
+  jogging continues immediately afterward. Ribbon shows LinuxCNC task mode.
+  MPG jog-counts are routed directly in `industry-cam.hal`; `postgui.hal` is not
+  loaded by this config. See `session-notes/2026-11-08-touchoff-mode-indicator-gui-fit.md`.
 
 ## Current Machine Configuration
 
