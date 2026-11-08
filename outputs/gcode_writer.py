@@ -322,11 +322,11 @@ class GCodeWriter:
                 for j, move in enumerate(p.moves):
                     lines.append(self._emit_move(move, f"Cleanup move {j+1}"))
 
-            if same_tool:
-                # Same tool — just retract normally, no tool change
-                lines.append(self._rapid(safe_x, self._z, "Retract X after cleanup"))
-                lines.append(self._rapid(safe_x, pr.stock.z_start, "Traverse Z to Z_start"))
-            else:
+            if pr.cleanup_passes[-1].retract_moves is None:
+                raise ValueError("Cleanup pass is missing its planned diagonal retract.")
+            for retract in pr.cleanup_passes[-1].retract_moves:
+                lines.append(self._emit_move(retract, "Diagonal retract after cleanup"))
+            if not same_tool:
                 # Different tool — retract to park, stop for tool change
                 lines.append(self._line("G40", "Cutter comp off for tool change"))
                 lines.extend(self._safe_retract_to_park(
@@ -407,6 +407,12 @@ class GCodeWriter:
                 for j, move in enumerate(p.moves):
                     lines.append(self._emit_move(move, f"{label}: move {j+1}"))
             lines.append("")
+
+        if pr.finish_passes:
+            if pr.finish_passes[-1].retract_moves is None:
+                raise ValueError("Finish pass is missing its planned diagonal retract.")
+            for retract in pr.finish_passes[-1].retract_moves:
+                lines.append(self._emit_move(retract, "Diagonal retract after final finish/spring"))
 
         # End
         lines.append("; === PROGRAM END ===")

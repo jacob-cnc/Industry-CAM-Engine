@@ -50,6 +50,7 @@ class TurningPass:
     moves: List[ToolMove]
     swept_region: Optional[SweptRegion] = None
     is_spring_pass: bool = False
+    retract_moves: Optional[Tuple[ToolMove, ...]] = None  # Planned exit, including terminal finish.
     approach_moves: Tuple[ToolMove, ...] = ()  # Pipeline-planned, validated incoming link.
 
 

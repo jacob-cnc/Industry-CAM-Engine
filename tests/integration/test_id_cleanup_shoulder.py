@@ -36,7 +36,7 @@ def test_gch_cleanup_cuts_wall_then_shoulder_before_retract(strategy, passes, sp
     shoulder_index = parsed.index(feeds[-1])
     assert parsed[shoulder_index + 1].move_type == MoveType.RAPID
     assert parsed[shoulder_index + 1].x == pytest.approx(2.985)
-    assert parsed[shoulder_index + 1].z == pytest.approx(-.567)
+    assert parsed[shoulder_index + 1].z == pytest.approx(.05)
 
 
 def test_wall_only_cleanup_keeps_existing_bottom_allowance():

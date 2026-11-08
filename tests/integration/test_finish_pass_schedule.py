@@ -50,6 +50,7 @@ def test_cutting_passes_remove_allowance_and_spring_repeats_final(mode, strategy
     assert [m.z for m in emitted_cuts] == pytest.approx([m.z for m in expected_moves])
     # All finish-to-finish links in output are the links already validated by pipeline.
     links = [m for p in plan.finish_passes[1:] for m in p.approach_moves]
+    links += list(plan.finish_passes[-1].retract_moves)
     rapid_moves = [m for m in emitted if m.move_type == MoveType.RAPID][2:]
     assert [m.x for m in rapid_moves] == pytest.approx([m.x for m in links])
     assert [m.z for m in rapid_moves] == pytest.approx([m.z for m in links])
