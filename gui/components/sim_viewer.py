@@ -27,6 +27,7 @@ from PyQt5.QtGui import QFont, QTextCursor, QColor, QTextCharFormat
 
 from gui.components.graph_widget import MachiningGraphWidget
 from gui.colors import COLORS, FONTS
+from gui.components.elided_label import ElidedLabel
 from outputs.graph_adapter import GraphData
 from models.moves import MoveType
 
@@ -560,7 +561,7 @@ class SimViewerWidget(QWidget):
         btn_style = (
             f"QPushButton {{ background-color: {COLORS['bg_surface']};"
             f" color: {COLORS['text_primary']}; border: 1px solid {COLORS['border_normal']};"
-            f" border-radius: 4px; padding: 4px 8px; min-height: 28px;"
+            f" border-radius: 4px; padding: 4px 5px; min-height: 28px;"
             f" font-weight: bold; }}"
             f"QPushButton:hover {{ background-color: {COLORS['btn_primary_hover']}; }}"
         )
@@ -643,11 +644,13 @@ class SimViewerWidget(QWidget):
         )
         bar_layout.addWidget(self._frame_label)
 
-        self._info_label = QLabel("Ready")
+        # ElidedLabel instead of a 240 px min-width QLabel: per-move info text
+        # can be long and must not widen the window.
+        self._info_label = ElidedLabel("Ready", min_width=120)
         self._info_label.setStyleSheet(
-            f"color: {COLORS['text_secondary']}; font-size: 9pt; min-width: 240px;"
+            f"color: {COLORS['text_secondary']}; font-size: 9pt;"
         )
-        bar_layout.addWidget(self._info_label)
+        bar_layout.addWidget(self._info_label, stretch=1)
 
         return bar
 
