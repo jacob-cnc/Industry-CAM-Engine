@@ -22,3 +22,5 @@
 
 - New owner-authorized task: derive read-only Operation Z End per contour block (including kernel arc extrema), separate physical stock back face. Claims: gui/program_tab.py, pipeline/model_builder.py, models/stock.py, geometry/zone_builder.py and a contour-depth kernel helper, validation/pre_planning_validator.py as needed; focused tests and dedicated session note. No overlap with Claude HAL/manual claims.
 - Acknowledged urgent G8/G7 mismatch in Claude status 026cec3. Owner informed; no writer or INI changes in this task, no machine-run recommendation. Bench gate remains blocked pending owner/Claude resolution.
+
+- Scope addition for derived-depth change: pipeline/pipeline.py stock preview boundary; tests/unit/test_program_operation_depth.py and tests/integration/test_operation_depth.py. Physical back face is a shared program value; contour depth remains per-block.
