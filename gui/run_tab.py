@@ -22,6 +22,7 @@ from PyQt5.QtWidgets import (
     QFrame, QMessageBox,
 )
 
+from gui.components.elided_label import ElidedLabel
 from gui.colors import COLORS, FONTS
 from gui.components.sim_viewer import SimViewerWidget, parse_gcode_for_sim, GCodePanel
 from outputs.graph_adapter import convert_from_moves
@@ -210,6 +211,16 @@ class RunTab(QWidget):
         self._status_file.setMaximumWidth(300)
         bar_layout.addWidget(self._status_file)
 
+        # Last LinuxCNC error for this program (e.g. a soft-limit rejection at
+        # cycle start) — cleared on the next start. Full text in tooltip.
+        self._status_error = ElidedLabel("", min_width=120)
+        self._status_error.setStyleSheet(
+            f"color: {COLORS['text_primary']}; background-color: {COLORS['status_error']};"
+            f" border-radius: 4px; padding: 2px 6px; font-size: 9pt;"
+        )
+        self._status_error.setVisible(False)
+        bar_layout.addWidget(self._status_error, stretch=1)
+
         return bar
 
     # =================================================================
@@ -235,6 +246,15 @@ class RunTab(QWidget):
             self._poll_timer.start()
         else:
             self._poll_timer.stop()
+
+    def show_error(self, msg: str):
+        """Show a LinuxCNC error in the Run tab status bar until the next start."""
+        self._status_error.setText(f"! {msg}")
+        self._status_error.setVisible(True)
+
+    def clear_error(self):
+        self._status_error.setText("")
+        self._status_error.setVisible(False)
 
     def load_file(self, path: str):
         """Load a G-code file programmatically (e.g., from Edit tab)."""
@@ -336,6 +356,7 @@ class RunTab(QWidget):
         """Start program execution from line 1."""
         if not self._gcode_path:
             return
+        self.clear_error()
         success = self._backend.program_run(start_line=0)
         if success:
             self._set_running_state()
@@ -362,6 +383,7 @@ class RunTab(QWidget):
         if not self._gcode_path:
             return
         line = self._line_spin.value() - 1  # Convert 1-based to 0-based
+        self.clear_error()
         success = self._backend.program_run(start_line=max(0, line))
         if success:
             self._set_running_state()

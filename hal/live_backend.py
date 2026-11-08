@@ -327,6 +327,7 @@ class LiveBackend(HALBackend):
             self._cmd.abort()
             self._cmd.wait_complete()
         self._cmd.mode(mode)
+        self._cmd.wait_complete()   # as AXIS ensure_mode does
         return True
 
     def set_mode_manual(self) -> bool:
@@ -524,9 +525,19 @@ class LiveBackend(HALBackend):
     # ------------------------------------------------------------------
 
     def program_open(self, path: str) -> bool:
+        """Open a program WITHOUT changing task mode.
+
+        Matches stock AXIS (open_file_guts): the file is opened in the current
+        mode and AUTO is entered only at cycle start (program_run). Switching
+        to AUTO on load left the controller in AUTO, where LinuxCNC ignores MPG
+        jog counts (bench 2026-11-08).
+        """
         try:
-            if not self._ensure_mode(linuxcnc.MODE_AUTO):
-                return False
+            self._stat.poll()
+            if self._stat.interp_state != linuxcnc.INTERP_IDLE:
+                return False   # never reload under a running/paused program
+            self._cmd.task_plan_synch()
+            self._cmd.wait_complete()
             self._cmd.program_open(path)
             return True
         except linuxcnc.error:
@@ -595,7 +606,9 @@ class LiveBackend(HALBackend):
             if not self._ensure_mode(linuxcnc.MODE_MDI):
                 return False
             axis_letter = "X" if axis == 0 else "Z"
-            self._cmd.mdi(f"G10 L20 P{system} {axis_letter}{value:.6f}")
+            # X value is DIAMETER: force G7 in the same block (see tools_tab)
+            prefix = "G7 " if axis == 0 else ""
+            self._cmd.mdi(f"{prefix}G10 L20 P{system} {axis_letter}{value:.6f}")
             self._cmd.wait_complete()
             self._ensure_mode(linuxcnc.MODE_MANUAL)
             return True

@@ -61,6 +61,7 @@ class MainWindow(QMainWindow):
         self._set_initial_tool()
 
         self._prev_estop = False
+        self._auto_idle_polls = 0
 
         # Status bar poll timer — updates position, RPM, feed, tool, gcodes
         from PyQt5.QtCore import QTimer
@@ -181,6 +182,7 @@ class MainWindow(QMainWindow):
         self._status_bar.reset_clicked.connect(self._backend.estop_reset)
         self._status_bar.machine_on_clicked.connect(self._backend.machine_on)
         self._status_bar.machine_off_clicked.connect(self._backend.machine_off)
+        self._status_bar.mode_clicked.connect(self._on_mode_clicked)
 
     # ------------------------------------------------------------------
     # Signal Slots
@@ -256,6 +258,21 @@ class MainWindow(QMainWindow):
         self._setup_tab.set_active(current is self._setup_tab)
         self._run_tab.set_active(current is self._run_tab)
 
+    def _on_mode_clicked(self):
+        """Ribbon mode chip clicked: return to MANUAL, but never interrupt a
+        running or paused program."""
+        from hal.interface import InterpState, TaskMode
+        self._backend.poll()
+        s = self._backend.state
+        if s.task_mode == TaskMode.MANUAL:
+            return
+        if s.interp_state != InterpState.IDLE:
+            self._status_bar.show_error("Program active - stop it before leaving AUTO")
+            logger.info("Mode chip click ignored: interpreter %s", s.interp_state.value)
+            return
+        logger.info("Mode chip click: returning to MANUAL from %s", s.task_mode.value)
+        self._backend.set_mode_manual()
+
     def _on_estop_clicked(self):
         """Handle E-Stop button press — trigger estop on backend.
 
@@ -281,7 +298,7 @@ class MainWindow(QMainWindow):
         self._status_bar.update_position(s.x.position, s.z.position)
 
         # Machine state
-        from hal.interface import InterpState, TaskState
+        from hal.interface import InterpState, TaskState, TaskMode
         if s.estop_active:
             state_str = "ESTOP"
         elif s.interp_state == InterpState.READING:
@@ -295,6 +312,19 @@ class MainWindow(QMainWindow):
         # Task mode (MANUAL / MDI / AUTO) — flags MDI wedging that silently
         # disables MPG jogging.
         self._status_bar.update_mode(s.task_mode.value)
+
+        # Return to MANUAL whenever LinuxCNC sits in AUTO with the interpreter
+        # idle (program finished, stopped, or rejected at cycle start). LinuxCNC
+        # ignores MPG jog counts outside MANUAL, and nothing else switches back.
+        # Two consecutive polls (>=200 ms) so the AUTO->RUN handoff at cycle
+        # start is never interrupted. PAUSED / WAITING (M0, M6) are not IDLE.
+        if s.task_mode == TaskMode.AUTO and s.interp_state == InterpState.IDLE:
+            self._auto_idle_polls += 1
+            if self._auto_idle_polls == 2:
+                logger.info("AUTO and idle: returning to MANUAL")
+                self._backend.set_mode_manual()
+        else:
+            self._auto_idle_polls = 0
 
         # Spindle
         rpm = int(s.spindle.speed)
@@ -319,6 +349,7 @@ class MainWindow(QMainWindow):
         # Errors: prefer the error channel message; fall back to ESTOP transition
         if s.error_message:
             self._status_bar.show_error(s.error_message)
+            self._run_tab.show_error(s.error_message)
         elif s.estop_active and not self._prev_estop:
             self._status_bar.show_error("E-STOP")
 
