@@ -95,6 +95,16 @@ def serialize_tool(tool: ToolCardData) -> str:
         f"I{i_str} J{j_str} Q{tool.orientation} "
         f";{metadata}"
     )
+    # v2.9.6 emctool.h: CANON_TOOL_ENTRY_LEN is 256, including the
+    # newline/terminator. Its rewrite pads T/P and prints six decimal angles.
+    # Budget that (longer) form too, not just the application comment length.
+    rewritten = (
+        f"T{tool.tool_number:<3d} P{tool.tool_number:<3d} "
+        f"D{nose_diameter:+f} X{x_applied:+f} Z{tool.z_offset + tool.z_wear:+f} "
+        f"I{tool.front_angle:+f} J{tool.back_angle:+f} Q{tool.orientation} ;{metadata}\n"
+    )
+    if max(len((line + "\n").encode("utf-8")), len(rewritten.encode("utf-8"))) >= 256:
+        raise ValueError("Tool entry exceeds LinuxCNC's 256-byte line/rewrite limit; shorten its description.")
     return line
 
 

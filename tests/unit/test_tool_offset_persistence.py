@@ -48,6 +48,17 @@ def test_linuxcnc_reordered_zero_omitting_rewrite_preserves_split():
     assert changed.x_wear == .001
 
 
+def test_entry_fits_linuxcnc_full_line_and_rewrite_buffer(tmp_path):
+    path = tmp_path / "tool.tbl"
+    save_tool_table([tool()], str(path))
+    before = path.read_bytes()
+    oversized = tool()
+    oversized.description = "x" * 95
+    with pytest.raises(ValueError, match="256-byte"):
+        save_tool_table([oversized], str(path))
+    assert path.read_bytes() == before
+
+
 def test_legacy_application_nonzero_x_is_not_guessed_or_silently_skipped(tmp_path):
     path = tmp_path / "old.tbl"
     path.write_text("T2 P2 X1 Z0 Q5 ;type=boring_bar|insert=DCMT\n")

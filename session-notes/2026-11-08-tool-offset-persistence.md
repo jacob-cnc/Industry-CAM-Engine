@@ -16,7 +16,8 @@ Software-verified only; no lathe deployment or measured-cut claim.
 - Metadata schema `ice=2|xwear=...|zwear=...` survives a LinuxCNC rewrite, including
   changed applied totals. Parsing accepts reordered words and omitted zero fields.
   Descriptions/inserts are escaped, and oversized metadata is rejected rather than
-  risking a truncated wear split. This two-axis QCTP editor rejects nonzero extra
+  risking a truncated wear split. The full entry and the padded/six-decimal
+  LinuxCNC rewrite must both fit CANON_TOOL_ENTRY_LEN=256 (emctool.h:26). This two-axis QCTP editor rejects nonzero extra
   axes, unsupported Q0 orientation, and P != T rather than silently remapping them.
 - Both pipeline.tool_table_io and the older public pipeline.file_io APIs use the
   same serializer. No generator, simulation scaling, or G-code output is changed.
@@ -98,8 +99,8 @@ reload once on the installed 2.9.6 runtime. Abort unexpected motion, dimensional
 change, controller error, or synchronization failure. Roll back software and the
 matching preserved table together; do not overwrite machine-local G54 offsets.
 
-Final software results: 42 focused tool-table/persistence tests pass. Full suite:
-356 passed, the same six pre-existing quadrant-arc failures, 2 skipped, 2 xfailed,
+Final software results: 43 focused tool-table/persistence cases pass in the full run. Full suite:
+357 passed, the same six pre-existing quadrant-arc failures, 2 skipped, 2 xfailed,
 2 xpassed. Architecture check: 69 errors, 179 warnings (existing source findings).
 Eight-tab mock GUI smoke and git diff --check pass. No changes to outputs/,
 Claude's four reserved methods, tool.tbl, INI, or HAL relative to 549bcc4.
