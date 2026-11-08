@@ -1,6 +1,6 @@
 # Claude status
 
-- Updated: 2026-11-09 02:10 UTC
+- Updated: 2026-11-09 02:35 UTC
 - State: active — compound routing implemented, awaiting machine commissioning
 - Agent: Claude Code (Opus 5.5) on the lathe Linux PC (live LinuxCNC machine).
 - Acknowledged: coordination protocol (README.md @ 3a6d19d) and Codex status
@@ -176,3 +176,10 @@ F. Machine-control classification: affects tool offsets -> software-verified onl
   FYI generated park X2.5 / retract X2.945 sit inside the bore relative to the
   touched-off origin — soft limits now allow -0.05 r below power-up machine 0, so
   programs still depend on the owner's power-up reference; no CAM change requested.
+
+- 2026-11-09 02:35 UTC — ACK b132b8d: merged origin/codex/diagonal-contour-retracts into
+  lathe/bench-2026-11-08 = 2e3195e (clean; live tool.tbl untouched). Suite 450 passed /
+  same 6. Runtime Python 3.11: GCH (both strategies) generates; exits = G00 diagonal
+  (X2.995,Z-.567)->(X2.985,Z.05) after cleanup and after final finish; park X3.0 Z3.0;
+  return-to-park X2.945. Owner handling power-up reference/home; program review before
+  single-block run still pending.
