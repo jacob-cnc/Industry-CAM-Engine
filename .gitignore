@@ -24,3 +24,7 @@ backups/
 # OS
 .DS_Store
 Thumbs.db
+
+# Per-machine tool editor configuration
+.tool_tab_settings.json
+*.tbl.bak.*

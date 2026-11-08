@@ -14,6 +14,9 @@ This tab is usable in offline mode (no LinuxCNC dependency).
 import json
 import os
 import logging
+import hashlib
+from copy import deepcopy
+from pathlib import Path
 from typing import Optional, List
 
 from PyQt5.QtCore import Qt, pyqtSignal
@@ -71,6 +74,9 @@ class Tools_Tab(QWidget):
         self._cards: List[ToolGeometryRow] = []
         self._selected_index: int = -1
         self._active_file_path: Optional[str] = None
+        self._table_revision = None
+        self._loaded_tools = []
+        self._table_sync_failed = False
 
         # LinuxCNC stat/command channels (None in offline mode)
         self._linuxcnc_stat = None
@@ -289,8 +295,8 @@ class Tools_Tab(QWidget):
         Args:
             tool_number: The tool number of the card that changed.
         """
-        self.tool_changed.emit(tool_number)
-        self._autosave()
+        if self._autosave():
+            self.tool_changed.emit(tool_number)
 
     def _on_card_clicked(self, tool_number: int) -> None:
         """Handle clicked from a ToolGeometryRow.
@@ -359,67 +365,50 @@ class Tools_Tab(QWidget):
     # ------------------------------------------------------------------
 
     def _on_load_clicked(self) -> None:
-        """Handle Load Table button click.
-
-        Opens a file dialog filtered to .tbl files, loads the selected
-        tool table, and populates the card list.
-        """
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Load Tool Table",
-            "",
-            "Tool Table Files (*.tbl);;All Files (*)",
-        )
-        if not file_path:
+        """Live reload uses only the INI table; offline mode can select a table."""
+        if self._linuxcnc_command is not None:
+            try:
+                self._require_idle_table_edit()
+                path = self._live_table_path()
+                # Validate before telling the controller to load an ambiguous table.
+                tools = load_tool_table(path)
+                self._linuxcnc_command.load_tool_table()
+                self._wait_table_command()
+                self._verify_controller_table(tools)
+                self._refresh_active_offset()
+                self._accept_table(path, tools)
+                self._table_sync_failed = False
+            except Exception as exc:
+                QMessageBox.warning(self, "Tool Table Not Loaded", str(exc))
             return
-
+        path, _ = QFileDialog.getOpenFileName(self, "Load Tool Table", "", "Tool Table Files (*.tbl);;All Files (*)")
+        if not path:
+            return
         try:
-            tools = load_tool_table(file_path)
-        except FileNotFoundError:
-            QMessageBox.warning(self, "File Not Found", f"Could not find: {file_path}")
-            return
-        except Exception as e:
-            QMessageBox.warning(self, "Load Error", f"Error loading tool table:\n{e}")
-            return
-
-        self._active_file_path = file_path
-        self.set_cards(tools)
-        self._button_bar.set_table_name(os.path.basename(file_path))
-        self._save_settings()
+            self._accept_table(path, load_tool_table(path))
+            self._save_settings()
+        except Exception as exc:
+            QMessageBox.warning(self, "Tool Table Not Loaded", str(exc))
 
     def _on_save_as_clicked(self) -> None:
-        """Handle Save Table As button click.
-
-        Opens a file dialog for save path, creates a backup of the existing
-        file if it exists, then saves the current tool data.
-        """
-        file_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Save Tool Table As",
-            "",
-            "Tool Table Files (*.tbl);;All Files (*)",
-        )
-        if not file_path:
+        """Export a table; in live mode the INI table remains authoritative."""
+        path, _ = QFileDialog.getSaveFileName(self, "Save Tool Table As", "", "Tool Table Files (*.tbl);;All Files (*)")
+        if not path:
             return
-
-        # Create backup if the target file already exists
-        if os.path.exists(file_path):
-            try:
-                create_backup(file_path)
-            except Exception as e:
-                logger.warning(f"Backup creation failed: {e}")
-
-        # Save the tool table
-        tools = self.get_tools()
         try:
-            save_tool_table(tools, file_path)
-        except Exception as e:
-            QMessageBox.warning(self, "Save Error", f"Error saving tool table:\n{e}")
-            return
-
-        self._active_file_path = file_path
-        self._button_bar.set_table_name(os.path.basename(file_path))
-        self._save_settings()
+            if self._linuxcnc_command is not None:
+                self._require_idle_table_edit()
+                if os.path.realpath(path) == os.path.realpath(self._live_table_path()):
+                    self._persist_table()
+                    return
+            if os.path.exists(path):
+                create_backup(path)
+            save_tool_table(self.get_tools(), path)
+            if self._linuxcnc_command is None:
+                self._accept_table(path, self.get_tools())
+                self._save_settings()
+        except Exception as exc:
+            QMessageBox.warning(self, "Tool Table Not Saved", str(exc))
 
     def _on_add_tool_clicked(self) -> None:
         """Handle Add Tool button click.
@@ -557,19 +546,153 @@ class Tools_Tab(QWidget):
     # Autosave
     # ------------------------------------------------------------------
 
-    def _autosave(self) -> None:
-        """Save the entire tool table to the active file path.
-
-        Silent failure — does not block the UI on write errors.
-        """
-        if not self._active_file_path:
-            return
-
-        tools = self.get_tools()
+    def _autosave(self) -> bool:
+        """Persist combined offsets, then reload/verify the live controller."""
+        if self._linuxcnc_command is None and not self._active_file_path:
+            return True
         try:
-            save_tool_table(tools, self._active_file_path)
-        except Exception as e:
-            logger.warning(f"Autosave failed: {e}")
+            self._persist_table()
+            return True
+        except Exception as exc:
+            # Restore the last accepted values, so unapplied edits are not shown
+            # as active geometry or handed to CAM through get_tool().
+            self.set_cards(deepcopy(self._loaded_tools))
+            QMessageBox.warning(self, "Tool Change Not Applied", str(exc))
+            return False
+
+    @staticmethod
+    def _revision(path):
+        return hashlib.sha256(Path(path).read_bytes()).hexdigest() if os.path.exists(path) else None
+
+    def _accept_table(self, path, tools):
+        self._active_file_path = os.path.realpath(path)
+        self._table_revision = self._revision(path)
+        self._loaded_tools = deepcopy(tools)
+        self.set_cards(tools)
+        self._button_bar.set_table_name(os.path.basename(path))
+
+    def _live_table_path(self):
+        ini_name = os.environ.get("INI_FILE_NAME") or getattr(self._linuxcnc_stat, "ini_filename", None)
+        if not ini_name or not os.path.isfile(ini_name):
+            raise RuntimeError("Live tool table requires the active INI_FILE_NAME; no settings-path fallback is allowed.")
+        table_name = linuxcnc.ini(ini_name).find("EMCIO", "TOOL_TABLE")
+        if not table_name:
+            raise RuntimeError("Active INI has no [EMCIO] TOOL_TABLE.")
+        return os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(ini_name)), os.path.expanduser(table_name)))
+
+    def _require_idle_table_edit(self):
+        self._linuxcnc_stat.poll()
+        if (self._linuxcnc_stat.interp_state != linuxcnc.INTERP_IDLE or
+                self._linuxcnc_stat.task_mode != linuxcnc.MODE_MANUAL or
+                getattr(self._linuxcnc_stat, "paused", False)):
+            raise RuntimeError("Tool table edits require an idle controller in MANUAL mode; no file was saved.")
+        modes = getattr(self._linuxcnc_stat, "gcodes", ())
+        if any(code in modes for code in (410, 420, 431, 432)):
+            raise RuntimeError("Cancel cutter/dynamic tool compensation before editing the tool table.")
+
+        if 430 in getattr(self._linuxcnc_stat, "gcodes", ()):
+            active = next((t for t in self._loaded_tools
+                           if t.tool_number == self._linuxcnc_stat.tool_in_spindle), None)
+            actual = self._linuxcnc_stat.tool_offset
+            if active is None or abs(actual[0] - (active.x_offset + active.x_wear)) > 0.000001 or abs(actual[2] - (active.z_offset + active.z_wear)) > 0.000001:
+                raise RuntimeError("Active G43 does not match the spindle tool; cancel G43 before editing.")
+
+    def _wait_table_command(self):
+        result = self._linuxcnc_command.wait_complete()
+        if result != linuxcnc.RCS_DONE:
+            raise RuntimeError("LinuxCNC did not confirm the tool-table command.")
+
+    def _refresh_active_offset(self):
+        # Reloading the table does not reapply an already active G43 offset.
+        self._linuxcnc_stat.poll()
+        if 430 not in getattr(self._linuxcnc_stat, "gcodes", ()):
+            return
+        active_tool = self._linuxcnc_stat.tool_in_spindle
+        if active_tool <= 0:
+            raise RuntimeError("Cannot refresh G43 without an identified active tool.")
+        self._linuxcnc_command.mode(linuxcnc.MODE_MDI)
+        try:
+            self._wait_table_command()
+            self._linuxcnc_command.mdi(f"G43 H{active_tool}")
+            self._wait_table_command()
+            self._linuxcnc_stat.poll()
+            expected = next(entry for entry in self._linuxcnc_stat.tool_table if entry.id == active_tool)
+            actual = self._linuxcnc_stat.tool_offset
+            if abs(actual[0] - expected.xoffset) > 0.000001 or abs(actual[2] - expected.zoffset) > 0.000001:
+                raise RuntimeError("Active G43 offsets do not match the reloaded tool table.")
+        finally:
+            self._linuxcnc_command.mode(linuxcnc.MODE_MANUAL)
+            self._wait_table_command()
+
+    def _verify_controller_table(self, tools):
+        self._linuxcnc_stat.poll()
+        entries = self._linuxcnc_stat.tool_table
+        expected_ids = {tool.tool_number for tool in tools}
+        actual_ids = {entry.id for entry in entries if entry.id > 0}
+        if expected_ids != actual_ids:
+            raise RuntimeError("LinuxCNC tool IDs do not match the saved table.")
+        for tool in tools:
+            matches = [entry for entry in entries if entry.id == tool.tool_number]
+            if not any(abs(entry.xoffset - (tool.x_offset + tool.x_wear)) < 0.000001 and
+                       abs(entry.zoffset - (tool.z_offset + tool.z_wear)) < 0.000001 and
+                       abs(entry.diameter - tool.nose_radius * 2) < 0.000001 and
+                       abs(entry.frontangle - tool.front_angle) < 0.051 and
+                       abs(entry.backangle - tool.back_angle) < 0.051 and
+                       entry.orientation == tool.orientation
+                       for entry in matches):
+                raise RuntimeError(f"LinuxCNC table does not match saved offsets for T{tool.tool_number}.")
+
+    def _persist_table(self):
+        live = self._linuxcnc_command is not None
+        if self._table_sync_failed:
+            raise RuntimeError("Tool table synchronization failed; reload and verify the controller table before editing.")
+        path = self._live_table_path() if live else self._active_file_path
+        if live:
+            self._require_idle_table_edit()
+        if not path or os.path.realpath(path) != os.path.realpath(self._active_file_path or ""):
+            raise RuntimeError("Active tool table is not the controller's INI table. Reload it first.")
+        if self._revision(path) != self._table_revision:
+            raise RuntimeError("Tool table changed outside the editor. Reload it before reapplying edits.")
+        tools = self.get_tools()
+        if live and self._linuxcnc_stat.tool_in_spindle > 0 and not any(
+                t.tool_number == self._linuxcnc_stat.tool_in_spindle for t in tools):
+            raise RuntimeError("Unload the active tool before deleting or renumbering it.")
+        previous = Path(path).read_bytes() if os.path.exists(path) else None
+        if previous is not None:
+            create_backup(path)
+        save_tool_table(tools, path)
+        try:
+            if live:
+                self._require_idle_table_edit()
+                self._linuxcnc_command.load_tool_table()
+                self._wait_table_command()
+                self._verify_controller_table(tools)
+                self._refresh_active_offset()
+        except Exception as error:
+            # Restore the disk snapshot and attempt to restore controller state.
+            if previous is not None:
+                rollback = Path(path + ".rollback")
+                rollback.write_bytes(previous)
+                os.replace(rollback, path)
+            else:
+                os.unlink(path)
+            if live:
+                self._table_sync_failed = True
+                try:
+                    self._require_idle_table_edit()
+                    self._linuxcnc_command.load_tool_table()
+                    self._wait_table_command()
+                    self._verify_controller_table(self._loaded_tools)
+                    self._refresh_active_offset()
+                    self._table_sync_failed = False
+                except Exception:
+                    logger.exception("Tool-table rollback could not be verified; further edits blocked")
+            if self._table_sync_failed:
+                self._button_bar.set_table_name("Sync failed — reload required")
+                raise RuntimeError("Tool table synchronization/rollback could not be verified; further edits are blocked. Reload and verify the controller table before continuing.") from error
+            raise
+        self._table_revision = self._revision(path)
+        self._loaded_tools = deepcopy(tools)
 
     # ------------------------------------------------------------------
     # Settings Persistence
@@ -578,14 +701,9 @@ class Tools_Tab(QWidget):
     def _get_settings_path(self) -> str:
         """Return the path to the settings JSON file.
 
-        Uses the directory of the active file if available, otherwise
-        the current working directory.
+        The ignored file in the working directory is local to this machine.
         """
-        if self._active_file_path:
-            directory = os.path.dirname(self._active_file_path)
-        else:
-            directory = os.getcwd()
-        return os.path.join(directory, _SETTINGS_FILE)
+        return os.path.join(os.getcwd(), _SETTINGS_FILE)
 
     def _load_settings(self) -> Optional[str]:
         """Load settings from .tool_tab_settings.json.
@@ -596,7 +714,7 @@ class Tools_Tab(QWidget):
             The last_table_path if found, None otherwise.
         """
         # Try current working directory first
-        settings_path = os.path.join(os.getcwd(), _SETTINGS_FILE)
+        settings_path = self._get_settings_path()
         if not os.path.exists(settings_path):
             return None
 
@@ -614,11 +732,8 @@ class Tools_Tab(QWidget):
 
         settings_data = {"last_table_path": self._active_file_path}
 
-        # Save in the directory of the active file
-        settings_path = os.path.join(
-            os.path.dirname(self._active_file_path) or os.getcwd(),
-            _SETTINGS_FILE,
-        )
+        # Read and write the same ignored per-machine convenience file.
+        settings_path = self._get_settings_path()
         try:
             with open(settings_path, "w", encoding="utf-8") as f:
                 json.dump(settings_data, f, indent=2)
@@ -626,28 +741,20 @@ class Tools_Tab(QWidget):
             logger.warning(f"Failed to save settings: {e}")
 
     def _load_settings_and_auto_load(self) -> None:
-        """On startup, load settings and auto-load the previously active table.
-
-        If the file does not exist, displays an empty list and clears
-        the table name label.
-        """
-        last_path = self._load_settings()
-        if not last_path:
-            return
-
-        if not os.path.exists(last_path):
-            # File not found — display empty list, clear table name
-            self._button_bar.set_table_name("")
-            return
-
         try:
-            tools = load_tool_table(last_path)
-            self._active_file_path = last_path
-            self.set_cards(tools)
-            self._button_bar.set_table_name(os.path.basename(last_path))
-        except Exception as e:
-            logger.warning(f"Auto-load failed for {last_path}: {e}")
-            self._button_bar.set_table_name("")
+            if self._linuxcnc_command is not None:
+                path = self._live_table_path()
+            else:
+                last_path = self._load_settings()
+                path = last_path if last_path and os.path.isfile(last_path) else os.path.join(os.getcwd(), "tool.tbl")
+            if os.path.isfile(path):
+                if self._linuxcnc_command is not None:
+                    self._verify_controller_table(load_tool_table(path))
+                self._accept_table(path, load_tool_table(path))
+        except Exception as exc:
+            logger.warning("Tool table not loaded: %s", exc)
+            self._button_bar.set_table_name("Tool table not loaded")
+            self._button_bar._table_name_label.setToolTip(str(exc))
 
     # ------------------------------------------------------------------
     # Delete Button Management

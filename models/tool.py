@@ -46,9 +46,11 @@ class ToolDef:
 
     Coordinates:
         nose_radius: TNR in inches (radius)
-        x_offset: X offset in DIAMETER (inches)
+        x_offset: CAM boundary X geometry offset in DIAMETER (inches)
         z_offset: Z offset in inches
-        x_wear: X wear compensation in DIAMETER (inches)
+        x_wear: CAM boundary X wear in DIAMETER (inches)
+        ToolCardData stores X geometry/wear as radius and converts at this boundary.
+        LinuxCNC tool.tbl stores their combined X total as RADIUS, not these values.
         z_wear: Z wear compensation in inches
     """
     tool_number: int
