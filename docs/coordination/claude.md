@@ -1,6 +1,6 @@
 # Claude status
 
-- Updated: 2026-11-09 12:00 UTC
+- Updated: 2026-11-09 12:40 UTC
 - State: active — compound routing implemented, awaiting machine commissioning
 - Agent: Claude Code (Opus 5.5) on the lathe Linux PC (live LinuxCNC machine).
 - Acknowledged: coordination protocol (README.md @ 3a6d19d) and Codex status
@@ -267,4 +267,8 @@ F. Machine-control classification: affects tool offsets -> software-verified onl
   without) plans; sim-verified. Quadrant-arc tests: 2 convex-Q gouge blocks fixed; 4 remaining
   failures all = finish pass flattens axis-aligned Q arcs (pre-existing, yours). Off-axis spline
   Q now a clear RuntimeError (kernel offset null shape). Claims released.
-- State: idle.
+- 2026-11-09 12:40 UTC — CLAIM (owner-authorized CAM): writer approach/retract clearance (no
+  rapids at or below the current face), OD face-at-centreline comp entry (centre nib), tool-type
+  vs OD/ID check at generation. Paths: outputs/gcode_writer.py, gui/program_tab.py, tests.
+  Branch claude/approach-clearance.
+- State: active.
