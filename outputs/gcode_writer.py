@@ -126,6 +126,7 @@ class GCodeWriter:
         if pr.roughing_params.peck_enabled and pr.roughing_params.peck_length:
             lines.append(f"; Peck Length: {pr.roughing_params.peck_length * conv:{fmt}}")
         lines.append(f"; Finish Passes: {pr.finishing_params.passes}")
+        lines.append(f"; Spring Pass: {1 if pr.finishing_params.spring_pass else 0}")
         lines.append(f"; Finish DOC (dia): {pr.finishing_params.doc_dia * conv:{fmt}}")
         lines.append(f"; Finish Feed: {pr.finishing_params.feed * conv:{fmt}}")
         lines.append(";")
@@ -347,6 +348,23 @@ class GCodeWriter:
 
         # === FINISH PASS ===
         if pr.finish_passes:
+            cuts = sum(not p.is_spring_pass for p in pr.finish_passes)
+            springs = sum(p.is_spring_pass for p in pr.finish_passes)
+            if cuts != pr.finishing_params.passes or springs != int(pr.finishing_params.spring_pass):
+                raise ValueError("Planned finish/spring counts do not match finishing parameters.")
+            previous_cut = None
+            for planned in pr.finish_passes:
+                if planned.is_spring_pass:
+                    continue
+                signature = []
+                for move in planned.moves:
+                    values = [move.x, move.z]
+                    if move.move_type in (MoveType.ARC_CW, MoveType.ARC_CCW):
+                        values += [move.center_i, move.center_k] if self._arc_format == "ijk" else [abs(move.radius)]
+                    signature.append((move.move_type, tuple(format(value * conv, fmt) for value in values)))
+                if signature == previous_cut:
+                    raise ValueError("Finish cuts coincide at output precision; reduce cutting passes or increase finish allowance.")
+                previous_cut = signature
             # Tool change needed if no cleanup handled it and tools differ
             if not pr.cleanup_passes and not same_tool:
                 lines.append("; === TOOL CHANGE (roughing → finishing) ===")
@@ -378,9 +396,16 @@ class GCodeWriter:
             self._x = approach_x
             self._z = approach_z
 
-            for p in pr.finish_passes:
+            for pass_number, p in enumerate(pr.finish_passes):
+                if pass_number > 0:
+                    if not p.approach_moves:
+                        raise ValueError("Finish pass is missing its planned retract/approach link.")
+                    for link in p.approach_moves:
+                        lines.append(self._emit_move(link, "Finish retract/approach"))
+                label = "Spring pass (repeat final contour)" if p.is_spring_pass else f"Finish cutting pass {pass_number + 1}"
+                lines.append(f"; {label}")
                 for j, move in enumerate(p.moves):
-                    lines.append(self._emit_move(move, f"Finish move {j+1}"))
+                    lines.append(self._emit_move(move, f"{label}: move {j+1}"))
             lines.append("")
 
         # End

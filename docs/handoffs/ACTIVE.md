@@ -6,6 +6,14 @@ the distinction between the owner's verbatim request and later design advice.
 
 ## Proposed
 
+- [Define the ID Pocket/Removal Region Explicitly](2026-11-08-id-pocket-removal-model.md)
+  - Status: Owner request captured; investigation not started.
+  - Priority: Follow-up after the immediate GCH bore-and-shoulder cleanup fix.
+  - Open-contour cleanup is accepted for that case; it does not settle complex
+    interior pocket modeling or remaining-stock safety.
+  - First action: define keep/removal/air regions and boundary provenance, then
+    compare kernel-based pocket and open-contour approaches in an ADR.
+
 - [Explicit X-Z Contours, Arc Choice, and DXF Interchange](2026-09-13-explicit-xz-contours-and-dxf.md)
   - Status: Owner request captured; design and implementation not started.
   - Applies to: conversational geometry entry, Program-tab visualization,

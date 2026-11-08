@@ -37,3 +37,5 @@ deployment, validation, or cross-project reuse.
   truth, plus verification states
 - `ADR-002-evidence-reference-and-change-discipline.md` - proportional reference
   review, evidence handling, and reversible change discipline
+- `ADR-003-finish-cutting-and-spring-passes.md` - calculated finish DOC, kernel
+  cutting contours, independent spring repeat, and explicit finish links

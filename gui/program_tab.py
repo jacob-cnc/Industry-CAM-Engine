@@ -233,6 +233,7 @@ class ProgramTab(QWidget):
         self._setup_ui()
         self._connect_signals()
         self._update_ui_for_state()
+        self._refresh_finish_doc()
         # Start with a default OD Profile block in the block list
         default_block = self._block_list.add_block("od_profile", select=True)
         self._active_block_id = default_block.block_id
@@ -285,7 +286,7 @@ class ProgramTab(QWidget):
         """Return current finishing field values as a dict."""
         return {
             "tool_number": self._finish_tool_num.value(),
-            "passes": int(self._finish_passes.value()),
+            "passes": int(self._finish_passes.value()) if float(self._finish_passes.value()).is_integer() else self._finish_passes.value(),
             "doc_dia": self._finish_doc.value(),
             "feed": self._finish_feed.value(),
             "spindle_rpm": self._finish_rpm.value(),
@@ -653,13 +654,15 @@ class ProgramTab(QWidget):
             min_value=1.0, max_value=10.0, decimals=0,
             default_value=1.0, suffix="", unit_aware=False,
         ))
-        form.addRow("Passes:", self._finish_passes)
+        form.addRow("Cutting passes:", self._finish_passes)
 
         self._finish_doc = NumericField(NumericFieldConfig(
-            min_value=0.0005, max_value=0.05, decimals=4,
-            default_value=0.002, suffix="dia",
+            min_value=0.0, max_value=20.0, decimals=6,
+            default_value=0.005, suffix="dia",
         ))
-        form.addRow("DOC:", self._finish_doc)
+        self._finish_doc.setReadOnly(True)
+        self._finish_doc.setToolTip("Finish allowance divided by cutting passes; spring pass is excluded.")
+        form.addRow("DOC (calculated):", self._finish_doc)
 
         self._finish_feed = NumericField(NumericFieldConfig(
             min_value=0.0001, max_value=0.05, decimals=4,
@@ -797,7 +800,9 @@ class ProgramTab(QWidget):
 
         # Finishing fields
         self._finish_passes.value_changed.connect(self._on_field_changed)
-        self._finish_doc.value_changed.connect(self._on_field_changed)
+        self._finish_passes.value_changed.connect(self._refresh_finish_doc)
+        self._rough_fin_allowance.value_changed.connect(self._refresh_finish_doc)
+        self._finish_spring_pass.toggled.connect(self._on_field_changed)
         self._finish_feed.value_changed.connect(self._on_field_changed)
         self._finish_rpm.value_changed.connect(self._on_field_changed)
 
@@ -969,6 +974,8 @@ class ProgramTab(QWidget):
             corner_breaks = data.get("corner_breaks", [])
             self._segment_list.set_segments(segments, corner_breaks)
             self._refresh_operation_z_end(segments)
+            self._finish_spring_pass.setChecked(bool(finishing.get("spring_pass", False)))
+            self._refresh_finish_doc()
 
         elif block.is_threading:
             self._threading_panel.set_values(data)
@@ -1024,6 +1031,18 @@ class ProgramTab(QWidget):
             self._stock_z_end.set_value(0.0)
             self._stock_z_end.setText("Invalid contour")
             self._stock_z_end.setToolTip(str(exc))
+
+    def _refresh_finish_doc(self, *_):
+        from models.params import FinishingParams
+        value = self._finish_passes.value()
+        try:
+            if not float(value).is_integer():
+                raise ValueError("Finish passes must be a positive integer.")
+            doc = FinishingParams.doc_from_allowance(self._rough_fin_allowance.value(), int(value))
+            self._finish_doc.set_value(doc)
+        except ValueError as exc:
+            self._finish_doc.setText("Invalid finish settings")
+            self._finish_doc.setToolTip(str(exc))
 
     def _on_segment_selection_changed(self, seg_index: int):
         """Segment selection changed in the builder — highlight on graph."""
@@ -1213,9 +1232,10 @@ class ProgramTab(QWidget):
             peck_enabled=roughing.get("peck_enabled", False),
             peck_length=roughing.get("peck_length", None),
             spindle_rpm=roughing.get("spindle_rpm", 1200.0),
-            finish_passes=int(finishing.get("passes", 1)),
+            finish_passes=finishing.get("passes", 1),
             finish_doc_dia=finishing.get("doc_dia", 0.002),
             finish_feed=finishing.get("feed", 0.003),
+            finish_spring_pass=bool(finishing.get("spring_pass", False)),
             tool_def=tool_def,
             x_park=stock.get("x_park", 3.0),
             z_park=stock.get("z_park", 3.0),
@@ -1759,14 +1779,14 @@ class ProgramTab(QWidget):
             self._finish_feed.set_value(finishing["feed"])
         if "spindle_rpm" in finishing:
             self._finish_rpm.set_value(finishing["spindle_rpm"])
-        if "spring_pass" in finishing:
-            self._finish_spring_pass.setChecked(finishing["spring_pass"])
+        self._finish_spring_pass.setChecked(bool(finishing.get("spring_pass", False)))
 
         # Segments
         segments = data.get("segments", [])
         if segments:
             corner_breaks = data.get("corner_breaks", None)
             self._segment_list.set_segments(segments, corner_breaks=corner_breaks)
+        self._refresh_finish_doc()
 
     # ------------------------------------------------------------------
     # Helpers
