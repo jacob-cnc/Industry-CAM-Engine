@@ -86,6 +86,8 @@ class CompoundJogEngine:
         self.x_total = 0
         self.z_total = 0
         self.suppressed = 0      # pulses dropped by limits/clamp this session
+        self.rejected = 0        # pulses refused by the jump guard (logic fault)
+        self.last_rejected = None
 
     # ------------------------------------------------------------------
 
@@ -108,6 +110,8 @@ class CompoundJogEngine:
         self.x_total = 0
         self.z_total = 0
         self.suppressed = 0
+        self.rejected = 0
+        self.last_rejected = None
         self.linear.reset()
         self.active = True
 
@@ -168,6 +172,15 @@ class CompoundJogEngine:
             self.suppressed += 1
             return None
         dx, dz = delta
+
+        # Jump guard (any mode): a pulse may never move the tool further than
+        # the path length it commanded, plus one count of quantization per
+        # axis and arc re-sync. Anything larger is a logic fault — refuse it.
+        allowed = abs(count_delta) * travel_per_count + 2.0 * (x_scale + z_scale) + 1e-4
+        if (dx * dx + dz * dz) ** 0.5 > allowed:
+            self.rejected += 1
+            self.last_rejected = (count_delta, dx, dz, allowed)
+            return None
 
         if self.mode == "arc":
             self.arc.accumulate_distance(dx, dz)

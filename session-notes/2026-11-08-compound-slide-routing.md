@@ -63,4 +63,17 @@ jogging is unaffected.
 
 ## Machine evidence
 
-(pending)
+- Routing check script: ALL CHECKS PASSED (LinuxCNC closed).
+- Normal MPG jog through the new mux: owner reports unchanged.
+- Jump test: activate/deactivate in linear and arc mode -> no motion (owner).
+- First compound run: no motion — INI joint limits applied to unhomed (arbitrary)
+  machine coordinates suppressed every pulse. Fixed 2472d4b (LinuxCNC
+  refresh_jog_limits semantics).
+- Linear 45 deg: joint X -0.2001 r / Z +0.2003 -> true 45 deg. DRO showed radius
+  -> fixed e7945e6 (diameter display, G7 startup). Owner: angle + display correct.
+- Arc (R 0.5, GUI SE + Arc Top, 0.001 mode): ran the whole quadrant in one click
+  at jog speed (log: x_r 0.0945 -> 0.5945, z 0 -> -0.5). Cause: inherited
+  atan2 wrap at the start boundary clamped to the FAR end. Fixed: arc angle is
+  tracked directly and clamped; MPG forward always moves into the arc from the
+  start point; engine jump guard refuses any step larger than the commanded path
+  (GUI deactivates compound and logs an error). Arc re-test pending.

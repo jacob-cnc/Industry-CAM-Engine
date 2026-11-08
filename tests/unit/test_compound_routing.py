@@ -153,3 +153,58 @@ class TestJogWindow:
         eng.start(-1.5, 0.0, 0, angle_deg=45.0)
         assert eng.step(400, Z_SCALE, X_SCALE, Z_SCALE) is not None
         assert eng.suppressed == 0
+
+
+ALL_ARC_CONFIGS = [(q, st) for q in Quadrant for st in ArcStartType]
+
+
+class TestArcNoJump:
+    """Regression 2026-11-08 bench: one backward MPG click at an arc start
+    boundary ran the entire quadrant (machine X +0.5 r, Z -0.5) at jog speed."""
+
+    @pytest.mark.parametrize("q,st", ALL_ARC_CONFIGS)
+    @pytest.mark.parametrize("sign", [+1, -1])
+    def test_one_click_never_exceeds_commanded_path(self, q, st, sign):
+        eng = CompoundJogEngine(LIMITS)
+        eng.arc.activate(0.0945, 0.0, 0.5, q, st)
+        eng.start(0.0945, 0.0, 756, mode="arc")
+        s = eng.step(756 + sign * 4, Z_SCALE, X_SCALE, Z_SCALE)  # one click
+        if s is not None:
+            dx, dz = physical(s.x_total, s.z_total)
+            assert math.hypot(dx, dz) <= 4 * Z_SCALE + 0.0005
+        assert eng.rejected == 0
+
+    @pytest.mark.parametrize("q,st", ALL_ARC_CONFIGS)
+    def test_forward_traverses_quadrant_then_stops_backward_returns(self, q, st):
+        R = 0.25
+        eng = CompoundJogEngine(LIMITS)
+        eng.arc.activate(1.0, 0.0, R, q, st)
+        eng.start(1.0, 0.0, 0, mode="arc")
+        # Backward first: must not move at all (already at the start end)
+        assert eng.step(-4, Z_SCALE, X_SCALE, Z_SCALE) is None
+        eng._last_counts = 0
+        arc_len = math.pi / 2 * R
+        n = int(arc_len / Z_SCALE) + 400       # beyond the end on purpose
+        for c in range(1, n + 1):
+            eng.step(c, Z_SCALE, X_SCALE, Z_SCALE)
+        dx, dz = physical(eng.x_total, eng.z_total)
+        assert abs(dx) == pytest.approx(R, abs=0.001)
+        assert abs(dz) == pytest.approx(R, abs=0.001)
+        for c in range(n - 1, -1, -1):
+            eng.step(c, Z_SCALE, X_SCALE, Z_SCALE)
+        dx, dz = physical(eng.x_total, eng.z_total)
+        # back within ~1 count of start (the overshoot past the end was dropped)
+        assert abs(dx) < 0.002 and abs(dz) < 0.002
+        assert eng.rejected == 0
+
+
+class TestJumpGuard:
+    def test_guard_refuses_oversized_step(self):
+        eng = make(mode="arc")
+        # Corrupt arc state: tool at center -> target is a full radius away
+        eng.arc.arc_center_x, eng.arc.arc_center_z = 2.0, 0.0
+        eng.arc.radius, eng.arc.angle_start, eng.arc.angle_end = 0.5, 0.0, math.pi / 2
+        eng.arc.current_angle = 0.0
+        assert eng.step(1004, Z_SCALE, X_SCALE, Z_SCALE) is None
+        assert eng.rejected == 1
+        assert (eng.x_total, eng.z_total) == (0, 0)
