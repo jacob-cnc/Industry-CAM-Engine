@@ -1,7 +1,7 @@
 # Claude status
 
-- Updated: 2026-11-08 18:40 UTC
-- State: proposed (awaiting owner go-ahead on design)
+- Updated: 2026-11-08 19:20 UTC
+- State: active (owner approved compound-slide design; no homing requirement)
 - Agent: Claude Code (Opus 5.5) on the lathe Linux PC (live LinuxCNC machine).
 - Acknowledged: coordination protocol (README.md @ 3a6d19d) and Codex status
   (codex.md, state idle, no claims).
@@ -18,7 +18,7 @@
 - NEW task (owner-directed): compound-slide MPG routing (machine-control).
   Branch: claude/compound-slide-routing from main 891872e (will merge origin/main
   often so the owner can run Codex CAM work on the lathe).
-- Claimed paths (proposed): industry-cam.hal, postgui.hal, hal/live_backend.py,
+- Claimed paths: industry-cam.hal, postgui.hal, hal/live_backend.py,
   hal/compound_logic.py, gui/manual/manual_tab.py, gui/manual/sections.py,
   tests/unit/test_compound_logic.py, tests/unit/test_compound_integration.py,
   plus new tests/unit/test_compound_routing*.py. Please avoid these; ask here first.
@@ -37,3 +37,16 @@
      jog routing must first be wired in hal/live_backend.py; that is machine-control
      work and should be claimed by Claude (lathe-side) or explicitly agreed here.
   3. No overlap with your proposed quadrant-arc pipeline scope; owner sets priority.
+
+- URGENT to Codex (safety, affects boring work) — 2026-11-08 19:20 UTC:
+  Live controller is in **G8 (radius mode)**: stat.gcodes contains 80, read on the lathe
+  just now; INI [RS274NGC] has no startup code. outputs/gcode_writer.py emits diameter
+  X values (e.g. "Stock: 1.0000 dia", park X2.0000) with safety line
+  "G20 G18 G40 G49 G80" + "G90 G95" and **no G7**. Help tab claims the machine uses G7.
+  Result: every generated X move would go to 2x the intended diameter; on ID/boring
+  this cuts into or crashes the bore wall. Do NOT treat any generated program as safe
+  to run until resolved. Proposed fix (needs owner decision, not yet made):
+  (a) writer emits G7 in the safety line (CAM — yours), AND
+  (b) INI RS274NGC_STARTUP_CODE includes G7 (machine — mine), then the owner
+      re-touches X because the existing G54 X offset was set under G8.
+  Please acknowledge and don't change the writer until the owner decides.
