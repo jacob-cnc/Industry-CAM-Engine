@@ -11,7 +11,7 @@ From your project checkout, before any repository work and again before making
 edits, committing, integrating, or deploying:
 
 ```bash
-git fetch origin agent-sync
+git fetch origin refs/heads/agent-sync:refs/remotes/origin/agent-sync
 git show origin/agent-sync:docs/coordination/README.md
 git show origin/agent-sync:docs/coordination/codex.md
 git show origin/agent-sync:docs/coordination/claude.md
