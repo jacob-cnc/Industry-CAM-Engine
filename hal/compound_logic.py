@@ -18,11 +18,17 @@ from typing import Tuple
 from hal.constants import X_MIN_LIMIT, X_MAX_LIMIT, Z_MIN_LIMIT, Z_MAX_LIMIT
 
 
-# Soft limits in radius for X (INI values are diameter)
+# Default soft limits (legacy constants). Live compound jogging passes the
+# machine's real joint limits via the ``limits`` argument instead, because
+# these constants do not match the INI (see CompoundJogEngine).
 _X_MIN_R = X_MIN_LIMIT / 2.0
 _X_MAX_R = X_MAX_LIMIT / 2.0
 _Z_MIN = Z_MIN_LIMIT
 _Z_MAX = Z_MAX_LIMIT
+
+# (x_min_radius, x_max_radius, z_min, z_max)
+Limits = Tuple[float, float, float, float]
+_DEFAULT_LIMITS: Limits = (_X_MIN_R, _X_MAX_R, _Z_MIN, _Z_MAX)
 
 
 # ======================================================================
@@ -109,7 +115,8 @@ class CompoundLinearLogic:
 
     @staticmethod
     def check_soft_limits(current_x: float, current_z: float,
-                          x_delta: float, z_delta: float) -> Tuple[float, float, bool]:
+                          x_delta: float, z_delta: float,
+                          limits: Limits = None) -> Tuple[float, float, bool]:
         """Check if motion would exceed soft limits.
 
         If EITHER axis would exceed, BOTH are suppressed (no partial motion).
@@ -119,13 +126,15 @@ class CompoundLinearLogic:
             current_z: Current Z position.
             x_delta: Proposed X motion (radius).
             z_delta: Proposed Z motion.
+            limits: (x_min_r, x_max_r, z_min, z_max); defaults to legacy constants.
 
         Returns:
             (x_delta, z_delta, suppressed).
         """
-        if (current_x + x_delta) < _X_MIN_R or (current_x + x_delta) > _X_MAX_R:
+        x_min, x_max, z_min, z_max = limits or _DEFAULT_LIMITS
+        if (current_x + x_delta) < x_min or (current_x + x_delta) > x_max:
             return (0.0, 0.0, True)
-        if (current_z + z_delta) < _Z_MIN or (current_z + z_delta) > _Z_MAX:
+        if (current_z + z_delta) < z_min or (current_z + z_delta) > z_max:
             return (0.0, 0.0, True)
         return (x_delta, z_delta, False)
 
@@ -250,7 +259,8 @@ class CompoundArcLogic:
         self.cumulative_distance = 0.0
 
     def process_pulse(self, count_delta: int, jog_scale: float,
-                      current_x: float, current_z: float
+                      current_x: float, current_z: float,
+                      limits: Limits = None
                       ) -> Tuple[float, float, bool, bool]:
         """Process a single MPG pulse through the full arc pipeline.
 
@@ -278,7 +288,8 @@ class CompoundArcLogic:
         # 2. Soft limits
         new_x = current_x + x_delta
         new_z = current_z + z_delta
-        if new_x < _X_MIN_R or new_x > _X_MAX_R or new_z < _Z_MIN or new_z > _Z_MAX:
+        x_min, x_max, z_min, z_max = limits or _DEFAULT_LIMITS
+        if new_x < x_min or new_x > x_max or new_z < z_min or new_z > z_max:
             return (0.0, 0.0, True, False)
 
         # 3. Re-project onto arc
