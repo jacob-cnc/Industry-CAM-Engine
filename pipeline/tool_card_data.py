@@ -63,7 +63,10 @@ TOOL_TYPES: List[str] = [
 TYPE_ORIENTATIONS: Dict[str, List[int]] = {
     "Turning RH": [2, 1, 3, 4],
     "Turning LH": [4, 3, 1, 2],
-    "Boring Bar": [8, 6, 5, 7],
+    # LinuxCNC Fig 2.16, front-tool lathe: Q3 = corner +X/-Z (conventional
+    # boring bar cutting toward the chuck), Q4 = +X/+Z (back-boring toward the
+    # tailstock), Q8 = straight +X. Was [8, 6, 5, 7] (Q5-8 are axis-aligned).
+    "Boring Bar": [3, 4, 8],
     "Threading External": [2, 1],
     "Threading Internal": [6, 5],
     "Grooving/Parting": [2, 6, 1, 5],

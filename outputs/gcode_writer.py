@@ -193,7 +193,7 @@ class GCodeWriter:
 
         # Determine cutter comp code based on TNR and tool direction
         has_tnr = pr.tool.nose_radius > 0.0001
-        comp_code = self._get_comp_code(pr.tool.direction) if has_tnr else "G40"
+        comp_code = self._get_comp_code(pr.tool.direction, is_id) if has_tnr else "G40"
 
         # Engage cutter comp for all cutting passes if TNR is present
         # G41/G42 compensates the programmed path by the tool nose radius.
@@ -339,7 +339,7 @@ class GCodeWriter:
                 lines.append(self._line(f"S{pr.roughing_params.spindle_rpm:.0f} M3", "Spindle CW - resume"))
                 # Re-engage cutter comp for finish tool
                 finish_has_tnr = finish_tool.nose_radius > 0.0001
-                finish_comp_code = self._get_comp_code(finish_tool.direction) if finish_has_tnr else "G40"
+                finish_comp_code = self._get_comp_code(finish_tool.direction, is_id) if finish_has_tnr else "G40"
                 if finish_has_tnr and finish_comp_code != "G40":
                     lines.append(self._line(f"{finish_comp_code}", f"Cutter comp on (TNR={finish_tool.nose_radius:.4f})"))
                 else:
@@ -378,7 +378,7 @@ class GCodeWriter:
                 lines.append(self._line("G43", "Tool length comp on"))
                 lines.append(self._line(f"S{pr.roughing_params.spindle_rpm:.0f} M3", "Spindle CW - resume"))
                 finish_has_tnr = finish_tool.nose_radius > 0.0001
-                finish_comp_code = self._get_comp_code(finish_tool.direction) if finish_has_tnr else "G40"
+                finish_comp_code = self._get_comp_code(finish_tool.direction, is_id) if finish_has_tnr else "G40"
                 if finish_has_tnr and finish_comp_code != "G40":
                     lines.append(self._line(f"{finish_comp_code}", f"Cutter comp on (TNR={finish_tool.nose_radius:.4f})"))
                 else:
@@ -696,13 +696,24 @@ class GCodeWriter:
 
             return extreme_x + clearance
 
-    def _get_comp_code(self, direction: ToolDirection) -> str:
-        """Get G41/G42 based on tool direction."""
-        if direction == ToolDirection.RIGHT:
-            return "G42"
-        elif direction == ToolDirection.LEFT:
-            return "G41"
-        return "G40"
+    @staticmethod
+    def _get_comp_code(direction: ToolDirection, is_id: bool = False) -> str:
+        """G41/G42 for a front-tool lathe (G18, X+ away from centreline).
+
+        Cutter comp side is relative to the direction of travel, so it depends
+        on which side of the material the tool is on, not only on tool hand:
+          RH tool cutting toward the chuck (-Z):
+            OD - tool outside the part  -> G42
+            ID - tool inside the bore   -> G41
+          LH tool (cutting toward the tailstock) reverses travel -> swapped.
+        Bench 2026-11-08: the old hand-only rule sent G42 for an ID pass and
+        LinuxCNC put the control point 2 x TNR (0.032 radius) outside the
+        programmed bore diameter.
+        """
+        if direction == ToolDirection.NEUTRAL:
+            return "G40"
+        right_code, left_code = ("G41", "G42") if is_id else ("G42", "G41")
+        return right_code if direction == ToolDirection.RIGHT else left_code
 
     def _compute_pass_max_x(self, turning_pass) -> float:
         """Compute the true maximum X reached by a pass, including arc peaks.
@@ -1048,7 +1059,7 @@ class GCodeWriter:
 
         if engage_comp:
             has_tnr = new_tool.nose_radius > 0.0001
-            comp_code = self._get_comp_code(new_tool.direction) if has_tnr else "G40"
+            comp_code = self._get_comp_code(new_tool.direction, is_id) if has_tnr else "G40"
             if has_tnr and comp_code != "G40":
                 lines.append(self._line(f"{comp_code}", f"Cutter comp on (TNR={new_tool.nose_radius:.4f})"))
             else:

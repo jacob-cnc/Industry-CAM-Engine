@@ -9,7 +9,14 @@ from enum import Enum
 
 
 class ToolOrientation(Enum):
-    """LinuxCNC tool orientation codes 1-9."""
+    """LinuxCNC tool orientation codes 1-9 (Q word).
+
+    The member NAMES are legacy and do NOT describe LinuxCNC's meaning. Per the
+    LinuxCNC 2.9.6 manual Fig 2.16 (front-tool lathe), the cutting corner
+    relative to the nose centre is: 1 -X+Z, 2 -X-Z (RH OD turning),
+    3 +X-Z (conventional boring bar), 4 +X+Z, 5 +Z, 6 -X, 7 -Z, 8 +X, 9 centre.
+    Only the integer value is sent to LinuxCNC.
+    """
     OD_FRONT_RIGHT = 1
     OD_FRONT_LEFT = 2
     OD_BACK_RIGHT = 3
