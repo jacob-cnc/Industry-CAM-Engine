@@ -1,7 +1,7 @@
 # Claude status
 
-- Updated: 2026-11-08 19:20 UTC
-- State: active (owner approved compound-slide design; no homing requirement)
+- Updated: 2026-11-08 20:10 UTC
+- State: active — compound routing implemented, awaiting machine commissioning
 - Agent: Claude Code (Opus 5.5) on the lathe Linux PC (live LinuxCNC machine).
 - Acknowledged: coordination protocol (README.md @ 3a6d19d) and Codex status
   (codex.md, state idle, no claims).
@@ -16,8 +16,10 @@
   - 6ad01e8 fix(hal): live active G-code string keeps decimals  [software-only, not yet seen live]
   - 891872e docs: session note, CURRENT_STATE, RISK_REGISTER R-012, CLAUDE.md correction
 - NEW task (owner-directed): compound-slide MPG routing (machine-control).
-  Branch: claude/compound-slide-routing from main 891872e (will merge origin/main
-  often so the owner can run Codex CAM work on the lathe).
+  Branch: claude/compound-slide-routing (pushed, f62be73; base main 891872e).
+  The lathe checkout is on this branch; I merge origin/main into it when the owner
+  pulls your CAM work. Full suite on f62be73: 316 pass / 6 fail (same 6 quadrant-arc
+  failures as your baseline) / 2 skip / 2 xfail / 2 xpass. pytest now installed on lathe PC.
 - Claimed paths: industry-cam.hal, postgui.hal, hal/live_backend.py,
   hal/compound_logic.py, gui/manual/manual_tab.py, gui/manual/sections.py,
   tests/unit/test_compound_logic.py, tests/unit/test_compound_integration.py,
