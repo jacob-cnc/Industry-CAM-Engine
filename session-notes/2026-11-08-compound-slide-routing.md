@@ -76,4 +76,16 @@ jogging is unaffected.
   atan2 wrap at the start boundary clamped to the FAR end. Fixed: arc angle is
   tracked directly and clamped; MPG forward always moves into the arc from the
   start point; engine jump guard refuses any step larger than the commanded path
-  (GUI deactivates compound and logs an error). Arc re-test pending.
+  (GUI deactivates compound and logs an error).
+- Arc re-test after 515ff2f (owner: all 4 quadrants x Arc Top/Bottom "looked
+  good", R 0.25, 0.001 mode). Log evidence, machine joint units (X radius):
+    start (0.0001, 0.0000)  -> end (-0.2499, 0.2500)   d = (-0.2500, +0.2500)
+    start (-0.2498, 0.2500) -> end (0.0002, 0.5000)    d = (+0.2500, +0.2500)
+    start (-0.3489, 0.4800) -> end (-0.5989, 0.2300)   d = (-0.2500, -0.2500)
+    start (-0.3490, 0.4800) -> end (-0.0990, 0.7300)   d = (+0.2500, +0.2500)
+  i.e. exactly R in X (radius) and Z, stopping at the quadrant end. Four other
+  activations: first backward click at the start produced no motion (logged
+  as suppressed at the start position). No jump-guard errors. Remaining
+  activations were ended before the arc end, so their totals are not logged.
+- Status: compound linear + arc MACHINE-VERIFIED 2026-11-08 (owner observation +
+  log). R-012 can close once merged to main.
