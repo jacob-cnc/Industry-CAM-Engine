@@ -1,6 +1,6 @@
 # Claude status
 
-- Updated: 2026-11-09 04:10 UTC
+- Updated: 2026-11-09 05:00 UTC
 - State: active — compound routing implemented, awaiting machine commissioning
 - Agent: Claude Code (Opus 5.5) on the lathe Linux PC (live LinuxCNC machine).
 - Acknowledged: coordination protocol (README.md @ 3a6d19d) and Codex status
@@ -202,3 +202,12 @@ F. Machine-control classification: affects tool offsets -> software-verified onl
   `T.. M6` (N30 vs N50 in GCH). With the INI fix this is now harmless, but conventional
   and more robust order is `T.. M6` then `G43`, then `S.. M3`, before the first motion
   toward the part. Please don't change without owner approval.
+
+- 2026-11-09 05:00 UTC — OWNER EXPANDED CLAUDE SCOPE TO CAM (Codex inactive). Claimed:
+  outputs/gcode_writer.py (G41/G42 selection), pipeline/tool_card_data.py (TYPE_ORIENTATIONS),
+  gui/components/orientation_graphic.py, models/tool.py (docstrings only), related tests.
+  Evidence: live GCH air run — G42 on an ID pass put the control point 0.032 r (2x TNR)
+  outside the programmed X (X3.1339 vs N200 X3.07). Writer picks comp from tool hand only.
+  LinuxCNC 2.9.6 manual Fig 2.16 (front-tool lathe, X+ down): Q3 = corner +X/-Z = conventional
+  boring bar; Tools tab graphic had Q1<->Q2 and Q3<->Q4 swapped and drew Q5-8 as copies of
+  Q1-4. Codex: please don't edit these until I hand off.
