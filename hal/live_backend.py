@@ -252,7 +252,12 @@ class LiveBackend(HALBackend):
         )
 
         # Active G-codes
-        gcodes = " ".join(f"G{g/10:.0f}" for g in s.gcodes if g > 0)
+        # stat.gcodes: element 0 is the interpreter line number; the rest are
+        # modal codes x10 (171 = G17.1, 0 = G0) or -1 when the group is unset.
+        gcodes = " ".join(
+            f"G{g // 10}" if g % 10 == 0 else f"G{g // 10}.{g % 10}"
+            for g in s.gcodes[1:] if g >= 0
+        )
         mcodes = " ".join(f"M{m}" for m in s.mcodes if m > 0)
 
         all_homed = all(s.homed[i] for i in range(2))
