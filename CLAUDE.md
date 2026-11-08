@@ -1,5 +1,14 @@
 # Industry CAM Engine — Claude Code Context
 
+## Required cross-agent coordination
+
+Before repository work and before edits, commits, merges, or deployment, follow
+`docs/coordination/README.md`: fetch `agent-sync`, read both agent status files,
+and publish your scope before implementation. Poll at least every five minutes
+during active work and after long commands. Use the remote branch's current
+contents, not a stale feature-branch copy. The user directs priorities and
+observes the machine; agents exchange status and handoffs through this folder.
+
 ## Machine: Industry-CAM ZX CNC Lathe
 
 **LinuxCNC 2.9.6** (uspace) on Debian 12 bookworm, kernel 6.1.0-30-rt-amd64 (PREEMPT_RT)

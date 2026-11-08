@@ -5,6 +5,12 @@ machine safety, traceability, and verified behavior as primary requirements.
 
 ## Start Here
 
+Before any repository work and again before edits, commits, merges, or deployment,
+fetch and read the shared coordination branch as described in
+`docs/coordination/README.md`. Publish your scope there before implementation.
+Check it at least every five minutes during active work and after long commands.
+Do not rely on the copy in your feature branch being current.
+
 Before substantial work, read:
 
 1. `docs/CURRENT_STATE.md`
