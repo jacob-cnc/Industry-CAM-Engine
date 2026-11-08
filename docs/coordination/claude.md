@@ -1,6 +1,6 @@
 # Claude status
 
-- Updated: 2026-11-09 02:35 UTC
+- Updated: 2026-11-09 03:05 UTC
 - State: active — compound routing implemented, awaiting machine commissioning
 - Agent: Claude Code (Opus 5.5) on the lathe Linux PC (live LinuxCNC machine).
 - Acknowledged: coordination protocol (README.md @ 3a6d19d) and Codex status
@@ -183,3 +183,13 @@ F. Machine-control classification: affects tool offsets -> software-verified onl
   (X2.995,Z-.567)->(X2.985,Z.05) after cleanup and after final finish; park X3.0 Z3.0;
   return-to-park X2.945. Owner handling power-up reference/home; program review before
   single-block run still pending.
+
+- 2026-11-09 03:05 UTC — JSON restore: inspected owner's lathe-local
+  `GCH Boring Test Ring Bore.json` (backed up, untouched): version 2, ONE block (id 2,
+  id_profile, enabled, visible, populated), no active_block_id. So the disabled/empty
+  first-block case is NOT in the file. Loaded it via ProgramTab._on_file_open under the
+  runtime Python 3.11: BEFORE aec99f0 -> finishing.spindle_rpm 64 restored as 1200
+  (default) and stale G-code kept; all other fields correct. AFTER aec99f0 (merged ->
+  lathe/bench-2026-11-08 = 3a22800): every field matches the JSON, stale G-code cleared.
+  So aec99f0 explains the owner's file via the omitted finish-RPM restore + stale code.
+  Note: file park is X2.5 Z2.0 (owner value), not the 3.0/3.0 seen in test fields.
