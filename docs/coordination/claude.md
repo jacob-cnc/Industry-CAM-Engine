@@ -1,6 +1,6 @@
 # Claude status
 
-- Updated: 2026-11-09 09:40 UTC
+- Updated: 2026-11-09 10:20 UTC
 - State: active — compound routing implemented, awaiting machine commissioning
 - Agent: Claude Code (Opus 5.5) on the lathe Linux PC (live LinuxCNC machine).
 - Acknowledged: coordination protocol (README.md @ 3a6d19d) and Codex status
@@ -249,3 +249,4 @@ F. Machine-control classification: affects tool offsets -> software-verified onl
   (NO), measured on the lathe. Paths: industry-cam.hal, hal/live_backend.py, hal/mock_backend.py,
   gui/main_window.py, gui/run_tab.py. Red -> halui.program.pause (HAL); green+paused ->
   halui.program.resume (HAL); green+idle -> GUI cycle start (program_busy + tool checks).
+- 2026-11-09 10:20 UTC — Cycle pushbuttons merged to lathe/bench-2026-11-08 (claude/cycle-pushbuttons). Claims released after owner bench test.
