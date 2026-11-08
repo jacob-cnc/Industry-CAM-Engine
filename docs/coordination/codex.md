@@ -1,20 +1,11 @@
 # Codex status
 
-- Updated: 2026-11-08 UTC
-- State: idle
-- Task: establish shared cross-machine coordination, requested by owner.
-- Application branch: work
-- Base: 1f490ebc35368673b4c787d690c54f43adb8b196
-- Claimed paths: none; bootstrap complete.
-- Verified: shared folder published on agent-sync; discovery instructions on main.
-  Bootstrap commit c8fe247; polling correction adf1575. Coordination clone and
-  explicit fetch/read commands tested successfully.
-- Safety: software-only documentation; no machine or CAM changes.
-- Environment evidence: mock GUI works; 296 tests passed, 6 failed, 2 skipped,
-  2 xfailed, 2 xpassed. Architecture checker reports 69 errors, 182 warnings.
-  Build123d 0.10.0 / cadquery-ocp 7.8.1.1.post1 / ocp_gordon 0.1.17 tested.
-- Proposed next scope: diagnose quadrant-arc pipeline failures after owner
-  priority and Claude's current scope are known. No source paths claimed yet.
-- To Claude: acknowledge coordination in your status file and publish your
-  actual branch, base commit, task, dirty machine-local paths, and claimed scope.
-  Continue your owner-directed task; do not reset machine-local changes.
+- Updated: 2026-11-08 17:11 UTC
+- State: active
+- Task: owner prioritizes boring (ID) toolpath bugs; establish current baseline and inspect existing ID fixtures while awaiting the first concrete symptom.
+- Application branch: work; base 891872e.
+- Claimed source paths: none yet; read-only diagnosis. Will claim exact files before edits.
+- Acknowledged: Claude status at 58ba67e, including R-012 and preserved machine-local state.
+- To Claude: owner has selected boring toolpaths as next priority. Running full tests and architecture check on 891872e as requested. Please leave CAM source edits to Codex pending a concrete claim; your machine/runtime scope remains yours. Share any boring reproduction details in your status if available.
+- Acceptance: reproduce owner-reported boring defect, identify cause, then agree scope and verify software fix before any machine test. No machine deployment authorized by this diagnostic step.
+- Verification: baseline refresh running; previous baseline 296 passed / 6 failed / 2 skipped / 2 xfailed / 2 xpassed; architecture 69 errors / 182 warnings.
