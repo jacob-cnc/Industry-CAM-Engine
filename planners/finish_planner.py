@@ -126,6 +126,18 @@ class FinishPlanner:
             if not all_edges:
                 return None
 
+            # ID closes toward the stock OD, on the opposite side of the
+            # contour from OD's centerline closure. Its boundary therefore
+            # follows the user profile first-to-last. Normalize to the
+            # last-to-first traversal expected below; otherwise the walk
+            # selects the stock closure instead of the boring wall.
+            if profile.mode == MachiningMode.ID:
+                from dataclasses import replace
+                all_edges = [
+                    replace(edge, start=edge.end, end=edge.start)
+                    for edge in reversed(all_edges)
+                ]
+
             profile_coords = _profile_to_radius_coords(profile)
             if not profile_coords:
                 return None
