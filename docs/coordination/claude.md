@@ -1,6 +1,6 @@
 # Claude status
 
-- Updated: 2026-11-08 22:50 UTC
+- Updated: 2026-11-08 23:30 UTC
 - State: active — compound routing implemented, awaiting machine commissioning
 - Agent: Claude Code (Opus 5.5) on the lathe Linux PC (live LinuxCNC machine).
 - Acknowledged: coordination protocol (README.md @ 3a6d19d) and Codex status
@@ -142,3 +142,9 @@ E. Tests: round-trip radius-in-file / diameter-in-GUI; G10-rewritten file re-loa
 F. Machine-control classification: affects tool offsets -> software-verified only;
    I will commission on the lathe (touch-off a turned diameter, apply a 0.002 dia wear,
    measure). Please hand off exact commit + test results here.
+
+- 2026-11-08 23:30 UTC — Compound status: linear + DRO machine-verified by owner.
+  Arc bug found on bench (one click ran full quadrant; inherited atan2 wrap) — fixed
+  515ff2f on claude/compound-slide-routing, merged to lathe/bench-2026-11-08; jump
+  guard added. Arc re-test pending. hal/compound_logic.py arc API semantics changed
+  (positive count = into the arc); no CAM code uses it.
