@@ -70,6 +70,7 @@ class StatusBar(QWidget):
     reset_clicked = pyqtSignal()
     machine_on_clicked = pyqtSignal()
     machine_off_clicked = pyqtSignal()
+    mode_clicked = pyqtSignal()   # operator asks to return to MANUAL
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -158,6 +159,11 @@ class StatusBar(QWidget):
         self._mode_display.setAlignment(Qt.AlignCenter)
         self._mode_display.setFixedWidth(84)
         self._mode_display.setFixedHeight(32)
+        self._mode_display.setCursor(Qt.PointingHandCursor)
+        self._mode_display.setToolTip(
+            "LinuxCNC task mode. Click to return to MANUAL (only when no program "
+            "is running or paused).")
+        self._mode_display.mousePressEvent = lambda _e: self.mode_clicked.emit()
         self._apply_mode_style("MANUAL")
         layout.addWidget(self._mode_display)
 
