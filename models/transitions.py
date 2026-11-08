@@ -16,6 +16,7 @@ class TransitionType(Enum):
     RETRACT_TRAVERSE_PLUNGE = "retract_traverse_plunge"
     PERPENDICULAR_LINK = "perpendicular_link"
     STEP_OVER = "step_over"
+    DIAGONAL_RETRACT_APPROACH = "diagonal_retract_approach"
 
 
 @dataclass(frozen=True)

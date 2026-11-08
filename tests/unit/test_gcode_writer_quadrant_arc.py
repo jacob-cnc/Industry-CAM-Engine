@@ -69,6 +69,7 @@ def _make_plan_with_finish_arcs(arc_moves: list[ToolMove]) -> PlanResult:
         pass_index=0,
         pass_type=PassType.FINISH,
         moves=arc_moves,
+        retract_moves=(ToolMove(MoveType.RAPID, 4.01, 0.0, pass_type=PassType.TRANSITION),),
     )
 
     return PlanResult(

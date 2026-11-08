@@ -15,6 +15,7 @@ Signals:
     clicked(int): Emitted when the card is clicked (tool_number).
 """
 
+import re
 from PyQt5.QtWidgets import (
     QWidget, QGridLayout, QHBoxLayout, QVBoxLayout,
     QLabel, QLineEdit, QComboBox, QPushButton, QFrame,
@@ -36,6 +37,9 @@ _ALL_INSERTS = [
     "CNMG", "CCMT", "WNMG", "DNMG", "DCMT", "VNMG", "TNMG", "SNMG", "RCMT",
     "60° UN/Metric", "55° Whitworth", "ACME", "Grooving", "Custom",
 ]
+
+# Marks a saved Q that the tool type does not recommend (kept, never auto-changed)
+_NONSTANDARD_SUFFIX = "(non-standard)"
 
 # All orientations Q1–Q9
 _ALL_ORIENTATIONS = list(range(1, 10))
@@ -139,11 +143,8 @@ class ToolGeometryRow(QWidget):
                 self._custom_insert_edit.setText(data.insert_code)
                 self._custom_insert_edit.setVisible(True)
 
-            # Orientation dropdown
-            orient_text = f"Q{data.orientation}"
-            idx = self._orient_combo.findText(orient_text)
-            if idx >= 0:
-                self._orient_combo.setCurrentIndex(idx)
+            # Orientation dropdown — never silently change a saved Q
+            self._select_saved_orientation(data.orientation)
 
             # Numeric fields — X values displayed as diameter (×2)
             self._x_offset_field.set_value(data.x_offset * 2.0)
@@ -502,6 +503,24 @@ class ToolGeometryRow(QWidget):
         idx = self._orient_combo.findText(current_text)
         self._orient_combo.setCurrentIndex(idx if idx >= 0 else 0)
         self._orient_combo.blockSignals(False)
+        # A kept non-standard Q survives option refreshes (e.g. insert change)
+        if preserve and idx < 0 and current_text.endswith(_NONSTANDARD_SUFFIX):
+            m = re.match(r"\s*Q(\d)", current_text)
+            if m:
+                self._select_saved_orientation(int(m.group(1)))
+
+    def _select_saved_orientation(self, orientation: int) -> None:
+        """Select a SAVED orientation, keeping it even if the tool type no
+        longer recommends it. Previously an unlisted Q silently fell back to the
+        first option and the next autosave overwrote the saved value."""
+        text = f"Q{orientation}"
+        idx = self._orient_combo.findText(text)
+        if idx < 0:
+            self._orient_combo.blockSignals(True)
+            self._orient_combo.addItem(f"{text} {_NONSTANDARD_SUFFIX}")
+            self._orient_combo.blockSignals(False)
+            idx = self._orient_combo.count() - 1
+        self._orient_combo.setCurrentIndex(idx)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -509,11 +528,9 @@ class ToolGeometryRow(QWidget):
 
     def _orientation_value(self) -> int:
         """Parse the current orientation combo text (e.g. 'Q3') to int."""
-        text = self._orient_combo.currentText()
-        try:
-            return int(text.replace("Q", ""))
-        except (ValueError, AttributeError):
-            return 1
+        text = self._orient_combo.currentText() or ""
+        m = re.match(r"\s*Q(\d)", text)
+        return int(m.group(1)) if m else 1
 
     def _emit_field_changed(self) -> None:
         """Emit field_changed signal if not suppressed."""

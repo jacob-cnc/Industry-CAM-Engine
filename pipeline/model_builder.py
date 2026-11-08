@@ -40,6 +40,8 @@ def build_from_fields(
     x_park: float = 3.0,
     z_park: float = 3.0,
     corner_breaks: Optional[List[Optional[dict]]] = None,
+    stock_back_z: Optional[float] = None,
+    finish_spring_pass: bool = False,
 ) -> Tuple[ClosedProfile, StockDef, RoughingParams, FinishingParams]:
     """Convert raw UI field values into typed dataclasses.
 
@@ -48,7 +50,8 @@ def build_from_fields(
         stock_dia: Stock diameter (inches)
         x_start: X approach position (diameter)
         z_start: Z approach position (inches, positive)
-        z_end: Z end position (inches, negative)
+        z_end: Legacy argument retained for callers; contour geometry determines depth.
+        stock_back_z: Optional physical stock back face, separate from operation depth.
         mode: "od" or "id"
         pilot_hole_dia: Pilot hole diameter (0 if none)
         doc_dia: Depth of cut (diameter)
@@ -94,6 +97,82 @@ def build_from_fields(
     except ValueError:
         raise ValueError(f"Invalid strategy: '{strategy}'. Must be 'staircase' or 'offset_contour'.")
 
+    profile = profile_from_fields(segments, mode, corner_breaks)
+    from geometry.zone_builder import contour_z_end
+    from dataclasses import replace
+    operation_z_end = contour_z_end(profile)
+    profile = replace(profile, z_end=operation_z_end)
+
+    from math import isfinite
+    from models.constants import TOLERANCE
+    if stock_back_z is not None and not isfinite(stock_back_z):
+        raise ValueError("Stock back face must be finite.")
+    if stock_back_z is not None and stock_back_z > operation_z_end + TOLERANCE:
+        raise ValueError("Stock back face must be at or behind the operation Z End.")
+
+    stock = StockDef(
+        diameter=stock_dia,
+        x_start=x_start,
+        z_start=_safe_z_start(z_start, fin_allowance),
+        z_end=operation_z_end,
+        back_face_z=stock_back_z,
+        mode=machining_mode,
+        x_park=x_park,
+        z_park=z_park,
+        pilot_hole_dia=pilot_hole_dia,
+    )
+
+    roughing = RoughingParams(
+        doc_dia=doc_dia,
+        feed=feed,
+        strategy=roughing_strategy,
+        fin_allowance=fin_allowance,
+        peck_enabled=peck_enabled,
+        peck_length=peck_length,
+        spindle_rpm=spindle_rpm,
+    )
+
+    finishing = FinishingParams(
+        passes=finish_passes,
+        doc_dia=FinishingParams.doc_from_allowance(fin_allowance, finish_passes),
+        feed=finish_feed,
+        spring_pass=finish_spring_pass,
+    )
+
+    return profile, stock, roughing, finishing
+
+
+def _safe_z_start(z_start: float, fin_allowance: float) -> float:
+    """Ensure Z_start provides a safe approach without unnecessary face passes.
+
+    If Z_start is at or below the finish allowance threshold (Z=0 + fin_allowance),
+    there's no meaningful face material to remove. In that case, bump Z_start to
+    fin_allowance + 0.050" to provide a safe rapid approach clearance without
+    generating TFZ face passes.
+
+    This lets the user set Z_start=0 to skip face passes while still getting
+    a safe approach distance.
+
+    Args:
+        z_start: User-specified Z start (positive = above face)
+        fin_allowance: Finish allowance in DIAMETER
+
+    Returns:
+        Adjusted z_start value
+    """
+    fin_allowance_radius = fin_allowance / 2.0
+    threshold = fin_allowance_radius + 0.001  # Slightly above fin_allowance
+
+    if z_start <= threshold:
+        # No face material — provide safe approach clearance only
+        return fin_allowance_radius + 0.050
+
+    return z_start
+
+
+def profile_from_fields(segments: List[dict], mode: str, corner_breaks=None) -> ClosedProfile:
+    """Parse a contour identically for preview, depth calculation, and generation."""
+    machining_mode = MachiningMode(mode.lower())
     # Convert segment dicts to ProfileMove objects
     profile_moves = []
     for i, seg in enumerate(segments):
@@ -143,68 +222,12 @@ def build_from_fields(
         # Default: no corner breaks
         breaks = [None] * max(0, len(profile_moves) - 1)
 
-    # Build dataclasses
     profile = ClosedProfile(
         segments=profile_moves,
         corner_breaks=breaks,
         mode=machining_mode,
         z_start=0.0,  # Always 0 (finished face)
-        z_end=z_end,
+        z_end=min(float(seg.get("z", 0.0)) for seg in segments),
     )
 
-    stock = StockDef(
-        diameter=stock_dia,
-        x_start=x_start,
-        z_start=_safe_z_start(z_start, fin_allowance),
-        z_end=z_end,
-        mode=machining_mode,
-        x_park=x_park,
-        z_park=z_park,
-        pilot_hole_dia=pilot_hole_dia,
-    )
-
-    roughing = RoughingParams(
-        doc_dia=doc_dia,
-        feed=feed,
-        strategy=roughing_strategy,
-        fin_allowance=fin_allowance,
-        peck_enabled=peck_enabled,
-        peck_length=peck_length,
-        spindle_rpm=spindle_rpm,
-    )
-
-    finishing = FinishingParams(
-        passes=finish_passes,
-        doc_dia=finish_doc_dia,
-        feed=finish_feed,
-    )
-
-    return profile, stock, roughing, finishing
-
-
-def _safe_z_start(z_start: float, fin_allowance: float) -> float:
-    """Ensure Z_start provides a safe approach without unnecessary face passes.
-
-    If Z_start is at or below the finish allowance threshold (Z=0 + fin_allowance),
-    there's no meaningful face material to remove. In that case, bump Z_start to
-    fin_allowance + 0.050" to provide a safe rapid approach clearance without
-    generating TFZ face passes.
-
-    This lets the user set Z_start=0 to skip face passes while still getting
-    a safe approach distance.
-
-    Args:
-        z_start: User-specified Z start (positive = above face)
-        fin_allowance: Finish allowance in DIAMETER
-
-    Returns:
-        Adjusted z_start value
-    """
-    fin_allowance_radius = fin_allowance / 2.0
-    threshold = fin_allowance_radius + 0.001  # Slightly above fin_allowance
-
-    if z_start <= threshold:
-        # No face material — provide safe approach clearance only
-        return fin_allowance_radius + 0.050
-
-    return z_start
+    return profile

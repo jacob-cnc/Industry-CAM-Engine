@@ -11,7 +11,7 @@ from typing import Optional, List
 import logging
 import os
 
-from PyQt5.QtCore import Qt, pyqtSignal, QTimer
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QSignalBlocker
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QScrollArea, QLabel, QComboBox, QCheckBox, QSpinBox,
@@ -233,6 +233,7 @@ class ProgramTab(QWidget):
         self._setup_ui()
         self._connect_signals()
         self._update_ui_for_state()
+        self._refresh_finish_doc()
         # Start with a default OD Profile block in the block list
         default_block = self._block_list.add_block("od_profile", select=True)
         self._active_block_id = default_block.block_id
@@ -261,6 +262,7 @@ class ProgramTab(QWidget):
             "x_start": self._stock_x_start.value(),
             "z_start": self._stock_z_start.value(),
             "z_end": self._stock_z_end.value(),
+            "back_face_z": self._stock_back_z.value(),
             "x_park": self._stock_x_park.value(),
             "z_park": self._stock_z_park.value(),
             "pilot_hole_dia": self._stock_pilot_hole.value(),
@@ -284,7 +286,7 @@ class ProgramTab(QWidget):
         """Return current finishing field values as a dict."""
         return {
             "tool_number": self._finish_tool_num.value(),
-            "passes": int(self._finish_passes.value()),
+            "passes": int(self._finish_passes.value()) if float(self._finish_passes.value()).is_integer() else self._finish_passes.value(),
             "doc_dia": self._finish_doc.value(),
             "feed": self._finish_feed.value(),
             "spindle_rpm": self._finish_rpm.value(),
@@ -533,10 +535,20 @@ class ProgramTab(QWidget):
         form.addRow("Z Start:", self._stock_z_start)
 
         self._stock_z_end = NumericField(NumericFieldConfig(
-            min_value=-10.0, max_value=0.0, decimals=4,
+            min_value=-1000.0, max_value=0.0, decimals=4,
+            default_value=0.0, suffix="in",
+        ))
+        self._stock_z_end.setReadOnly(True)
+        self._stock_z_end.setToolTip("Derived from the active block contour, including arc extrema.")
+        self._stock_z_end.set_value(0.0)
+        form.addRow("Operation Z End:", self._stock_z_end)
+
+        self._stock_back_z = NumericField(NumericFieldConfig(
+            min_value=-1000.0, max_value=0.0, decimals=4,
             default_value=-1.0, suffix="in",
         ))
-        form.addRow("Z End:", self._stock_z_end)
+        self._stock_back_z.setToolTip("Physical back face of the stock, independent of cutting depth.")
+        form.addRow("Stock Back Face:", self._stock_back_z)
 
         self._stock_x_park = NumericField(NumericFieldConfig(
             min_value=0.0, max_value=20.0, decimals=4,
@@ -642,13 +654,15 @@ class ProgramTab(QWidget):
             min_value=1.0, max_value=10.0, decimals=0,
             default_value=1.0, suffix="", unit_aware=False,
         ))
-        form.addRow("Passes:", self._finish_passes)
+        form.addRow("Cutting passes:", self._finish_passes)
 
         self._finish_doc = NumericField(NumericFieldConfig(
-            min_value=0.0005, max_value=0.05, decimals=4,
-            default_value=0.002, suffix="dia",
+            min_value=0.0, max_value=20.0, decimals=6,
+            default_value=0.005, suffix="dia",
         ))
-        form.addRow("DOC:", self._finish_doc)
+        self._finish_doc.setReadOnly(True)
+        self._finish_doc.setToolTip("Finish allowance divided by cutting passes; spring pass is excluded.")
+        form.addRow("DOC (calculated):", self._finish_doc)
 
         self._finish_feed = NumericField(NumericFieldConfig(
             min_value=0.0001, max_value=0.05, decimals=4,
@@ -770,7 +784,7 @@ class ProgramTab(QWidget):
         self._stock_diameter.value_changed.connect(self._on_field_changed)
         self._stock_x_start.value_changed.connect(self._on_field_changed)
         self._stock_z_start.value_changed.connect(self._on_field_changed)
-        self._stock_z_end.value_changed.connect(self._on_field_changed)
+        self._stock_back_z.value_changed.connect(self._on_field_changed)
         self._stock_x_park.value_changed.connect(self._on_field_changed)
         self._stock_z_park.value_changed.connect(self._on_field_changed)
         self._stock_pilot_hole.value_changed.connect(self._on_field_changed)
@@ -786,13 +800,15 @@ class ProgramTab(QWidget):
 
         # Finishing fields
         self._finish_passes.value_changed.connect(self._on_field_changed)
-        self._finish_doc.value_changed.connect(self._on_field_changed)
+        self._finish_passes.value_changed.connect(self._refresh_finish_doc)
+        self._rough_fin_allowance.value_changed.connect(self._refresh_finish_doc)
+        self._finish_spring_pass.toggled.connect(self._on_field_changed)
         self._finish_feed.value_changed.connect(self._on_field_changed)
         self._finish_rpm.value_changed.connect(self._on_field_changed)
 
         # Segment list
         self._segment_list.segments_changed.connect(self._on_segments_changed)
-        self._segment_list.corner_breaks_changed.connect(self._on_field_changed)
+        self._segment_list.corner_breaks_changed.connect(lambda *_: self._on_segments_changed(self.get_segments()))
         self._segment_list.selection_changed.connect(self._on_segment_selection_changed)
 
         # Generate button
@@ -906,58 +922,46 @@ class ProgramTab(QWidget):
     def _restore_block_data(self, block):
         """Restore field values from a block's params_data into the UI."""
         data = block.params_data
-        if not data:
-            # No saved data — clear fields to defaults for new blocks
-            if block.is_profile:
-                self._segment_list.clear()
+        if not data and not block.is_profile:
             return
 
         if block.is_profile:
-            # Restore stock fields
             stock = data.get("stock", {})
-            if "diameter" in stock:
-                self._stock_diameter.set_value(stock["diameter"])
-            if "x_start" in stock:
-                self._stock_x_start.set_value(stock["x_start"])
-            if "z_start" in stock:
-                self._stock_z_start.set_value(stock["z_start"])
-            if "z_end" in stock:
-                self._stock_z_end.set_value(stock["z_end"])
-            if "x_park" in stock:
-                self._stock_x_park.set_value(stock["x_park"])
-            if "z_park" in stock:
-                self._stock_z_park.set_value(stock["z_park"])
-            if "pilot_hole_dia" in stock:
-                self._stock_pilot_hole.set_value(stock["pilot_hole_dia"])
-
-            # Restore roughing fields
             roughing = data.get("roughing", {})
-            if "doc_dia" in roughing:
-                self._rough_doc.set_value(roughing["doc_dia"])
-            if "feed" in roughing:
-                self._rough_feed.set_value(roughing["feed"])
-            if "fin_allowance" in roughing:
-                self._rough_fin_allowance.set_value(roughing["fin_allowance"])
-            if "spindle_rpm" in roughing:
-                self._rough_rpm.set_value(roughing["spindle_rpm"])
-            if "tool_number" in roughing:
-                self._rough_tool_num.setValue(int(roughing["tool_number"]))
-
-            # Restore finishing fields
             finishing = data.get("finishing", {})
-            if "tool_number" in finishing:
-                self._finish_tool_num.setValue(int(finishing["tool_number"]))
-            if "passes" in finishing:
-                self._finish_passes.set_value(float(finishing["passes"]))
-            if "doc_dia" in finishing:
-                self._finish_doc.set_value(finishing["doc_dia"])
-            if "feed" in finishing:
-                self._finish_feed.set_value(finishing["feed"])
+            # Missing optional fields use widget defaults, never values left by
+            # a different program or previously selected block.
+            for key, field in (
+                ("diameter", self._stock_diameter), ("x_start", self._stock_x_start),
+                ("z_start", self._stock_z_start), ("x_park", self._stock_x_park),
+                ("z_park", self._stock_z_park), ("pilot_hole_dia", self._stock_pilot_hole),
+            ):
+                field.set_value(stock.get(key, field._config.default_value))
+            for key, field in (
+                ("doc_dia", self._rough_doc), ("feed", self._rough_feed),
+                ("fin_allowance", self._rough_fin_allowance), ("spindle_rpm", self._rough_rpm),
+            ):
+                field.set_value(roughing.get(key, field._config.default_value))
+            strategy = roughing.get("strategy", "staircase").replace("_", " ").title()
+            self._rough_strategy.setCurrentText(strategy)
+            self._rough_peck_check.setChecked(bool(roughing.get("peck_enabled", False)))
+            self._rough_peck_length.set_value(roughing.get("peck_length") or self._rough_peck_length._config.default_value)
+            rough_tool = int(roughing.get("tool_number", block.tool_number))
+            self._rough_tool_num.setValue(rough_tool)
+            self._finish_tool_num.setValue(int(finishing.get("tool_number", rough_tool)))
+            for key, field in (
+                ("passes", self._finish_passes), ("feed", self._finish_feed),
+                ("spindle_rpm", self._finish_rpm),
+            ):
+                field.set_value(finishing.get(key, field._config.default_value))
 
             # Restore segments
             segments = data.get("segments", [])
             corner_breaks = data.get("corner_breaks", [])
             self._segment_list.set_segments(segments, corner_breaks)
+            self._refresh_operation_z_end(segments)
+            self._finish_spring_pass.setChecked(bool(finishing.get("spring_pass", False)))
+            self._refresh_finish_doc()
 
         elif block.is_threading:
             self._threading_panel.set_values(data)
@@ -993,12 +997,38 @@ class ProgramTab(QWidget):
 
     def _on_segments_changed(self, segments: list):
         """Profile segments changed — auto-populate Z End from most negative Z."""
-        if segments:
-            z_values = [seg.get("z", 0.0) for seg in segments]
-            min_z = min(z_values)
-            if min_z < 0:
-                self._stock_z_end.set_value(min_z)
+        self._refresh_operation_z_end(segments)
         self._on_field_changed()
+
+    def _refresh_operation_z_end(self, segments=None):
+        from pipeline.model_builder import profile_from_fields
+        from geometry.zone_builder import contour_z_end
+        if segments is None:
+            segments = self.get_segments()
+        if not segments:
+            self._stock_z_end.set_value(0.0)
+            self._stock_z_end.setText("—")
+            return
+        try:
+            profile = profile_from_fields(segments, self._get_machining_mode(), self.get_corner_breaks())
+            self._stock_z_end.set_value(contour_z_end(profile))
+            self._stock_z_end.setToolTip("Derived from the active block contour, including arc extrema.")
+        except (ValueError, RuntimeError) as exc:
+            self._stock_z_end.set_value(0.0)
+            self._stock_z_end.setText("Invalid contour")
+            self._stock_z_end.setToolTip(str(exc))
+
+    def _refresh_finish_doc(self, *_):
+        from models.params import FinishingParams
+        value = self._finish_passes.value()
+        try:
+            if not float(value).is_integer():
+                raise ValueError("Finish passes must be a positive integer.")
+            doc = FinishingParams.doc_from_allowance(self._rough_fin_allowance.value(), int(value))
+            self._finish_doc.set_value(doc)
+        except ValueError as exc:
+            self._finish_doc.setText("Invalid finish settings")
+            self._finish_doc.setToolTip(str(exc))
 
     def _on_segment_selection_changed(self, seg_index: int):
         """Segment selection changed in the builder — highlight on graph."""
@@ -1156,7 +1186,9 @@ class ProgramTab(QWidget):
         tool_num = roughing.get("tool_number", block.tool_number)
         tool_def = None
         if self._tool_resolver:
-            tool_def = self._tool_resolver(tool_num)
+            # The tool table is authoritative: never substitute another tool or
+            # a built-in default (TNR would silently differ from the machine).
+            tool_def = self._require_tool(tool_num, block, "roughing")
         if tool_def is None:
             tool_def = self._active_tool
         if tool_def is None:
@@ -1178,6 +1210,7 @@ class ProgramTab(QWidget):
             x_start=stock.get("x_start", 0.0),
             z_start=stock.get("z_start", 0.1),
             z_end=stock.get("z_end", -1.0),
+            stock_back_z=self._stock_back_z.value(),
             mode=mode,
             pilot_hole_dia=stock.get("pilot_hole_dia", 0.0),
             doc_dia=roughing.get("doc_dia", 0.030),
@@ -1187,9 +1220,10 @@ class ProgramTab(QWidget):
             peck_enabled=roughing.get("peck_enabled", False),
             peck_length=roughing.get("peck_length", None),
             spindle_rpm=roughing.get("spindle_rpm", 1200.0),
-            finish_passes=int(finishing.get("passes", 1)),
+            finish_passes=finishing.get("passes", 1),
             finish_doc_dia=finishing.get("doc_dia", 0.002),
             finish_feed=finishing.get("feed", 0.003),
+            finish_spring_pass=bool(finishing.get("spring_pass", False)),
             tool_def=tool_def,
             x_park=stock.get("x_park", 3.0),
             z_park=stock.get("z_park", 3.0),
@@ -1201,7 +1235,7 @@ class ProgramTab(QWidget):
         finish_tool_num = finishing.get("tool_number", tool_num)
         if finish_tool_num != tool_def.tool_number:
             if self._tool_resolver:
-                finish_tool_def = self._tool_resolver(finish_tool_num)
+                finish_tool_def = self._require_tool(finish_tool_num, block, "finishing")
             if finish_tool_def is None:
                 finish_tool_def = ToolDef(
                     tool_number=finish_tool_num,
@@ -1319,11 +1353,21 @@ class ProgramTab(QWidget):
         ))
         return lines
 
+    def _require_tool(self, tool_number: int, block, role: str):
+        """Resolve a tool from the Tools tab table or fail generation clearly."""
+        tool_def = self._tool_resolver(tool_number)
+        if tool_def is None:
+            raise ValueError(
+                f"Tool T{tool_number} ({role}) for block '{block.display_label}' is not in "
+                f"the tool table. Add it in the Tools tab or choose another tool, then "
+                f"regenerate.")
+        return tool_def
+
     def _resolve_tool_for_block(self, block):
         """Look up ToolDef for a block from the tool table."""
         tool_def = None
         if self._tool_resolver:
-            tool_def = self._tool_resolver(block.tool_number)
+            tool_def = self._require_tool(block.tool_number, block, "block")
         if tool_def is None:
             from models.tool import ToolType as TT
             tool_def = ToolDef(
@@ -1388,7 +1432,7 @@ class ProgramTab(QWidget):
         # Check all numeric fields are valid
         numeric_fields = [
             self._stock_diameter, self._stock_x_start,
-            self._stock_z_start, self._stock_z_end,
+            self._stock_z_start, self._stock_z_end, self._stock_back_z,
             self._stock_x_park, self._stock_z_park,
             self._rough_doc, self._rough_feed, self._rough_fin_allowance,
             self._rough_rpm,
@@ -1579,6 +1623,8 @@ class ProgramTab(QWidget):
 
         data = {
             "version": 2,
+            "stock_back_face_z": self._stock_back_z.value(),
+            "active_block_id": self._active_block_id,
             "blocks": blocks_data,
         }
 
@@ -1603,137 +1649,95 @@ class ProgramTab(QWidget):
                 )
 
     def _load_program_data(self, data: dict):
-        """Deserialize program state from JSON dict into fields.
-
-        Handles both formats:
-            - Version 2 (multi-block): data["blocks"] array
-            - Version 1 (legacy single-block): flat structure with stock/roughing/segments
-        """
+        """Restore legacy or multi-block conversation, including the edited block."""
+        from copy import deepcopy
         from models.program import ProgramBlock
-
+        from gui.components.block_list import BLOCK_TYPE_INFO
+        from outputs.graph_adapter import GraphData
+        if not isinstance(data, dict):
+            raise ValueError("Conversational program must be a JSON object.")
         version = data.get("version", 1)
-
-        if version >= 2 and "blocks" in data:
-            # Multi-block format — rebuild the block list
-            blocks_data = data["blocks"]
-            blocks = []
-            for bd in blocks_data:
-                block = ProgramBlock(
-                    block_id=bd.get("block_id", 0),
-                    block_type=bd.get("block_type", "od_profile"),
-                    tool_number=bd.get("tool_number", 1),
-                    enabled=bd.get("enabled", True),
-                    label=bd.get("label", ""),
-                    visible=bd.get("visible", True),
-                )
-                block.params_data = bd.get("params", {})
-                blocks.append(block)
-
-            # Load into block list (disconnect signal to prevent premature restore)
-            self._block_list.block_selected.disconnect(self._on_block_selected)
-            self._block_list.set_blocks(blocks)
-            self._block_list.block_selected.connect(self._on_block_selected)
-            # Select the first block and restore its data
-            if blocks:
-                self._active_block_id = blocks[0].block_id
-                self._restore_block_data(blocks[0])
-                # Trigger section visibility for the first block's type
-                type_to_index = {
-                    "od_profile": 0, "id_profile": 1,
-                    "threading_od": 2, "threading_id": 2,
-                    "grooving_od": 3, "grooving_id": 3, "parting": 3,
-                }
-                idx = type_to_index.get(blocks[0].block_type, 0)
-                self._block_type_combo.blockSignals(True)
-                self._block_type_combo.setCurrentIndex(idx)
-                self._block_type_combo.blockSignals(False)
-                self._on_block_type_changed(idx)
+        if version not in (1, 2):
+            raise ValueError(f"Unsupported conversational program version: {version}")
+        if version == 1:
+            if not isinstance(data.get("segments"), list):
+                raise ValueError("This JSON has no conversational profile segments.")
+            legacy_type = data.get("block_type", "ID Profile" if data.get("stock", {}).get("mode") == "id" else "OD Profile")
+            type_map = {"OD Profile": "od_profile", "ID Profile": "id_profile",
+                        "od_profile": "od_profile", "id_profile": "id_profile"}
+            if legacy_type not in type_map:
+                raise ValueError(f"Unsupported legacy profile type: {legacy_type}")
+            blocks_data = [dict(block_id=1, block_type=type_map[legacy_type],
+                                tool_number=data.get("roughing", {}).get("tool_number", 1), params=data)]
         else:
-            # Legacy single-block format — create one profile block from flat data
-            self._block_list.clear()
-
-            block_type_str = data.get("block_type", "OD Profile")
-            block_type_map = {"OD Profile": "od_profile", "ID Profile": "id_profile"}
-            block_type = block_type_map.get(block_type_str, "od_profile")
-
-            block = self._block_list.add_block(block_type, select=True)
-            self._active_block_id = block.block_id
-
-            # Load the legacy fields directly into the UI
-            self._legacy_load_fields(data)
-
-            # Save into the block's params_data
-            self._save_active_block_data()
-
-    def _legacy_load_fields(self, data: dict):
-        """Load fields from a legacy (version 1) single-block format."""
-        # Block type
-        block_type = data.get("block_type", "OD Profile")
-        idx = self._block_type_combo.findText(block_type)
-        if idx >= 0:
-            self._block_type_combo.blockSignals(True)
-            self._block_type_combo.setCurrentIndex(idx)
-            self._block_type_combo.blockSignals(False)
-
-        # Stock
-        stock = data.get("stock", {})
-        if "diameter" in stock:
-            self._stock_diameter.set_value(stock["diameter"])
-        if "x_start" in stock:
-            self._stock_x_start.set_value(stock["x_start"])
-        if "z_start" in stock:
-            self._stock_z_start.set_value(stock["z_start"])
-        if "z_end" in stock:
-            self._stock_z_end.set_value(stock["z_end"])
-        if "x_park" in stock:
-            self._stock_x_park.set_value(stock["x_park"])
-        if "z_park" in stock:
-            self._stock_z_park.set_value(stock["z_park"])
-        if "pilot_hole_dia" in stock:
-            self._stock_pilot_hole.set_value(stock["pilot_hole_dia"])
-
-        # Roughing
-        roughing = data.get("roughing", {})
-        if "doc_dia" in roughing:
-            self._rough_doc.set_value(roughing["doc_dia"])
-        if "feed" in roughing:
-            self._rough_feed.set_value(roughing["feed"])
-        if "strategy" in roughing:
-            strategy_text = roughing["strategy"].replace("_", " ").title()
-            idx = self._rough_strategy.findText(strategy_text)
-            if idx >= 0:
-                self._rough_strategy.setCurrentIndex(idx)
-        if "fin_allowance" in roughing:
-            self._rough_fin_allowance.set_value(roughing["fin_allowance"])
-        if "peck_enabled" in roughing:
-            self._rough_peck_check.setChecked(roughing["peck_enabled"])
-        if "peck_length" in roughing and roughing["peck_length"] is not None:
-            self._rough_peck_length.set_value(roughing["peck_length"])
-        if "spindle_rpm" in roughing:
-            self._rough_rpm.set_value(roughing["spindle_rpm"])
-        if "tool_number" in roughing:
-            self._rough_tool_num.setValue(int(roughing["tool_number"]))
-
-        # Finishing
-        finishing = data.get("finishing", {})
-        if "tool_number" in finishing:
-            self._finish_tool_num.setValue(int(finishing["tool_number"]))
-        if "passes" in finishing:
-            self._finish_passes.set_value(float(finishing["passes"]))
-        if "doc_dia" in finishing:
-            self._finish_doc.set_value(finishing["doc_dia"])
-        if "feed" in finishing:
-            self._finish_feed.set_value(finishing["feed"])
-        if "spindle_rpm" in finishing:
-            self._finish_rpm.set_value(finishing["spindle_rpm"])
-        if "spring_pass" in finishing:
-            self._finish_spring_pass.setChecked(finishing["spring_pass"])
-
-        # Segments
-        segments = data.get("segments", [])
-        if segments:
-            corner_breaks = data.get("corner_breaks", None)
-            self._segment_list.set_segments(segments, corner_breaks=corner_breaks)
+            blocks_data = data.get("blocks")
+            if not isinstance(blocks_data, list):
+                raise ValueError("Conversational program has no block list.")
+        blocks = []
+        ids = set()
+        for index, entry in enumerate(blocks_data):
+            if not isinstance(entry, dict):
+                raise ValueError("Every conversational block must be an object.")
+            block_id = entry.get("block_id", index + 1)
+            if type(block_id) is not int or block_id < 0 or block_id in ids:
+                raise ValueError("Conversational block IDs must be unique nonnegative integers.")
+            ids.add(block_id)
+            block_type = entry.get("block_type", "od_profile")
+            if block_type not in BLOCK_TYPE_INFO:
+                raise ValueError(f"Unsupported conversational block type: {block_type}")
+            params = entry.get("params", {})
+            if not isinstance(params, dict):
+                raise ValueError("Conversational block parameters must be an object.")
+            if block_type in ("od_profile", "id_profile"):
+                for key in ("stock", "roughing", "finishing"):
+                    if key in params and not isinstance(params[key], dict):
+                        raise ValueError(f"Block {key} must be an object.")
+                if not isinstance(params.get("segments", []), list):
+                    raise ValueError("Profile segments must be a list.")
+                if params.get("roughing", {}).get("strategy", "staircase") not in ("staircase", "offset_contour"):
+                    raise ValueError("Unsupported saved roughing strategy.")
+            block = ProgramBlock(block_id=block_id, block_type=block_type,
+                tool_number=entry.get("tool_number", 1), enabled=entry.get("enabled", True),
+                label=entry.get("label", ""), visible=entry.get("visible", True))
+            block.params_data = deepcopy(params)
+            blocks.append(block)
+        selected = next((b for b in blocks if b.block_id == data.get("active_block_id")), None)
+        if selected is None:
+            selected = next((b for b in blocks if b.enabled and b.visible and b.params_data
+                and (not b.is_profile or b.params_data.get("segments"))), None)
+        if selected is None and blocks:
+            selected = next((b for b in blocks if b.enabled and b.visible), blocks[0])
+        depths = [b.params_data.get("stock", {}).get("back_face_z",
+                  b.params_data.get("stock", {}).get("z_end", -1.0)) for b in blocks if b.is_profile]
+        back_face = data.get("stock_back_face_z", min(depths, default=-1.0))
+        # Suppress selection callbacks while replacing models. In particular,
+        # never save fields from the old program into a new block with the same ID.
+        self._active_block_id = -1
+        self._stock_back_z.set_value(back_face)
+        with QSignalBlocker(self._block_list):
+            self._block_list.set_blocks(blocks)
+            if selected is not None:
+                self._block_list.select_block(selected.block_id)
+        if selected is not None:
+            self._on_block_selected(selected.block_id)
+        else:
+            self._block_type_combo.setCurrentIndex(0)
+            blank = ProgramBlock(block_id=0, block_type="od_profile")
+            blank.params_data = dict(stock={}, roughing={}, finishing={}, segments=[])
+            self._restore_block_data(blank)
+        # A JSON open restores conversation; it must not retain another program's
+        # cached output or save it as the newly loaded program's companion .ngc.
+        self._last_gcode_text = ""
+        self._profile_contour_segments = []
+        self._selected_segment_index = -1
+        collapsed = self._sim_viewer._gcode_collapsed
+        self._sim_viewer.load(GraphData(), "", [])
+        self._sim_viewer._sim_stop()
+        if collapsed:
+            self._sim_viewer._splitter.setSizes([1000, 0])
+            self._sim_viewer._gcode_collapsed = True
+            self._sim_viewer._btn_toggle_code.setText("Show Code")
+        self.set_state(ProgramState.BUILDING if blocks else ProgramState.IDLE)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -2087,7 +2091,7 @@ class ProgramTab(QWidget):
         try:
             stock_dia = self._stock_diameter.value()
             z_start = self._stock_z_start.value()
-            z_end = self._stock_z_end.value()
+            z_end = self._stock_back_z.value()
             stock_r = stock_dia / 2.0
 
             if stock_r > 0 and z_start != z_end:
@@ -2242,7 +2246,8 @@ class ProgramTab(QWidget):
         field_labels = [
             (self._stock_diameter, "Stock Diameter"),
             (self._stock_z_start, "Z Start"),
-            (self._stock_z_end, "Z End"),
+            (self._stock_z_end, "Operation Z End"),
+            (self._stock_back_z, "Stock Back Face"),
             (self._rough_doc, "Roughing DOC"),
             (self._rough_feed, "Roughing Feed"),
             (self._rough_fin_allowance, "Finish Allowance"),

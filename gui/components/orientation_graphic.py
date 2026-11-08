@@ -122,24 +122,23 @@ class OrientationGraphicWidget(QWidget):
     ) -> Tuple[float, float]:
         """Get the tip position for a round insert based on orientation.
 
-        Lathe operator's POV: Z+ = right, X+ = up (screen Y negative).
+        Screen: Z+ right, X+ down (front-tool lathe, as LinuxCNC Fig 2.16).
         """
         # For Q9 (center), tip is at center
         if self._orientation == 9:
             return cx, cy
 
-        # Map orientation to screen position
-        # Q1: +X,+Z = top-right, Q2: +X,-Z = top-left
-        # Q3: -X,-Z = bottom-left, Q4: -X,+Z = bottom-right
+        # Screen angle of the cutting corner (0 = right/+Z, 90 = up/-X),
+        # per LinuxCNC 2.9.6 Fig 2.16 drawn with X+ DOWN (front-tool lathe).
         angle_map = {
-            1: 45.0,    # top-right
-            2: 135.0,   # top-left
-            3: 225.0,   # bottom-left
-            4: 315.0,   # bottom-right
-            5: 45.0,    # top-right (ID)
-            6: 135.0,   # top-left (ID)
-            7: 225.0,   # bottom-left (ID)
-            8: 315.0,   # bottom-right (ID)
+            1: 45.0,    # corner -X,+Z
+            2: 135.0,   # corner -X,-Z  (RH OD turning toward chuck)
+            3: 225.0,   # corner +X,-Z  (conventional boring bar)
+            4: 315.0,   # corner +X,+Z
+            5: 0.0,     # +Z
+            6: 90.0,    # -X
+            7: 180.0,   # -Z
+            8: 270.0,   # +X
         }
         angle_deg = angle_map.get(self._orientation, 45.0)
         angle_rad = math.radians(angle_deg)
@@ -213,14 +212,23 @@ class OrientationGraphicWidget(QWidget):
             body_corner = QPointF(front_dx + back_dx, front_dy + back_dy)
             polygon = QPolygonF([tip, front_end, body_corner, back_end])
 
-        # Apply orientation transform (mirror for Q2-Q8)
+        # Orient: mirror for corner orientations Q1-Q4; for Q5-Q8 rotate so the
+        # corner points along the axis (corner direction = away from the body).
         transform = self._get_orientation_transform()
+        rot = 0.0
+        if self._orientation in self._AXIS_DIRECTIONS:
+            n = polygon.count()
+            bx = sum(polygon.at(i).x() for i in range(n)) / n
+            by = sum(polygon.at(i).y() for i in range(n)) / n
+            tx_, ty_ = self._AXIS_DIRECTIONS[self._orientation]
+            rot = math.atan2(ty_, tx_) - math.atan2(-by, -bx)
+        cos_r, sin_r = math.cos(rot), math.sin(rot)
 
-        # Apply transform and center in widget
         transformed = QPolygonF()
         for i in range(polygon.count()):
             pt = polygon.at(i)
             tx, ty = self._apply_transform(pt.x(), pt.y(), transform)
+            tx, ty = tx * cos_r - ty * sin_r, tx * sin_r + ty * cos_r
             transformed.append(QPointF(cx + tx, cy + ty))
 
         # Offset tip toward its quadrant edge
@@ -252,42 +260,28 @@ class OrientationGraphicWidget(QWidget):
         # Control point crosshair at the programmed point (at the tip)
         self._draw_crosshair(painter, tip_pt.x(), tip_pt.y())
 
+    # LinuxCNC tool orientation (2.9.6 manual, Fig 2.16), drawn the way the
+    # main graphs and the manual show a FRONT-TOOL lathe: Z+ right, X+ DOWN
+    # (toward the operator). The "corner" is the cutting corner relative to the
+    # nose centre:
+    #   Q1 -X,+Z   Q2 -X,-Z (RH OD turning)   Q3 +X,-Z (conventional boring bar)
+    #   Q4 +X,+Z   Q5 +Z   Q6 -X   Q7 -Z   Q8 +X   Q9 centre
+    # Before 2026-11-08 this widget drew Q1<->Q2 and Q3<->Q4 swapped and Q5-Q8 as
+    # copies of Q1-Q4 (so a boring bar only looked right as Q8).
+    # Corners reuse the canonical polygon's mirror transforms; the canonical
+    # (1, 1) shape has its corner pointing up-left (= Q2).
+    _CORNER_TRANSFORMS = {
+        1: (-1.0, 1.0),    # up-right
+        2: (1.0, 1.0),     # up-left (canonical)
+        3: (1.0, -1.0),    # down-left  (was this widget's "Q8"/"Q4" picture)
+        4: (-1.0, -1.0),   # down-right
+    }
+    # Screen unit vector of the corner direction for axis-aligned Q5-Q8.
+    _AXIS_DIRECTIONS = {5: (1.0, 0.0), 6: (0.0, -1.0), 7: (-1.0, 0.0), 8: (0.0, 1.0)}
+
     def _get_orientation_transform(self) -> Tuple[float, float]:
-        """Get the 2D mirror transform for the current orientation.
-
-        Returns (mirror_x, mirror_y) tuple that maps the canonical Q1 shape
-        to the target orientation.
-
-        Lathe operator's POV (standard LinuxCNC lathe convention):
-            - Z+ points RIGHT (toward tailstock)
-            - X+ points UP (increasing diameter)
-            - Spindle/chuck is on the LEFT
-
-        Orientation positions (tip location in X/Z quadrant):
-            Q1: tip at +X, +Z → screen top-right (typical OD turning RH)
-            Q2: tip at +X, -Z → screen top-left
-            Q3: tip at -X, -Z → screen bottom-left
-            Q4: tip at -X, +Z → screen bottom-right
-            Q5: tip at +X, +Z → screen top-right (ID/boring)
-            Q6: tip at +X, -Z → screen top-left (ID/boring)
-            Q7: tip at -X, -Z → screen bottom-left (ID/boring)
-            Q8: tip at -X, +Z → screen bottom-right (ID/boring)
-            Q9: center (round/knurling)
-        """
-        # Canonical shape is built with tip pointing toward top-right (Q1).
-        # Mirror transforms map to other quadrants.
-        transforms = {
-            1: (1.0, 1.0),     # Q1: canonical (tip top-right)
-            2: (-1.0, 1.0),    # Q2: mirror X → tip top-left
-            3: (-1.0, -1.0),   # Q3: mirror both → tip bottom-left
-            4: (1.0, -1.0),    # Q4: mirror Y → tip bottom-right
-            5: (1.0, 1.0),     # Q5: same as Q1 (ID variant)
-            6: (-1.0, 1.0),    # Q6: same as Q2 (ID variant)
-            7: (-1.0, -1.0),   # Q7: same as Q3 (ID variant)
-            8: (1.0, -1.0),    # Q8: same as Q4 (ID variant)
-            9: (1.0, 1.0),     # Q9: center (no transform needed)
-        }
-        return transforms.get(self._orientation, (1.0, 1.0))
+        """Mirror transform for corner orientations Q1-Q4 (identity otherwise)."""
+        return self._CORNER_TRANSFORMS.get(self._orientation, (1.0, 1.0))
 
     def _apply_transform(
         self, x: float, y: float, transform: Tuple[float, float]
@@ -297,29 +291,19 @@ class OrientationGraphicWidget(QWidget):
         return x * mx, y * my
 
     def _get_tip_offset(self) -> Tuple[float, float]:
-        """Get the offset to position the tip in the correct quadrant of the widget.
-
-        The tip should be positioned toward the edge of the widget corresponding
-        to its orientation quadrant, so the insert body fills the opposite area.
-
-        Lathe operator's POV:
-            Z+ = screen right, X+ = screen up (Y negative)
-            Q1: +X,+Z = top-right, Q2: +X,-Z = top-left
-            Q3: -X,-Z = bottom-left, Q4: -X,+Z = bottom-right
-        """
-        offset = 20.0  # pixels from center toward the tip's quadrant edge
-        offsets = {
-            1: (offset, -offset),    # Q1: tip top-right
-            2: (-offset, -offset),   # Q2: tip top-left
-            3: (-offset, offset),    # Q3: tip bottom-left
-            4: (offset, offset),     # Q4: tip bottom-right
-            5: (offset, -offset),    # Q5: same as Q1
-            6: (-offset, -offset),   # Q6: same as Q2
-            7: (-offset, offset),    # Q7: same as Q3
-            8: (offset, offset),     # Q8: same as Q4
-            9: (0.0, 0.0),          # Q9: centered
+        """Offset that moves the corner toward its side of the widget so the
+        insert body fills the opposite area."""
+        offset = 20.0
+        if self._orientation in self._AXIS_DIRECTIONS:
+            dx, dy = self._AXIS_DIRECTIONS[self._orientation]
+            return (dx * offset * 1.4, dy * offset * 1.4)
+        corner = {
+            1: (offset, -offset),     # up-right
+            2: (-offset, -offset),    # up-left
+            3: (-offset, offset),     # down-left
+            4: (offset, offset),      # down-right
         }
-        return offsets.get(self._orientation, (0.0, 0.0))
+        return corner.get(self._orientation, (0.0, 0.0))
 
     def _draw_crosshair(
         self, painter: QPainter, x: float, y: float

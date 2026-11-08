@@ -46,7 +46,10 @@ class CleanupPlanner:
         mode: MachiningMode,
         profile: ClosedProfile = None,
     ) -> List[TurningPass]:
-        """Generate cleanup pass: offset finished part by fin_allowance, clip to turning region.
+        """Generate cleanup at the finish-allowance boundary.
+
+        ID uses the geometry query's open profile offset and wire clipping,
+        preserving authored shoulders. OD retains its existing face-offset route.
 
         Cleanup pass = Finished Part offset equidistant by fin_allowance,
         clipped at Z0+fin, Z_end, X_start+fin.
@@ -93,12 +96,19 @@ class CleanupPlanner:
             # ID: approach from pilot hole outward
             x_start_fin_dia = stock.pilot_hole_dia
 
-        # Compute the offset profile using the geometry kernel
-        # Completely separate paths for OD and ID — no shared logic that could regress
+        # OD retains its existing route. ID offsets the actual open contour;
+        # artificial stock closures must not replace or erase real shoulders.
         if mode == MachiningMode.OD:
             offset_edges = self._compute_offset_profile(segments, fin_allowance_radius, mode, stock, z0_fin, profile)
         else:
-            offset_edges = self._compute_offset_profile_id(segments, fin_allowance_radius, stock, z0_fin, profile)
+            edges = zone_query.profile_offset_edges(
+                profile, params.fin_allowance, z_min=stock.z_end + fin_allowance_radius)
+            if not edges:
+                raise RuntimeError("ID cleanup produced no contour for the requested profile.")
+            if any(edge.edge_type not in ("LINE", "ARC") for edge in edges):
+                raise RuntimeError("ID cleanup currently supports line and circular-arc contours only.")
+            offset_edges = [(edge.start, edge.end, edge.edge_type, edge.center, edge.radius)
+                            for edge in edges]
 
         if not offset_edges:
             return []
@@ -581,272 +591,6 @@ class CleanupPlanner:
                         found = True
                         break
                     # Check if edge end matches current end (need to reverse)
-                    if (abs(edge[1][0] - current_end[0]) < 0.001 and
-                            abs(edge[1][1] - current_end[1]) < 0.001):
-                        start, end, etype, center, radius = remaining.pop(i)
-                        ordered.append((end, start, etype, center, radius))
-                        found = True
-                        break
-                if not found:
-                    break
-
-            return ordered
-        except Exception:
-            return []
-
-    def _compute_offset_profile_id(
-        self,
-        segments: List[ProfileMove],
-        fin_allowance_radius: float,
-        stock: StockDef,
-        z0_fin: float,
-        profile: ClosedProfile = None,
-    ) -> List[tuple]:
-        """Compute the ID cleanup contour by offsetting the finished part face TOWARD centerline.
-
-        Same kernel-driven approach as OD, but with ID-specific geometry:
-        - Closure goes to stock OD (not centerline)
-        - Offset direction is NEGATIVE (shrink toward centerline = bore-side boundary)
-        - Clip region captures the bore-side (inner) boundary of the offset face
-        - Edge filter removes pilot hole, Z_top, Z_bot clip boundaries
-
-        The offset is equidistant (kernel-driven) so arcs and tapers are handled correctly.
-
-        Returns list of edge tuples (same format as OD version):
-          LINE: ((start_x_dia, start_z), (end_x_dia, end_z), "LINE", None, 0.0)
-          ARC:  ((start_x_dia, start_z), (end_x_dia, end_z), "ARC", (center_x_dia, center_z), radius)
-        """
-        from build123d import (
-            BuildSketch, BuildLine, Line, RadiusArc, make_face,
-            offset as b3d_offset, Kind,
-        )
-        from OCP.TopExp import TopExp_Explorer
-        from OCP.TopAbs import TopAbs_FACE
-        from OCP.TopoDS import TopoDS
-        from OCP.BRepAdaptor import BRepAdaptor_Curve
-        from OCP.GeomAbs import GeomAbs_Line, GeomAbs_Circle
-        from OCP.BRepTools import BRepTools
-
-        if len(segments) < 2:
-            return []
-
-        # Step 1: Build the finished part face (profile + closure to stock OD)
-        try:
-            # Use corner-break-aware coords if profile is available
-            if profile is not None:
-                coords = _profile_to_radius_coords(profile)
-            else:
-                coords = []
-                for seg in segments:
-                    coords.append({
-                        "type": seg.segment_type,
-                        "x_radius": seg.x / 2.0,
-                        "z": seg.z,
-                        "radius": seg.radius,
-                    })
-
-            # ID closure goes to stock OD
-            closure_x = stock.diameter / 2.0
-            last_x_r = coords[-1]["x_radius"]
-            last_z = coords[-1]["z"]
-            first_x_r = coords[0]["x_radius"]
-            first_z = coords[0]["z"]
-
-            if abs(last_x_r - closure_x) > 1e-10:
-                coords.append({"type": SegmentType.LINE, "x_radius": closure_x, "z": last_z, "radius": 0.0})
-            coords.append({"type": SegmentType.LINE, "x_radius": closure_x, "z": 0.0, "radius": 0.0})
-            if abs(closure_x - first_x_r) > 1e-10 or abs(0.0 - first_z) > 1e-10:
-                coords.append({"type": SegmentType.LINE, "x_radius": first_x_r, "z": first_z, "radius": 0.0})
-
-            with BuildSketch() as sketch:
-                with BuildLine():
-                    for i in range(len(coords)):
-                        next_i = (i + 1) % len(coords)
-                        current = coords[i]
-                        target = coords[next_i]
-                        cx, cz = current["x_radius"], current["z"]
-                        tx, tz = target["x_radius"], target["z"]
-                        if abs(cx - tx) < 1e-10 and abs(cz - tz) < 1e-10:
-                            continue
-                        if target["type"] == SegmentType.ARC and target["radius"] != 0.0:
-                            b3d_radius = target["radius"]
-                            RadiusArc((cx, cz), (tx, tz), b3d_radius)
-                        else:
-                            Line((cx, cz), (tx, tz))
-                make_face()
-            finished_part_face = sketch.sketch
-        except Exception:
-            return []
-
-        # Step 2: Offset the finished part face OUTWARD by fin_allowance
-        # Positive offset expands the face in all directions.
-        # For ID, this moves the bore-side boundary TOWARD centerline (smaller X)
-        # by fin_allowance — creating the roughing boundary.
-        # The bore-side boundary of the expanded face = profile_x - fin_allowance.
-        try:
-            offset_amount = fin_allowance_radius
-            offset_face = b3d_offset(finished_part_face, amount=offset_amount, kind=Kind.INTERSECTION)
-        except Exception:
-            return []
-
-        # Step 3: Extract boundary wire from the offset face
-        try:
-            offset_faces = offset_face.faces() if hasattr(offset_face, 'faces') else []
-            if not offset_faces:
-                return []
-            ocp_face = offset_faces[0].wrapped
-        except Exception:
-            return []
-
-        # Step 4: Clip the offset face to the turning region
-        # For ID: clip from pilot hole to just past the roughing boundary
-        # This captures the bore-side boundary (the cleanup contour)
-        try:
-            from build123d import BuildSketch, BuildLine, Line, make_face
-            from OCP.BRepAlgoAPI import BRepAlgoAPI_Common
-
-            z_top = z0_fin
-            z_bot = segments[-1].z + fin_allowance_radius  # Leave room for finish at bore bottom
-
-            # Clip X range: from pilot hole to just past the largest roughing boundary
-            # The offset face's bore-side boundary is at (profile_x - fin_allowance) for each section.
-            # We need the clip to include ALL roughing boundary X values.
-            pilot_r = stock.pilot_hole_dia / 2.0
-            max_profile_x_r = max(seg.x / 2.0 for seg in segments)
-            roughing_boundary_r = max_profile_x_r - fin_allowance_radius
-            # Clip extends from pilot hole to just past the largest roughing boundary
-            x_min_r = pilot_r
-            x_max_r = roughing_boundary_r + fin_allowance_radius * 3  # Small margin past boundary
-
-            with BuildSketch() as clip_sketch:
-                with BuildLine():
-                    Line((x_min_r, z_top), (x_max_r, z_top))
-                    Line((x_max_r, z_top), (x_max_r, z_bot))
-                    Line((x_max_r, z_bot), (x_min_r, z_bot))
-                    Line((x_min_r, z_bot), (x_min_r, z_top))
-                make_face()
-
-            clip_faces = clip_sketch.sketch.faces()
-            if not clip_faces:
-                return []
-
-            common_op = BRepAlgoAPI_Common(ocp_face, clip_faces[0].wrapped)
-            common_op.Build()
-            if not common_op.IsDone():
-                return []
-
-            clipped_shape = common_op.Shape()
-            face_explorer = TopExp_Explorer(clipped_shape, TopAbs_FACE)
-            if not face_explorer.More():
-                return []
-            clipped_face = TopoDS.Face_s(face_explorer.Current())
-            clipped_wire = BRepTools.OuterWire_s(clipped_face)
-        except Exception:
-            return []
-
-        # Step 5: Extract edges from the clipped wire
-        try:
-            from OCP.BRepTools import BRepTools_WireExplorer
-            from OCP.BRep import BRep_Tool
-
-            wire_explorer = BRepTools_WireExplorer(clipped_wire)
-            all_edges = []
-
-            while wire_explorer.More():
-                edge = wire_explorer.Current()
-                curve = BRepAdaptor_Curve(edge)
-                p_first = curve.Value(curve.FirstParameter())
-                p_last = curve.Value(curve.LastParameter())
-
-                vertex = wire_explorer.CurrentVertex()
-                v_pnt = BRep_Tool.Pnt_s(vertex)
-                dist_to_first = ((v_pnt.X() - p_first.X())**2 + (v_pnt.Y() - p_first.Y())**2)**0.5
-                dist_to_last = ((v_pnt.X() - p_last.X())**2 + (v_pnt.Y() - p_last.Y())**2)**0.5
-
-                if dist_to_first <= dist_to_last:
-                    p_start, p_end = p_first, p_last
-                else:
-                    p_start, p_end = p_last, p_first
-
-                start_x_dia = p_start.X() * 2.0
-                start_z = p_start.Y()
-                end_x_dia = p_end.X() * 2.0
-                end_z = p_end.Y()
-
-                curve_type = curve.GetType()
-                if curve_type == GeomAbs_Line:
-                    all_edges.append((
-                        (start_x_dia, start_z), (end_x_dia, end_z), "LINE", None, 0.0,
-                    ))
-                elif curve_type == GeomAbs_Circle:
-                    circle = curve.Circle()
-                    center = circle.Location()
-                    center_x_dia = center.X() * 2.0
-                    center_z = center.Y()
-                    radius = circle.Radius()
-                    all_edges.append((
-                        (start_x_dia, start_z), (end_x_dia, end_z), "ARC",
-                        (center_x_dia, center_z), radius,
-                    ))
-
-                wire_explorer.Next()
-
-            # Step 6: Filter out clip boundary edges, keep turning edges
-            tol = 1e-4
-            x_min_dia = x_min_r * 2.0
-            x_max_dia = x_max_r * 2.0
-            turning_edges = []
-            for edge in all_edges:
-                start, end = edge[0], edge[1]
-                sx, sz = start
-                ex, ez = end
-
-                # Skip edges at pilot hole boundary (X = x_min_dia)
-                if abs(sx - x_min_dia) < tol and abs(ex - x_min_dia) < tol:
-                    continue
-                # Skip edges at clip X max boundary
-                if abs(sx - x_max_dia) < tol and abs(ex - x_max_dia) < tol:
-                    continue
-                # Skip edges at Z_top (clip top boundary)
-                if abs(sz - z_top) < tol and abs(ez - z_top) < tol:
-                    continue
-                # Skip edges at Z=fin_allowance (offset face top boundary)
-                if abs(sz - fin_allowance_radius) < tol and abs(ez - fin_allowance_radius) < tol:
-                    continue
-                # Skip edges at Z_bot (clip bottom boundary)
-                if abs(sz - z_bot) < tol and abs(ez - z_bot) < tol:
-                    continue
-
-                turning_edges.append(edge)
-
-            if not turning_edges:
-                return []
-
-            # Step 7: Order edges from highest Z to lowest Z (cutting direction)
-            # Same chaining logic as OD — find highest Z start, chain downward
-            ordered = []
-            remaining = list(turning_edges)
-
-            # Sort by start Z descending to find the entry point
-            remaining.sort(key=lambda e: -e[0][1])
-            # Ensure first edge goes downward
-            first = remaining[0]
-            if first[0][1] < first[1][1]:
-                start, end, etype, center, radius = first
-                remaining[0] = (end, start, etype, center, radius)
-
-            current = remaining.pop(0)
-            ordered.append(current)
-
-            while remaining:
-                current_end = ordered[-1][1]
-                found = False
-                for i, edge in enumerate(remaining):
-                    if (abs(edge[0][0] - current_end[0]) < 0.001 and
-                            abs(edge[0][1] - current_end[1]) < 0.001):
-                        ordered.append(remaining.pop(i))
-                        found = True
-                        break
                     if (abs(edge[1][0] - current_end[0]) < 0.001 and
                             abs(edge[1][1] - current_end[1]) < 0.001):
                         start, end, etype, center, radius = remaining.pop(i)

@@ -12,6 +12,7 @@ Architecture:
 """
 
 import os
+import re
 import logging
 from typing import Optional, List
 
@@ -22,6 +23,7 @@ from PyQt5.QtWidgets import (
     QFrame, QMessageBox,
 )
 
+from gui.components.elided_label import ElidedLabel
 from gui.colors import COLORS, FONTS
 from gui.components.sim_viewer import SimViewerWidget, parse_gcode_for_sim, GCodePanel
 from outputs.graph_adapter import convert_from_moves
@@ -210,6 +212,16 @@ class RunTab(QWidget):
         self._status_file.setMaximumWidth(300)
         bar_layout.addWidget(self._status_file)
 
+        # Last LinuxCNC error for this program (e.g. a soft-limit rejection at
+        # cycle start) — cleared on the next start. Full text in tooltip.
+        self._status_error = ElidedLabel("", min_width=120)
+        self._status_error.setStyleSheet(
+            f"color: {COLORS['text_primary']}; background-color: {COLORS['status_error']};"
+            f" border-radius: 4px; padding: 2px 6px; font-size: 9pt;"
+        )
+        self._status_error.setVisible(False)
+        bar_layout.addWidget(self._status_error, stretch=1)
+
         return bar
 
     # =================================================================
@@ -235,6 +247,64 @@ class RunTab(QWidget):
             self._poll_timer.start()
         else:
             self._poll_timer.stop()
+
+    _TOOL_CHECK_RE = re.compile(
+        r";\s*--- tool check: program generated for T(\d+) D([0-9.]+) Q(\d+)")
+
+    def tool_table_problems(self) -> List[str]:
+        """Compare the program's expected tools with LinuxCNC's loaded table.
+
+        The writer records each tool it used ('; --- tool check: ...'). Comp
+        and offsets use LinuxCNC's table at run time, so a missing tool or a
+        changed nose diameter / orientation would change the cut. Returns
+        human-readable problems (empty = OK or not checkable offline).
+        """
+        if not self._gcode_text or not hasattr(self._backend, "get_tool_entry"):
+            return []
+        metric = bool(re.search(r"^\s*N\d+\s+G21\b", self._gcode_text, re.M))
+        problems, seen = [], set()
+        for m in self._TOOL_CHECK_RE.finditer(self._gcode_text):
+            t, dia, q = int(m.group(1)), float(m.group(2)), int(m.group(3))
+            if (t, dia, q) in seen:
+                continue
+            seen.add((t, dia, q))
+            if metric:
+                dia /= 25.4
+            entry = self._backend.get_tool_entry(t)
+            if entry is None:
+                problems.append(f"T{t} is not in LinuxCNC's tool table.")
+                continue
+            live_dia, live_q = entry
+            if abs(live_dia - dia) > 0.00005 or live_q != q:
+                problems.append(
+                    f"T{t}: program expects D{dia:.4f} Q{q}, LinuxCNC has "
+                    f"D{live_dia:.4f} Q{live_q}.")
+        return problems
+
+    def _warn_tool_problems(self, problems: List[str], at_start: bool) -> bool:
+        """Show tool problems. At cycle start, ask to continue (default No)."""
+        text = ("The tool table does not match what this program was generated "
+                "for:\n\n  " + "\n  ".join(problems) +
+                "\n\nFix the tool table (Tools tab) and regenerate the program. "
+                "The program will also pause at the tool check if run as is.")
+        logger.warning("Tool check: %s", "; ".join(problems))
+        self.show_error("Tool table mismatch - " + " ".join(problems))
+        if not at_start:
+            QMessageBox.warning(self, "Tool table mismatch", text)
+            return True
+        answer = QMessageBox.question(
+            self, "Tool table mismatch", text + "\n\nRun anyway?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        return answer == QMessageBox.Yes
+
+    def show_error(self, msg: str):
+        """Show a LinuxCNC error in the Run tab status bar until the next start."""
+        self._status_error.setText(f"! {msg}")
+        self._status_error.setVisible(True)
+
+    def clear_error(self):
+        self._status_error.setText("")
+        self._status_error.setVisible(False)
 
     def load_file(self, path: str):
         """Load a G-code file programmatically (e.g., from Edit tab)."""
@@ -288,6 +358,10 @@ class RunTab(QWidget):
         # Auto-preview on load
         self._on_preview()
 
+        problems = self.tool_table_problems()
+        if problems:
+            self._warn_tool_problems(problems, at_start=False)
+
         self.program_loaded.emit(path)
         logger.info("Loaded G-code: %s (%d lines)", filename, line_count)
 
@@ -332,20 +406,54 @@ class RunTab(QWidget):
     # Program Control
     # =================================================================
 
-    def _on_start(self):
-        """Start program execution from line 1."""
+    def cycle_start(self, source: str = "screen") -> str:
+        """Cycle Start with state-dependent behaviour (green button + screen).
+
+        paused            -> resume where it stopped (never line 1)
+        program has work  -> ignored
+        nothing queued    -> start the loaded program at line 1
+        Returns what happened: "resumed", "ignored", "started", "no-program",
+        "machine-off", "cancelled" or "failed".
+        """
+        self._backend.poll()          # decide on fresh state, not the 5 Hz cache
+        state = self._backend.state
+        if state.interp_state == InterpState.PAUSED or getattr(state, "paused", False):
+            self._backend.program_resume()
+            self._btn_pause.setText("Pause")
+            logger.info("Cycle start (%s): resume", source)
+            return "resumed"
+        if state.program_busy:
+            logger.info("Cycle start (%s): ignored, program running", source)
+            return "ignored"
+        if not state.machine_on:
+            self.show_error("Machine is off - turn it on before cycle start")
+            return "machine-off"
         if not self._gcode_path:
-            return
-        success = self._backend.program_run(start_line=0)
+            self.show_error("No program loaded - open one in the Run tab")
+            return "no-program"
+        return self._start_from_line(0, source)
+
+    def _on_start(self):
+        """On-screen Cycle Start — same behaviour as the green button."""
+        self.cycle_start("screen")
+
+    def _start_from_line(self, line: int, source: str) -> str:
+        self.clear_error()
+        problems = self.tool_table_problems()
+        if problems and not self._warn_tool_problems(problems, at_start=True):
+            return "cancelled"
+        success = self._backend.program_run(start_line=line)
         if success:
             self._set_running_state()
-        else:
-            logger.warning("program_run failed")
+            logger.info("Cycle start (%s): program started at line %d", source, line + 1)
+            return "started"
+        logger.warning("program_run failed")
+        return "failed"
 
     def _on_pause_resume(self):
         """Toggle pause/resume."""
         state = self._backend.state
-        if state.interp_state == InterpState.PAUSED:
+        if state.interp_state == InterpState.PAUSED or state.paused:
             self._backend.program_resume()
             self._btn_pause.setText("Pause")
         else:
@@ -362,6 +470,10 @@ class RunTab(QWidget):
         if not self._gcode_path:
             return
         line = self._line_spin.value() - 1  # Convert 1-based to 0-based
+        self.clear_error()
+        problems = self.tool_table_problems()
+        if problems and not self._warn_tool_problems(problems, at_start=True):
+            return
         success = self._backend.program_run(start_line=max(0, line))
         if success:
             self._set_running_state()
@@ -400,9 +512,13 @@ class RunTab(QWidget):
         """Timer callback — update line highlighting and status from machine state."""
         state = self._backend.state
 
-        # Update interpreter state display
+        # Update interpreter state display. The interpreter goes IDLE once it
+        # has read the whole file while motion is still executing, so show
+        # RUNNING whenever the program still has work (program_busy).
         interp_name = state.interp_state.value.upper()
-        if state.interp_state == InterpState.IDLE:
+        if state.program_busy and state.interp_state == InterpState.IDLE:
+            interp_name = "RUNNING"
+        if not state.program_busy and state.interp_state == InterpState.IDLE:
             color = COLORS['text_disabled']
         elif state.interp_state == InterpState.PAUSED:
             color = COLORS['status_warning']
@@ -426,8 +542,8 @@ class RunTab(QWidget):
                 self._sim_viewer.sim_line_changed.emit(-1)
                 self._status_line.setText("Line: —")
 
-        # Detect program completion (was running, now idle)
-        if state.interp_state == InterpState.IDLE and self._is_running:
+        # Detect program completion (was running, now nothing left to do)
+        if not state.program_busy and self._is_running:
             self._set_idle_state()
 
         # Update button state for pause
@@ -436,8 +552,12 @@ class RunTab(QWidget):
         elif state.interp_state == InterpState.READING:
             self._btn_pause.setText("Pause")
 
-        # Live tool position and toolpath reveal from machine state during execution
-        if state.interp_state in (InterpState.READING, InterpState.PAUSED, InterpState.WAITING):
-            x_r = state.x.position / 2.0  # diameter → radius
-            z = state.z.position
+        # Live tool position (work coords, X diameter -> radius) — always shown so
+        # the graph reflects where the machine is; toolpath reveal while a
+        # program has work (interp may be IDLE mid-cut, see program_busy).
+        x_r = state.x.position / 2.0
+        z = state.z.position
+        if state.program_busy:
             self._sim_viewer.update_live_position(motion_line, x_r, z)
+        elif not self._sim_viewer.is_playing():
+            self._sim_viewer.show_machine_position(x_r, z)

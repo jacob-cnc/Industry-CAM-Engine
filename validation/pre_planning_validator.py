@@ -107,17 +107,6 @@ def validate_profile(profile: ClosedProfile, stock: StockDef) -> List[Validation
             location=(segments[0].x, first_z),
         ))
 
-    # Check last segment Z = z_end
-    last_z = segments[-1].z
-    if abs(last_z - profile.z_end) > TOLERANCE:
-        results.append(ValidationResult(
-            severity=Severity.ERROR,
-            category="geometry",
-            message=f"Profile must end at Z={profile.z_end:.4f}. Current last segment Z={last_z:.5f}.",
-            recommendation=f"Set last segment Z to {profile.z_end:.4f}.",
-            location=(segments[-1].x, last_z),
-        ))
-
     # Check each segment
     prev_x = segments[0].x
     prev_z = segments[0].z
@@ -209,5 +198,15 @@ def validate_profile(profile: ClosedProfile, stock: StockDef) -> List[Validation
 
         prev_x = seg.x
         prev_z = seg.z
+
+    if not any(r.severity == Severity.ERROR for r in results):
+        from geometry.zone_builder import contour_z_end
+        actual_depth = contour_z_end(profile)
+        if abs(actual_depth - profile.z_end) > TOLERANCE:
+            results.append(ValidationResult(
+                severity=Severity.ERROR, category="geometry",
+                message=f"Operation Z End {profile.z_end:.5f} does not match contour depth {actual_depth:.5f}.",
+                recommendation="Rebuild the operation from its contour.",
+            ))
 
     return results

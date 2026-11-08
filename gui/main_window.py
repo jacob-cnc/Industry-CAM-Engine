@@ -61,12 +61,23 @@ class MainWindow(QMainWindow):
         self._set_initial_tool()
 
         self._prev_estop = False
+        self._auto_idle_polls = 0
 
         # Status bar poll timer — updates position, RPM, feed, tool, gcodes
         from PyQt5.QtCore import QTimer
         self._status_timer = QTimer(self)
         self._status_timer.timeout.connect(self._poll_status_bar)
         self._status_timer.start(200)  # 5 Hz
+
+        # Green cycle button (TB3 P10). Measured presses are ~150 ms, so poll
+        # at 20 ms. HAL resumes a paused program and red pauses (both in
+        # industry-cam.hal, GUI-independent); the GUI only STARTS a program
+        # when nothing is queued, after its tool-table check.
+        self._cycle_btn_prev = False
+        self._cycle_btn_busy = False
+        self._cycle_btn_timer = QTimer(self)
+        self._cycle_btn_timer.timeout.connect(self._poll_cycle_button)
+        self._cycle_btn_timer.start(20)
 
         logger.info("MainWindow initialized (offline preview mode)")
 
@@ -181,6 +192,7 @@ class MainWindow(QMainWindow):
         self._status_bar.reset_clicked.connect(self._backend.estop_reset)
         self._status_bar.machine_on_clicked.connect(self._backend.machine_on)
         self._status_bar.machine_off_clicked.connect(self._backend.machine_off)
+        self._status_bar.mode_clicked.connect(self._on_mode_clicked)
 
     # ------------------------------------------------------------------
     # Signal Slots
@@ -256,6 +268,46 @@ class MainWindow(QMainWindow):
         self._setup_tab.set_active(current is self._setup_tab)
         self._run_tab.set_active(current is self._run_tab)
 
+    def _poll_cycle_button(self):
+        """Rising edge of the green button -> cycle start when idle."""
+        if not hasattr(self._backend, "read_cycle_start"):
+            return
+        pressed = self._backend.read_cycle_start()
+        rising = pressed and not self._cycle_btn_prev
+        self._cycle_btn_prev = pressed
+        if not rising or self._cycle_btn_busy:
+            return
+        self._cycle_btn_busy = True          # modal dialogs re-enter the event loop
+        try:
+            self._backend.poll()
+            s = self._backend.state
+            if s.paused or s.program_busy:
+                logger.info("Green button: program %s - handled in HAL / ignored",
+                            "paused" if s.paused else "running")
+                return
+            self._tab_widget.setCurrentWidget(self._run_tab)
+            result = self._run_tab.cycle_start("green button")
+            logger.info("Green button: %s", result)
+        except Exception:
+            logger.exception("Green button handler failed")
+        finally:
+            self._cycle_btn_busy = False
+
+    def _on_mode_clicked(self):
+        """Ribbon mode chip clicked: return to MANUAL, but never interrupt a
+        running or paused program."""
+        from hal.interface import InterpState, TaskMode
+        self._backend.poll()
+        s = self._backend.state
+        if s.task_mode == TaskMode.MANUAL:
+            return
+        if s.program_busy:
+            self._status_bar.show_error("Program active - stop it before leaving AUTO")
+            logger.info("Mode chip click ignored: interpreter %s", s.interp_state.value)
+            return
+        logger.info("Mode chip click: returning to MANUAL from %s", s.task_mode.value)
+        self._backend.set_mode_manual()
+
     def _on_estop_clicked(self):
         """Handle E-Stop button press — trigger estop on backend.
 
@@ -281,7 +333,7 @@ class MainWindow(QMainWindow):
         self._status_bar.update_position(s.x.position, s.z.position)
 
         # Machine state
-        from hal.interface import InterpState, TaskState
+        from hal.interface import InterpState, TaskState, TaskMode
         if s.estop_active:
             state_str = "ESTOP"
         elif s.interp_state == InterpState.READING:
@@ -295,6 +347,21 @@ class MainWindow(QMainWindow):
         # Task mode (MANUAL / MDI / AUTO) — flags MDI wedging that silently
         # disables MPG jogging.
         self._status_bar.update_mode(s.task_mode.value)
+
+        # Return to MANUAL when LinuxCNC sits in AUTO with NO program work left
+        # (finished, stopped, or rejected at cycle start). LinuxCNC ignores MPG
+        # jog counts outside MANUAL. program_busy covers interpreter, task exec,
+        # motion queue and pause — interp IDLE alone is true mid-cut once the
+        # whole file has been read (lathe, 2026-11-08). Two consecutive polls.
+        if s.task_mode == TaskMode.AUTO and not s.program_busy:
+            self._auto_idle_polls += 1
+            if self._auto_idle_polls == 2:
+                logger.info("AUTO and idle: returning to MANUAL")
+                if hasattr(self._backend, "restore_lathe_modes"):
+                    self._backend.restore_lathe_modes()   # M2 leaves G17
+                self._backend.set_mode_manual()
+        else:
+            self._auto_idle_polls = 0
 
         # Spindle
         rpm = int(s.spindle.speed)
@@ -319,6 +386,7 @@ class MainWindow(QMainWindow):
         # Errors: prefer the error channel message; fall back to ESTOP transition
         if s.error_message:
             self._status_bar.show_error(s.error_message)
+            self._run_tab.show_error(s.error_message)
         elif s.estop_active and not self._prev_estop:
             self._status_bar.show_error("E-STOP")
 

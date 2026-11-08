@@ -60,6 +60,7 @@ class GCodeWriter:
         self._z = 0.0
         self._feed = None
         self._n = 10
+        self._ocode = 9000
         self._metric = unit_mode == "metric"
         self._conv = 25.4 if self._metric else 1.0
         self._fmt = ".3f" if self._metric else ".4f"
@@ -126,6 +127,7 @@ class GCodeWriter:
         if pr.roughing_params.peck_enabled and pr.roughing_params.peck_length:
             lines.append(f"; Peck Length: {pr.roughing_params.peck_length * conv:{fmt}}")
         lines.append(f"; Finish Passes: {pr.finishing_params.passes}")
+        lines.append(f"; Spring Pass: {1 if pr.finishing_params.spring_pass else 0}")
         lines.append(f"; Finish DOC (dia): {pr.finishing_params.doc_dia * conv:{fmt}}")
         lines.append(f"; Finish Feed: {pr.finishing_params.feed * conv:{fmt}}")
         lines.append(";")
@@ -170,7 +172,7 @@ class GCodeWriter:
         # Safety preamble
         unit_code = "G21" if self._metric else "G20"
         unit_label = "mm" if self._metric else "inch"
-        lines.append(self._line(f"{unit_code} G18 G40 G49 G80", f"Safety line - {unit_label}, ZX plane, comp off"))
+        lines.append(self._line(f"{unit_code} G7 G18 G40 G49 G80", f"Safety line - {unit_label}, diameter mode, ZX plane, comp off"))
         lines.append(self._line("G90 G95", "Absolute positioning, feed per revolution"))
         lines.append("")
 
@@ -188,19 +190,17 @@ class GCodeWriter:
         # Tool call (LinuxCNC standard: Tn M6, then G43)
         lines.append(self._line(f"T{pr.tool.tool_number} M6", f"Load tool T{pr.tool.tool_number} - {pr.tool.description}"))
         lines.append(self._line("G43", "Tool length comp on"))
+        lines.extend(self._tool_check_lines(pr.tool))
         lines.append("")
 
-        # Determine cutter comp code based on TNR and tool direction
-        has_tnr = pr.tool.nose_radius > 0.0001
-        comp_code = self._get_comp_code(pr.tool.direction) if has_tnr else "G40"
-
-        # Engage cutter comp for all cutting passes if TNR is present
-        # G41/G42 compensates the programmed path by the tool nose radius.
-        # Must be engaged before the first cutting move with a lead-in move.
-        if has_tnr and comp_code != "G40":
-            lines.append(self._line(f"{comp_code}", f"Cutter comp on (TNR={pr.tool.nose_radius:.4f})"))
-        else:
-            lines.append(self._line("G40", "Cutter comp off (no TNR)"))
+        # Roughing runs UNCOMPENSATED (G40). With the correct Q the control point
+        # is the imaginary tip, so straight X/Z cuts are exact and angled cuts
+        # only ever leave extra material (<= 0.414 x TNR normal to the surface),
+        # which the finish passes remove. Comp through the roughing zigzag put
+        # the tool on the wrong side of every step-out and LinuxCNC refused
+        # step-outs shorter than TNR ("Straight feed in concave corner ...",
+        # lathe 2026-11-08). Cleanup/finish contours engage G41/G42 per pass.
+        lines.append(self._line("G40", "Cutter comp off - roughing is uncompensated"))
         lines.append("")
 
         # === FACE PASSES ===
@@ -318,14 +318,15 @@ class GCodeWriter:
             self._z = approach_z
 
             for p in pr.cleanup_passes:
-                for j, move in enumerate(p.moves):
-                    lines.append(self._emit_move(move, f"Cleanup move {j+1}"))
+                lines.extend(self._emit_contour_pass(
+                    p.moves, "Cleanup move", pr.tool, is_id, pr.stock.z_start, pr))
 
-            if same_tool:
-                # Same tool — just retract normally, no tool change
-                lines.append(self._rapid(safe_x, self._z, "Retract X after cleanup"))
-                lines.append(self._rapid(safe_x, pr.stock.z_start, "Traverse Z to Z_start"))
-            else:
+            if pr.cleanup_passes[-1].retract_moves is None:
+                raise ValueError("Cleanup pass is missing its planned diagonal retract.")
+            lines.append(self._line("G40", "Cutter comp off - exit"))
+            for retract in pr.cleanup_passes[-1].retract_moves:
+                lines.append(self._emit_move(retract, "Diagonal retract after cleanup"))
+            if not same_tool:
                 # Different tool — retract to park, stop for tool change
                 lines.append(self._line("G40", "Cutter comp off for tool change"))
                 lines.extend(self._safe_retract_to_park(
@@ -335,18 +336,29 @@ class GCodeWriter:
                 lines.append(self._line("M0", "Mandatory stop - change tool"))
                 lines.append(self._line(f"T{finish_tool.tool_number} M6", f"Load finish tool T{finish_tool.tool_number} - {finish_tool.description}"))
                 lines.append(self._line("G43", "Tool length comp on"))
+                lines.extend(self._tool_check_lines(finish_tool))
                 lines.append(self._line(f"S{pr.roughing_params.spindle_rpm:.0f} M3", "Spindle CW - resume"))
-                # Re-engage cutter comp for finish tool
-                finish_has_tnr = finish_tool.nose_radius > 0.0001
-                finish_comp_code = self._get_comp_code(finish_tool.direction) if finish_has_tnr else "G40"
-                if finish_has_tnr and finish_comp_code != "G40":
-                    lines.append(self._line(f"{finish_comp_code}", f"Cutter comp on (TNR={finish_tool.nose_radius:.4f})"))
-                else:
-                    lines.append(self._line("G40", "Cutter comp off (no TNR)"))
             lines.append("")
 
         # === FINISH PASS ===
         if pr.finish_passes:
+            cuts = sum(not p.is_spring_pass for p in pr.finish_passes)
+            springs = sum(p.is_spring_pass for p in pr.finish_passes)
+            if cuts != pr.finishing_params.passes or springs != int(pr.finishing_params.spring_pass):
+                raise ValueError("Planned finish/spring counts do not match finishing parameters.")
+            previous_cut = None
+            for planned in pr.finish_passes:
+                if planned.is_spring_pass:
+                    continue
+                signature = []
+                for move in planned.moves:
+                    values = [move.x, move.z]
+                    if move.move_type in (MoveType.ARC_CW, MoveType.ARC_CCW):
+                        values += [move.center_i, move.center_k] if self._arc_format == "ijk" else [abs(move.radius)]
+                    signature.append((move.move_type, tuple(format(value * conv, fmt) for value in values)))
+                if signature == previous_cut:
+                    raise ValueError("Finish cuts coincide at output precision; reduce cutting passes or increase finish allowance.")
+                previous_cut = signature
             # Tool change needed if no cleanup handled it and tools differ
             if not pr.cleanup_passes and not same_tool:
                 lines.append("; === TOOL CHANGE (roughing → finishing) ===")
@@ -358,13 +370,8 @@ class GCodeWriter:
                 lines.append(self._line("M0", "Mandatory stop - change tool"))
                 lines.append(self._line(f"T{finish_tool.tool_number} M6", f"Load finish tool T{finish_tool.tool_number} - {finish_tool.description}"))
                 lines.append(self._line("G43", "Tool length comp on"))
+                lines.extend(self._tool_check_lines(finish_tool))
                 lines.append(self._line(f"S{pr.roughing_params.spindle_rpm:.0f} M3", "Spindle CW - resume"))
-                finish_has_tnr = finish_tool.nose_radius > 0.0001
-                finish_comp_code = self._get_comp_code(finish_tool.direction) if finish_has_tnr else "G40"
-                if finish_has_tnr and finish_comp_code != "G40":
-                    lines.append(self._line(f"{finish_comp_code}", f"Cutter comp on (TNR={finish_tool.nose_radius:.4f})"))
-                else:
-                    lines.append(self._line("G40", "Cutter comp off (no TNR)"))
                 lines.append("")
 
             lines.append("; === FINISH PASS (profile contour) ===")
@@ -378,10 +385,25 @@ class GCodeWriter:
             self._x = approach_x
             self._z = approach_z
 
-            for p in pr.finish_passes:
-                for j, move in enumerate(p.moves):
-                    lines.append(self._emit_move(move, f"Finish move {j+1}"))
+            for pass_number, p in enumerate(pr.finish_passes):
+                if pass_number > 0:
+                    if not p.approach_moves:
+                        raise ValueError("Finish pass is missing its planned retract/approach link.")
+                    lines.append(self._line("G40", "Cutter comp off - exit"))
+                    for link in p.approach_moves:
+                        lines.append(self._emit_move(link, "Finish retract/approach"))
+                label = "Spring pass (repeat final contour)" if p.is_spring_pass else f"Finish cutting pass {pass_number + 1}"
+                lines.append(f"; {label}")
+                lines.extend(self._emit_contour_pass(
+                    p.moves, f"{label}: move", finish_tool, is_id, pr.stock.z_start, pr))
             lines.append("")
+
+        if pr.finish_passes:
+            if pr.finish_passes[-1].retract_moves is None:
+                raise ValueError("Finish pass is missing its planned diagonal retract.")
+            lines.append(self._line("G40", "Cutter comp off - exit"))
+            for retract in pr.finish_passes[-1].retract_moves:
+                lines.append(self._emit_move(retract, "Diagonal retract after final finish/spring"))
 
         # End
         lines.append("; === PROGRAM END ===")
@@ -394,6 +416,135 @@ class GCodeWriter:
         lines.append("%")   # RS274 closing delimiter
 
         return "\n".join(lines) + "\n"
+
+    # Tool-table check tolerance on nose DIAMETER (inches).
+    _TOOL_CHECK_DIA_TOL = 0.00005
+
+    def _tool_check_lines(self, tool) -> List[str]:
+        """Runtime check that LinuxCNC's loaded tool matches this program.
+
+        After T M6 / G43, compares tool number (#5400), nose diameter (#5410)
+        and orientation (#5413) with the values the program was generated
+        for. On mismatch: show both and PAUSE (M0) — the operator fixes the
+        table and restarts, or resumes deliberately. Comp uses LinuxCNC's live
+        table at run time, so a TNR edited after generation would otherwise
+        silently change the cut.
+        """
+        self._ocode = getattr(self, "_ocode", 9000) + 1
+        o = f"o{self._ocode}"
+        dia = 2.0 * tool.nose_radius * self._conv
+        q = int(getattr(tool.orientation, "value", tool.orientation) or 0)
+        t = tool.tool_number
+        tol = self._TOOL_CHECK_DIA_TOL * self._conv
+        fmt = ".6f"
+        return [
+            f"; --- tool check: program generated for T{t} D{dia:{fmt}} Q{q} ---",
+            f"{o} if [[#5400 NE {t}] OR [ABS[#5410 - {dia:{fmt}}] GT {tol:{fmt}}] OR [#5413 NE {q}]]",
+            f"  (DEBUG, TOOL MISMATCH: program expects T{t} D{dia:.4f} Q{q} - LinuxCNC has T#5400 D#5410 Q#5413. Fix tool table and regenerate, or Resume to continue anyway.)",
+            "  M0",
+            f"{o} endif",
+        ]
+
+    # Extra length of the comp entry move beyond 2 x TNR (inches).
+    _COMP_ENTRY_MARGIN = 0.010
+
+    def _emit_contour_pass(self, moves, label: str, tool, is_id: bool,
+                           z_clear_stock: float, pr=None) -> List[str]:
+        """Emit one cleanup/finish contour with its own G41/G42 entry.
+
+        Comp is OFF on arrival (G40). Pattern for a contour whose first profile
+        move runs along Z (bores, OD shoulders):
+            G00 X<x0> Z<z_clear>     uncompensated, in air above the start
+            G41/G42
+            G01 X<x0> Z<z0>          entry, collinear with the first profile
+                                     move, longer than 2 x TNR
+            ...profile moves...
+        so LinuxCNC applies the offset on an air move and never sees a corner
+        before the profile. For ID passes the leading radial moves along the
+        face (pilot -> wall at Z0+fin) are air travel, not profile: they are
+        dropped (they sat the tool on the wrong side of G41).
+        Contours that START with a radial profile move (OD face from centre)
+        keep the previous behaviour: comp engaged with that move as the entry.
+        The caller emits G40 before the exit retract.
+        """
+        out: List[str] = []
+        has_tnr = tool.nose_radius > 0.0001
+        comp_code = self._get_comp_code(tool.direction, is_id) if has_tnr else "G40"
+        moves = list(moves)
+        if comp_code == "G40":
+            for j, move in enumerate(moves):
+                out.append(self._emit_move(move, f"{label} {j+1}"))
+            return out
+
+        start = 0
+        if is_id:
+            px, pz = self._x, self._z
+            while start < len(moves) and abs(moves[start].z - pz) < 1e-9 \
+                    and moves[start].move_type in (MoveType.FEED, MoveType.RAPID):
+                px, pz = moves[start].x, moves[start].z
+                start += 1
+            x0, z0 = px, pz
+        else:
+            x0, z0 = self._x, self._z
+        first = moves[start] if start < len(moves) else None
+        axial_first = (first is not None and first.move_type == MoveType.FEED
+                       and abs(first.x - x0) < 1e-9 and first.z < z0)
+
+        if axial_first:
+            min_len = 2.0 * tool.nose_radius + self._COMP_ENTRY_MARGIN
+            z_clear = max(z_clear_stock, z0 + min_len)
+            if self._z < z_clear - 1e-9:
+                out.append(self._rapid(self._x, z_clear, "Comp entry: clear Z (comp off)"))
+            if abs(self._x - x0) > 1e-9 or abs(self._z - z_clear) > 1e-9:
+                out.append(self._rapid(x0, z_clear, "Comp entry: above contour start (comp off)"))
+            out.append(self._line(comp_code, f"Cutter comp on (TNR={tool.nose_radius:.4f})"))
+            out.append(self._feed_line(x0, z0, first.feed, "Comp entry move (in air, collinear with contour)"))
+        else:
+            out.append(self._line(comp_code, f"Cutter comp on (TNR={tool.nose_radius:.4f})"))
+        prev = (self._x, self._z)
+        for j, move in enumerate(moves[start:]):
+            prev = (self._x, self._z)
+            out.append(self._emit_move(move, f"{label} {j+1}"))
+        if pr is not None:
+            out.extend(self._comp_lead_out(prev, (self._x, self._z), tool,
+                                           comp_code, moves[start:], pr))
+        return out
+
+    def _comp_lead_out(self, prev, end, tool, comp_code, profile_moves, pr) -> List[str]:
+        """Stop the nose AT the contour end when material lies beyond it.
+
+        With comp on, LinuxCNC ends the last move with the nose centre on the
+        endpoint, so the nose overhangs the end by R along the move (sim
+        2026-11-08: OD finish reported Z-0.8155 for Z-0.8). Into air that is
+        fine (it cleans e.g. the pilot-hole edge); into material it would cut
+        R past the programmed part. Then a compensated lead-out toward the
+        tool's air side is added before G40, so LinuxCNC clips the last move.
+        """
+        from shapely.geometry import Point, Polygon
+        dx_r, dz = (end[0] - prev[0]) / 2.0, end[1] - prev[1]
+        length = math.hypot(dx_r, dz)
+        if length < 1e-9:
+            return []
+        ux_r, uz = dx_r / length, dz / length
+        r = tool.nose_radius
+        probe = Point(end[0] + 2.0 * ux_r * (r + 0.002), end[1] + uz * (r + 0.002))
+        try:
+            stock = Polygon(pr.stock_boundary)
+            part = Polygon(pr.finished_part_boundary) if pr.finished_part_boundary else None
+        except Exception:
+            return []
+        zs = [m.z for m in profile_moves] + [end[1]]
+        in_span = min(zs) - 1e-9 <= probe.y <= max(zs) + 1e-9
+        material = (part is not None and part.contains(probe)) or \
+                   (stock.contains(probe) and not in_span)
+        if not material:
+            return []
+        # Air side = the comp side: left normal for G41, right for G42, in the
+        # (Z, X-radius) plane LinuxCNC uses for G18.
+        nz, nx = (-ux_r, uz) if comp_code == "G41" else (ux_r, -uz)
+        lead = 2.0 * r + self._COMP_ENTRY_MARGIN
+        return [self._feed_line(end[0] + 2.0 * nx * lead, end[1] + nz * lead, 0.0,
+                                "Comp lead-out (stops nose at contour end; material beyond)")]
 
     def _emit_move(self, move: ToolMove, comment: str) -> str:
         """Emit a single G-code line — always includes both X and Z.
@@ -665,13 +816,24 @@ class GCodeWriter:
 
             return extreme_x + clearance
 
-    def _get_comp_code(self, direction: ToolDirection) -> str:
-        """Get G41/G42 based on tool direction."""
-        if direction == ToolDirection.RIGHT:
-            return "G42"
-        elif direction == ToolDirection.LEFT:
-            return "G41"
-        return "G40"
+    @staticmethod
+    def _get_comp_code(direction: ToolDirection, is_id: bool = False) -> str:
+        """G41/G42 for a front-tool lathe (G18, X+ away from centreline).
+
+        Cutter comp side is relative to the direction of travel, so it depends
+        on which side of the material the tool is on, not only on tool hand:
+          RH tool cutting toward the chuck (-Z):
+            OD - tool outside the part  -> G42
+            ID - tool inside the bore   -> G41
+          LH tool (cutting toward the tailstock) reverses travel -> swapped.
+        Bench 2026-11-08: the old hand-only rule sent G42 for an ID pass and
+        LinuxCNC put the control point 2 x TNR (0.032 radius) outside the
+        programmed bore diameter.
+        """
+        if direction == ToolDirection.NEUTRAL:
+            return "G40"
+        right_code, left_code = ("G41", "G42") if is_id else ("G42", "G41")
+        return right_code if direction == ToolDirection.RIGHT else left_code
 
     def _compute_pass_max_x(self, turning_pass) -> float:
         """Compute the true maximum X reached by a pass, including arc peaks.
@@ -769,6 +931,8 @@ class GCodeWriter:
         if params.num_starts > 1:
             lines.append(f"; Starts: {params.num_starts} (lead = {params.pitch * params.num_starts * conv:{fmt}})")
         lines.append("")
+
+        lines.append(self._line("G7", "Diameter mode"))
 
         # Spindle speed for threading (typically lower than roughing)
         lines.append(self._line(f"S{params.spindle_rpm:.0f} M3", f"Threading speed {params.spindle_rpm:.0f} RPM"))
@@ -876,6 +1040,8 @@ class GCodeWriter:
         if params.peck_enabled:
             lines.append(f"; Peck: {params.peck_depth * conv:{fmt}} depth, {params.peck_retract * conv:{fmt}} retract")
         lines.append("")
+
+        lines.append(self._line("G7", "Diameter mode"))
 
         # Spindle
         lines.append(self._line(f"S{params.spindle_rpm:.0f} M3", f"Grooving speed {params.spindle_rpm:.0f} RPM"))
@@ -994,6 +1160,7 @@ class GCodeWriter:
         """
         lines = []
         lines.append("; === TOOL CHANGE ===")
+        lines.append(self._line("G7", "Diameter mode"))
         lines.append(self._line("G40", "Cutter comp off"))
         if stock_boundary:
             lines.extend(self._safe_retract_to_park(
@@ -1008,11 +1175,12 @@ class GCodeWriter:
             f"Load T{new_tool.tool_number} - {new_tool.description}"
         ))
         lines.append(self._line("G43", "Tool length comp on"))
+        lines.extend(self._tool_check_lines(new_tool))
         lines.append(self._line(f"S{rpm:.0f} M3", f"Spindle CW at {rpm:.0f} RPM"))
 
         if engage_comp:
             has_tnr = new_tool.nose_radius > 0.0001
-            comp_code = self._get_comp_code(new_tool.direction) if has_tnr else "G40"
+            comp_code = self._get_comp_code(new_tool.direction, is_id) if has_tnr else "G40"
             if has_tnr and comp_code != "G40":
                 lines.append(self._line(f"{comp_code}", f"Cutter comp on (TNR={new_tool.nose_radius:.4f})"))
             else:

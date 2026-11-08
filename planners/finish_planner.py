@@ -48,6 +48,7 @@ class FinishPlanner:
         stock: StockDef,
         mode: MachiningMode,
         profile: ClosedProfile = None,
+        finish_allowance_dia: float | None = None,
     ) -> List[TurningPass]:
         """Generate finish pass following the profile segments.
 
@@ -80,23 +81,41 @@ class FinishPlanner:
         if profile_edges and len(profile_edges) > 0:
             moves = self._moves_from_edges(profile_edges, finishing_params)
         else:
-            # Fallback: expand corner breaks from profile coords directly
+            if finishing_params.passes > 1 or finishing_params.spring_pass:
+                raise RuntimeError("Multiple finish cuts and spring passes require exact kernel profile edges.")
+            # Existing single-pass compatibility path.
             moves = self._moves_from_segments(segments, finishing_params, profile)
 
         if not moves:
             return []
 
-        finish_pass = TurningPass(
-            x_level=stock.x_start,
-            z_start=approach_z,
-            z_end=min(m.z for m in moves),
-            pass_index=0,
-            pass_type=PassType.FINISH,
-            moves=moves,
-            swept_region=None,
-        )
-
-        return [finish_pass]
+        from dataclasses import replace
+        if finishing_params.passes > 1 and (zone_query is None or finish_allowance_dia is None):
+            raise ValueError("Multiple finish cuts require a kernel query and explicit finish allowance.")
+        if finish_allowance_dia is not None:
+            FinishingParams.doc_from_allowance(finish_allowance_dia, finishing_params.passes)
+        passes = []
+        for index in range(finishing_params.passes):
+            if index == finishing_params.passes - 1:
+                pass_moves = moves
+            else:
+                remaining = finish_allowance_dia * (finishing_params.passes - index - 1) / finishing_params.passes
+                edges = zone_query.profile_offset_edges(profile, remaining)
+                pass_moves = self._moves_from_edges(edges, finishing_params)
+            pass_moves = [replace(move, pass_index=index) for move in pass_moves]
+            if not pass_moves:
+                raise RuntimeError("Finish contour has no cutting moves.")
+            passes.append(TurningPass(
+                x_level=stock.x_start if finishing_params.passes == 1 and not finishing_params.spring_pass else pass_moves[0].x,
+                z_start=approach_z if finishing_params.passes == 1 and not finishing_params.spring_pass else max(stock.z_start, pass_moves[0].z),
+                z_end=min(move.z for move in pass_moves),
+                pass_index=index, pass_type=PassType.FINISH, moves=pass_moves,
+            ))
+        if finishing_params.spring_pass:
+            final = passes[-1]
+            passes.append(replace(final, pass_index=finishing_params.passes, is_spring_pass=True,
+                moves=[replace(move, pass_index=finishing_params.passes) for move in final.moves]))
+        return passes
 
     def _extract_profile_edges(
         self, zone_query: 'ZoneQueryAPI', profile: ClosedProfile
@@ -125,6 +144,20 @@ class FinishPlanner:
             all_edges = zone_query.boundary_wire_extraction("finished_part")
             if not all_edges:
                 return None
+
+            # ID closes toward the stock OD, on the opposite side of the
+            # contour from OD's centerline closure. Its boundary therefore
+            # follows the user profile first-to-last. Normalize to the
+            # last-to-first traversal expected below; otherwise the walk
+            # selects the stock closure instead of the boring wall.
+            from geometry.zone_query import EdgeData
+            if profile.mode == MachiningMode.ID:
+                all_edges = [
+                    EdgeData(edge.edge_type, start=edge.end, end=edge.start,
+                             center=edge.center, radius=edge.radius,
+                             direction=edge.direction, ocp_edge=edge.ocp_edge)
+                    for edge in reversed(all_edges)
+                ]
 
             profile_coords = _profile_to_radius_coords(profile)
             if not profile_coords:
@@ -190,7 +223,6 @@ class FinishPlanner:
 
             # Reverse the edges and flip each one to get cutting direction.
             # Mark them as flipped so arc direction can be inverted.
-            from geometry.zone_query import EdgeData
             profile_edges = []
             for edge in reversed(reversed_edges):
                 flipped = EdgeData(

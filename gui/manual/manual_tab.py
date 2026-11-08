@@ -33,7 +33,7 @@ from hal.compound_router import CompoundJogEngine
 from hal.constants import JOG_MODES, DEFAULT_JOG_MODE_INDEX, DEFAULT_JOG_VELOCITY
 from hal.compound_logic import (
     CompoundLinearLogic, CompoundArcLogic,
-    Quadrant, ArcStartType,
+    Quadrant, ArcStartType, resolve_user_arc, arc_endpoint_angles,
 )
 
 logger = logging.getLogger(__name__)
@@ -264,6 +264,8 @@ class ManualTab(QWidget):
         self._compound["combo_mode"].currentIndexChanged.connect(self._on_compound_mode_changed)
         self._compound["input_angle"].editingFinished.connect(self._on_compound_angle_changed)
         self._compound["combo_quadrant"].currentIndexChanged.connect(self._on_compound_quadrant_changed)
+        self._compound["combo_start"].currentIndexChanged.connect(self._update_arc_endpoint_dots)
+        self._update_arc_endpoint_dots()
         self._compound["combo_mpg"].currentIndexChanged.connect(
             lambda idx: setattr(self, '_compound_mpg', 'x' if idx == 0 else 'z')
         )
@@ -547,22 +549,9 @@ class ManualTab(QWidget):
             valid, radius = CompoundArcLogic.validate_radius(radius_text)
             if not valid:
                 radius = 0.25
-            quadrant = self._get_selected_quadrant()
-            start_idx = self._compound["combo_start"].currentIndex()
-            # Combo: index 0 = "Arc Top", index 1 = "Arc Bottom"
-            start_type = ArcStartType.ARC_TOP if start_idx == 0 else ArcStartType.ARC_BOTTOM
-
-            # The N↔S quadrant swap (user NE/NW → logic SE/SW) inverts the
-            # meaning of "top" and "bottom" for north quadrants. Compensate:
-            user_idx = self._compound["combo_quadrant"].currentIndex()
-            user_is_north = user_idx in (0, 1)  # "NE"=0, "NW"=1
-            if user_is_north:
-                # Flip: user "Arc Top" (small X, top of graph) needs logic ARC_BOTTOM
-                #        user "Arc Bottom" (large X, bottom of graph) needs logic ARC_TOP
-                if start_type == ArcStartType.ARC_TOP:
-                    start_type = ArcStartType.ARC_BOTTOM
-                else:
-                    start_type = ArcStartType.ARC_TOP
+            quadrant, start_type = resolve_user_arc(
+                self._compound["combo_quadrant"].currentIndex(),
+                self._compound["combo_start"].currentIndex())
             self._arc_logic.activate(current_x_r, current_z, radius, quadrant, start_type)
             # Draw arc overlay on graph
             self._draw_compound_overlay()
@@ -710,30 +699,16 @@ class ManualTab(QWidget):
         # Pass the user-facing quadrant to the graphic (not the logic quadrant)
         user_quadrant = [Quadrant.NE, Quadrant.NW, Quadrant.SW, Quadrant.SE][index]
         self._compound["quadrant_graphic"].set_quadrant(user_quadrant)
+        self._update_arc_endpoint_dots()
 
-    def _get_selected_quadrant(self) -> Quadrant:
-        """Get the currently selected quadrant enum.
-
-        The combo box labels use the operator's visual convention:
-            NE = smaller X (toward centerline), +Z (away from headstock)
-            SE = larger X (away from centerline), +Z
-            NW = smaller X, -Z (toward headstock)
-            SW = larger X, -Z
-
-        The arc logic angle ranges use atan2(dx, dz) convention where
-        +X is at π/2. On the inverted-Y graph, +X is at the bottom.
-        So the logic's "NE" (0 to π/2) actually draws bottom-right = visual SE.
-
-        This mapping corrects the inversion:
-            User "NE" (top-right on graph) → Logic SE (3π/2 to 2π)
-            User "SE" (bottom-right on graph) → Logic NE (0 to π/2)
-            User "NW" (top-left on graph) → Logic SW (π to 3π/2)
-            User "SW" (bottom-left on graph) → Logic NW (π/2 to π)
-        """
-        idx = self._compound["combo_quadrant"].currentIndex()
-        # Combo items: ["NE", "NW", "SW", "SE"] at indices 0, 1, 2, 3
-        # Map user-facing labels to logic quadrants (N/S swapped):
-        return [Quadrant.SE, Quadrant.SW, Quadrant.NW, Quadrant.NE][idx]
+    def _update_arc_endpoint_dots(self, *_):
+        """Show the arc's start (green) and end (red) on the quadrant graphic,
+        computed from the same logic that drives the motion."""
+        quadrant, start_type = resolve_user_arc(
+            self._compound["combo_quadrant"].currentIndex(),
+            self._compound["combo_start"].currentIndex())
+        self._compound["quadrant_graphic"].set_endpoints(
+            *arc_endpoint_angles(quadrant, start_type))
 
     def _on_compound_radius_changed(self):
         """Validate and update arc radius input.

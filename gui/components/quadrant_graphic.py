@@ -6,7 +6,9 @@ highlighted. Used in the compound slide Arc mode UI.
 
 from PyQt5.QtWidgets import QWidget
 from PyQt5.QtGui import QPainter, QPen, QColor
-from PyQt5.QtCore import Qt, QRectF
+import math
+
+from PyQt5.QtCore import Qt, QRectF, QPointF
 
 from gui.colors import COLORS
 from hal.compound_logic import Quadrant
@@ -24,10 +26,22 @@ class QuadrantGraphic(QWidget):
         super().__init__(parent)
         self.setFixedSize(150, 150)
         self._selected = Quadrant.SE
+        self._endpoints = None   # (start_angle, end_angle), logic convention
 
     def set_quadrant(self, quadrant: Quadrant):
         """Update the highlighted quadrant and repaint."""
         self._selected = quadrant
+        self.update()
+
+    def set_endpoints(self, start_angle: float, end_angle: float):
+        """Mark the arc start (green dot) and end (red dot).
+
+        Angles use the arc logic's convention: point = center + R*(sin a, cos a)
+        with sin -> X (radius) and cos -> Z. On this widget Z+ is right and
+        X+ is down (graph invertY), so the screen point is
+        (cx + r*cos a, cy + r*sin a).
+        """
+        self._endpoints = (start_angle, end_angle)
         self.update()
 
     def paintEvent(self, event):
@@ -45,7 +59,7 @@ class QuadrantGraphic(QWidget):
         r = 60
 
         pen_inactive = QPen(QColor(COLORS['text_disabled']), 2)
-        pen_active = QPen(QColor("#4DE8C2"), 5)  # Bright blue-green, thick for visibility
+        pen_active = QPen(QColor("#2F8CFF"), 5)  # Bright blue, thick for visibility
 
         # Qt drawArc: 1/16th degree units, 0° = 3 o'clock, positive = CCW
         # Widget has normal screen coords (Y down). Operator POV on graph has invertY (X+ = down).
@@ -71,5 +85,15 @@ class QuadrantGraphic(QWidget):
         painter.setPen(pen_cross)
         painter.drawLine(cx, cy - r - 6, cx, cy + r + 6)
         painter.drawLine(cx - r - 6, cy, cx + r + 6, cy)
+
+        # Arc start (green) / end (red) dots — drawn last so they sit on top
+        if self._endpoints is not None:
+            dot_r = 7
+            outline = QPen(QColor(COLORS['bg_panel']), 2)
+            for angle, color in zip(self._endpoints, ("#22C55E", "#FF3B3B")):
+                pt = QPointF(cx + r * math.cos(angle), cy + r * math.sin(angle))
+                painter.setPen(outline)
+                painter.setBrush(QColor(color))
+                painter.drawEllipse(pt, dot_r, dot_r)
 
         painter.end()

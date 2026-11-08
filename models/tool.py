@@ -9,7 +9,14 @@ from enum import Enum
 
 
 class ToolOrientation(Enum):
-    """LinuxCNC tool orientation codes 1-9."""
+    """LinuxCNC tool orientation codes 1-9 (Q word).
+
+    The member NAMES are legacy and do NOT describe LinuxCNC's meaning. Per the
+    LinuxCNC 2.9.6 manual Fig 2.16 (front-tool lathe), the cutting corner
+    relative to the nose centre is: 1 -X+Z, 2 -X-Z (RH OD turning),
+    3 +X-Z (conventional boring bar), 4 +X+Z, 5 +Z, 6 -X, 7 -Z, 8 +X, 9 centre.
+    Only the integer value is sent to LinuxCNC.
+    """
     OD_FRONT_RIGHT = 1
     OD_FRONT_LEFT = 2
     OD_BACK_RIGHT = 3
@@ -46,9 +53,11 @@ class ToolDef:
 
     Coordinates:
         nose_radius: TNR in inches (radius)
-        x_offset: X offset in DIAMETER (inches)
+        x_offset: CAM boundary X geometry offset in DIAMETER (inches)
         z_offset: Z offset in inches
-        x_wear: X wear compensation in DIAMETER (inches)
+        x_wear: CAM boundary X wear in DIAMETER (inches)
+        ToolCardData stores X geometry/wear as radius and converts at this boundary.
+        LinuxCNC tool.tbl stores their combined X total as RADIUS, not these values.
         z_wear: Z wear compensation in inches
     """
     tool_number: int

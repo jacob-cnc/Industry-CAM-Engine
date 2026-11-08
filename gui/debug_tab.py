@@ -478,7 +478,8 @@ class DebugTab(QWidget):
         lines.append(f"Face passes:            {len(pr.face_passes)}")
         lines.append(f"Roughing passes:        {len(pr.roughing_passes)}")
         lines.append(f"Cleanup passes:         {len(pr.cleanup_passes)}")
-        lines.append(f"Finish passes:          {len(pr.finish_passes)}")
+        lines.append(f"Finish cutting passes:  {sum(not p.is_spring_pass for p in pr.finish_passes)}")
+        lines.append(f"Spring passes:          {sum(p.is_spring_pass for p in pr.finish_passes)}")
         lines.append(f"Total pass count:       {pr.pass_count}")
         lines.append("")
 

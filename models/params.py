@@ -5,6 +5,7 @@ Zero external dependencies.
 """
 
 from dataclasses import dataclass
+from math import isfinite
 from enum import Enum
 
 
@@ -39,9 +40,27 @@ class FinishingParams:
     """Parameters controlling finish pass generation.
 
     Coordinates:
-        doc_dia: Finish DOC in DIAMETER (inches)
+        doc_dia: Derived finish allowance / cutting passes, in DIAMETER (inches)
         feed: Finish feed rate (inches/rev)
+        spring_pass: Repeat final contour once; excluded from cutting pass count
     """
     passes: int = 1
-    doc_dia: float = 0.002
+    doc_dia: float = 0.002  # Derived from allowance/passes at model/pipeline boundary.
     feed: float = 0.003
+    spring_pass: bool = False
+
+    def __post_init__(self):
+        if type(self.passes) is not int or self.passes < 1:
+            raise ValueError("Finish cutting passes must be a positive integer.")
+        if not isfinite(self.feed) or self.feed <= 0:
+            raise ValueError("Finish feed must be positive and finite.")
+
+    @staticmethod
+    def doc_from_allowance(allowance: float, passes: int) -> float:
+        if type(passes) is not int or passes < 1:
+            raise ValueError("Finish cutting passes must be a positive integer.")
+        if not isfinite(allowance) or allowance < 0:
+            raise ValueError("Finish allowance must be finite and nonnegative.")
+        if allowance == 0 and passes > 1:
+            raise ValueError("Multiple cutting passes require a positive finish allowance.")
+        return allowance / passes

@@ -62,11 +62,15 @@ def validate_all_moves(
         end_z = move.z
         end_point = Point(end_x_r, end_z)
 
-        # Reset prev position when pass type changes — the G-code writer
-        # inserts safe approach rapids between phases that aren't in tool_moves
+        # Other phase boundaries retain the legacy reset because the writer
+        # inserts approaches not represented here. A planned contour exit must
+        # keep its cutting endpoint so the entire diagonal is checked.
         if move.pass_type != prev_pass_type:
-            prev_x = None
-            prev_z = None
+            contour_exit = (prev_pass_type in (PassType.CLEANUP, PassType.FINISH)
+                            and move.pass_type == PassType.TRANSITION)
+            if not contour_exit:
+                prev_x = None
+                prev_z = None
             prev_pass_type = move.pass_type
 
         # --- ENDPOINT CHECK (all move types) ---

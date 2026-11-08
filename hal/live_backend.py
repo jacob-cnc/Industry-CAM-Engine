@@ -96,6 +96,11 @@ class LiveBackend(HALBackend):
             self._hal_comp.newpin("z-jog-scale", hal_module.HAL_FLOAT, hal_module.HAL_IN)
             # Gates joint/axis jog-enable FALSE while the jog-counts mux switches
             self._hal_comp.newpin("jog-inhibit", hal_module.HAL_BIT, hal_module.HAL_OUT)
+            # Spindle feedback for display (netted to spindle-vel / spindle-at-speed)
+            self._hal_comp.newpin("spindle-rps", hal_module.HAL_FLOAT, hal_module.HAL_IN)
+            self._hal_comp.newpin("spindle-at-speed", hal_module.HAL_BIT, hal_module.HAL_IN)
+            # Green cycle button (debounced) — GUI starts programs from it
+            self._hal_comp.newpin("cycle-start", hal_module.HAL_BIT, hal_module.HAL_IN)
             # Control pins — written by GUI
             self._hal_comp.newpin("compound-enable", hal_module.HAL_BIT, hal_module.HAL_OUT)
             self._hal_comp.newpin("compound-angle", hal_module.HAL_FLOAT, hal_module.HAL_OUT)
@@ -124,6 +129,11 @@ class LiveBackend(HALBackend):
         if self._hal_comp is not None:
             self._connect_scale_select_pins()
             self._compound_routing_ok = self._connect_compound_routing()
+            # Spindle feedback for the ribbon. Non-critical: on failure the
+            # pins read 0 and the GUI shows 0 RPM.
+            self._halcmd_net(["spindle-vel", "compound-slide.spindle-rps"])
+            self._halcmd_net(["spindle-at-speed", "compound-slide.spindle-at-speed"])
+            self._halcmd_net(["cycle-go-btn", "compound-slide.cycle-start"])
             time.sleep(self._SWITCH_SETTLE_S)
             self._hal_comp["jog-inhibit"] = False
 
@@ -264,11 +274,26 @@ class LiveBackend(HALBackend):
         else:
             spindle_dir = SpindleDirection.STOPPED
 
+        # MEASURED speed from the spindle encoder (rev/s -> RPM) via HAL. The
+        # stat "speed" is the COMMANDED speed (S word, 0 when LinuxCNC thinks
+        # the spindle is off) — on this manual-spindle lathe the two differ,
+        # e.g. after M6 stopped the commanded spindle (2026-11-08).
+        measured_rpm, at_speed = 0.0, False
+        if self._hal_comp is not None:
+            try:
+                measured_rpm = self._hal_comp["spindle-rps"] * 60.0
+                at_speed = bool(self._hal_comp["spindle-at-speed"])
+            except Exception:
+                pass
+        if abs(measured_rpm) >= 1.0:
+            spindle_dir = (SpindleDirection.FORWARD if measured_rpm > 0
+                           else SpindleDirection.REVERSE)
+
         spindle = SpindleState(
-            speed=abs(spindle_speed),
-            commanded_speed=abs(sp.get("speed_cmd", sp.get("commanded", spindle_speed))),
+            speed=abs(measured_rpm),
+            commanded_speed=abs(spindle_speed),
             direction=spindle_dir,
-            at_speed=bool(sp.get("at_speed", False)),
+            at_speed=at_speed,
             override=sp.get("override", 1.0),
         )
 
@@ -287,6 +312,8 @@ class LiveBackend(HALBackend):
             task_state=task_state,
             task_mode=task_mode,
             interp_state=interp_state,
+            program_busy=self._program_busy(s),
+            paused=bool(s.paused),
             x=x_axis,
             z=z_axis,
             spindle=spindle,
@@ -310,6 +337,19 @@ class LiveBackend(HALBackend):
             error_message=error_msg,
         )
 
+    @staticmethod
+    def _program_busy(s) -> bool:
+        """AUTO program still has work: interpreter, task execution, motion
+        queue, pause, or an executing NML command. Interp IDLE alone is not
+        enough (it goes IDLE once the whole file is read, before motion ends)."""
+        if s.task_mode != linuxcnc.MODE_AUTO:
+            return False
+        return (s.interp_state != linuxcnc.INTERP_IDLE
+                or s.exec_state != linuxcnc.EXEC_DONE
+                or s.queue > 0
+                or bool(s.paused)
+                or s.state == linuxcnc.RCS_EXEC)
+
     # ------------------------------------------------------------------
     # Mode Control
     # ------------------------------------------------------------------
@@ -319,15 +359,41 @@ class LiveBackend(HALBackend):
         self._stat.poll()
         if self._stat.task_mode == mode:
             return True
+        if self._program_busy(self._stat):
+            # Never interfere with an AUTO program that still has work queued
+            return False
         if self._stat.interp_state != linuxcnc.INTERP_IDLE:
-            # Never abort a running AUTO program — jog/MDI requests silently fail
-            if self._stat.task_mode == linuxcnc.MODE_AUTO:
-                return False
             # MDI stuck non-idle (e.g. after tool change) — safe to abort
             self._cmd.abort()
             self._cmd.wait_complete()
         self._cmd.mode(mode)
+        self._cmd.wait_complete()   # as AXIS ensure_mode does
         return True
+
+    def restore_lathe_modes(self) -> bool:
+        """Re-assert G7 G18 after a program ends, if LinuxCNC dropped them.
+
+        M2 (and an error stop) reset the plane to G17 (LinuxCNC 2.9.6 manual,
+        M2/M30; confirmed in the headless sim 2026-11-08: comp is G40 in every
+        case, G7 is kept, plane becomes G17). The startup code only re-runs on
+        abort. MDI G2/G3 would otherwise run in the XY plane.
+        """
+        try:
+            self._stat.poll()
+            active = set(self._stat.gcodes)
+            if 180 in active and 70 in active:
+                return True
+            if self._program_busy(self._stat):
+                return False
+            if not self._ensure_mode(linuxcnc.MODE_MDI):
+                return False
+            self._cmd.mdi("G7 G18")
+            self._cmd.wait_complete()
+            logger.info("Restored lathe modes G7 G18 after program end")
+            return True
+        except linuxcnc.error as e:
+            logger.warning("restore_lathe_modes failed: %s", e)
+            return False
 
     def set_mode_manual(self) -> bool:
         return self._ensure_mode(linuxcnc.MODE_MANUAL)
@@ -524,9 +590,20 @@ class LiveBackend(HALBackend):
     # ------------------------------------------------------------------
 
     def program_open(self, path: str) -> bool:
+        """Open a program WITHOUT changing task mode.
+
+        Matches stock AXIS (open_file_guts): the file is opened in the current
+        mode and AUTO is entered only at cycle start (program_run). Switching
+        to AUTO on load left the controller in AUTO, where LinuxCNC ignores MPG
+        jog counts (bench 2026-11-08).
+        """
         try:
-            if not self._ensure_mode(linuxcnc.MODE_AUTO):
-                return False
+            self._stat.poll()
+            if (self._stat.interp_state != linuxcnc.INTERP_IDLE
+                    or self._program_busy(self._stat)):
+                return False   # never reload under a running/paused program
+            self._cmd.task_plan_synch()
+            self._cmd.wait_complete()
             self._cmd.program_open(path)
             return True
         except linuxcnc.error:
@@ -595,7 +672,9 @@ class LiveBackend(HALBackend):
             if not self._ensure_mode(linuxcnc.MODE_MDI):
                 return False
             axis_letter = "X" if axis == 0 else "Z"
-            self._cmd.mdi(f"G10 L20 P{system} {axis_letter}{value:.6f}")
+            # X value is DIAMETER: force G7 in the same block (see tools_tab)
+            prefix = "G7 " if axis == 0 else ""
+            self._cmd.mdi(f"{prefix}G10 L20 P{system} {axis_letter}{value:.6f}")
             self._cmd.wait_complete()
             self._ensure_mode(linuxcnc.MODE_MANUAL)
             return True
@@ -653,6 +732,25 @@ class LiveBackend(HALBackend):
             return (0, 0, 0.0, 0.0)
         c = self._hal_comp
         return (c["mpg-x-in"], c["mpg-z-in"], c["x-jog-scale"], c["z-jog-scale"])
+
+    def read_cycle_start(self) -> bool:
+        """Debounced green cycle-start button (TB3 P10)."""
+        try:
+            return bool(self._hal_comp["cycle-start"]) if self._hal_comp is not None else False
+        except Exception:
+            return False
+
+    def get_tool_entry(self, tool_number: int):
+        """(diameter, orientation) from LinuxCNC's LOADED tool table, or None
+        if the tool is not in it. Machine units (inch)."""
+        try:
+            self._stat.poll()
+            for t in self._stat.tool_table:
+                if t.id == tool_number:
+                    return (float(t.diameter), int(t.orientation))
+        except Exception as e:
+            logger.warning("tool table read failed: %s", e)
+        return None
 
     def get_machine_position(self) -> Tuple[float, float]:
         """(x_radius, z) commanded joint positions, machine units (fresh poll)."""
