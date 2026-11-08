@@ -16,7 +16,7 @@ closed. Evidence and mitigation status should link to commits or session notes.
 | R-009 | Machine, README, architecture, and steering documents contain stale/conflicting values | Medium | Open | Reconcile documents against current configuration and dated observations |
 | R-010 | No CI currently runs the automated suite on shared changes | Medium | Open | Define reproducible environment and add CI |
 | R-011 | Material-removal simulation can visually misrepresent cutting | Medium | Mitigated | Feature remains disabled until renderer is proven accurate |
-| R-012 | Compound-slide MPG routing is not wired: `postgui.hal` (mux2 chain) is never loaded, and removing the direct jog-counts nets from `industry-cam.hal` disables both MPGs | High | Mitigated | Direct nets restored 2026-11-08; implement full chain in `LiveBackend` with a bench-test plan before changing `industry-cam.hal` again |
+| R-012 | Compound-slide MPG routing: switching joint jog-counts between sources can cause an uncommanded jump; old postgui.hal design (mux2) could not load | High | Mitigated (software) | 2026-11-08: s32 mux + jog-enable inhibit in `industry-cam.hal`, GUI switches with inhibit held; unit-tested and halrun check script. Close only after machine commissioning per `session-notes/2026-11-08-compound-slide-routing.md` |
 
 ## Severity Guide
 
