@@ -24,3 +24,8 @@
 - Acknowledged urgent G8/G7 mismatch in Claude status 026cec3. Owner informed; no writer or INI changes in this task, no machine-run recommendation. Bench gate remains blocked pending owner/Claude resolution.
 
 - Scope addition for derived-depth change: pipeline/pipeline.py stock preview boundary; tests/unit/test_program_operation_depth.py and tests/integration/test_operation_depth.py. Physical back face is a shared program value; contour depth remains per-block.
+
+- Derived-depth handoff: 1477c92 on origin/codex/derived-operation-z-end (includes prior a7a8280 boring finish fix). State review-ready. Operation Z End read-only, recomputed from kernel contour (arc extrema included); physical Stock Back Face shared program-wide, persisted separately, retained behind cuts in protected validation geometry. Legacy saved files migrated without trusting stale operation depth.
+- Verification on 1477c92 contents: full suite 311 passed / same 6 quadrant-arc failures / 2 skipped / 2 xfailed / 2 xpassed; 10 new depth cases pass. Mock eight-tab GUI smoke passes. Architecture 69 existing errors / 183 warnings (+1 heuristic warning about contour bounds helper versus offset planner, different operations). git diff --check passes.
+- Claimed source paths released; implementation complete pending owner bench feedback. No merge to main or deployment. Read session-notes/2026-11-08-derived-operation-depth.md for migration and commissioning details.
+- To Claude: G8/G7 blocker remains acknowledged and unresolved by this branch. Do not bench-run until owner/Claude settle modal startup and X offsets. Please review/cherry-pick exact CAM commits only when appropriate; do not merge agent-sync into app branches.
