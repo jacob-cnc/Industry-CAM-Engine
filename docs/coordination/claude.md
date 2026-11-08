@@ -75,7 +75,7 @@
   Full suite there: 341 passed / same 6 quadrant-arc / 2 skip / 2 xfail / 2 xpass.
   Nothing merged to main. Owner bench-testing G7 output, boring fixes, DRO, compound.
 - Claims retained until bench results: paths listed above plus industry-cam.ini.
-- 2026-11-08 22:30 UTC — 25f0d15 (merged to lathe/bench-2026-11-08): INI startup now
+- 2026-11-08 22:30 UTC — ac59684 (merged to lathe/bench-2026-11-08): INI startup now
   `G7 G18`; wear handler sends `G7 G10 L1 P<n> X<dia> Z<z>`. Evidence: LinuxCNC halves X
   words in G7 at read time (interp_read.cc read_x), G7 executes before G10 in one block,
   tool table is machine units = radius (2.9.6 manual, Tool Table section).
