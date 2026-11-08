@@ -406,24 +406,54 @@ class RunTab(QWidget):
     # Program Control
     # =================================================================
 
-    def _on_start(self):
-        """Start program execution from line 1."""
+    def cycle_start(self, source: str = "screen") -> str:
+        """Cycle Start with state-dependent behaviour (green button + screen).
+
+        paused            -> resume where it stopped (never line 1)
+        program has work  -> ignored
+        nothing queued    -> start the loaded program at line 1
+        Returns what happened: "resumed", "ignored", "started", "no-program",
+        "machine-off", "cancelled" or "failed".
+        """
+        self._backend.poll()          # decide on fresh state, not the 5 Hz cache
+        state = self._backend.state
+        if state.interp_state == InterpState.PAUSED or getattr(state, "paused", False):
+            self._backend.program_resume()
+            self._btn_pause.setText("Pause")
+            logger.info("Cycle start (%s): resume", source)
+            return "resumed"
+        if state.program_busy:
+            logger.info("Cycle start (%s): ignored, program running", source)
+            return "ignored"
+        if not state.machine_on:
+            self.show_error("Machine is off - turn it on before cycle start")
+            return "machine-off"
         if not self._gcode_path:
-            return
+            self.show_error("No program loaded - open one in the Run tab")
+            return "no-program"
+        return self._start_from_line(0, source)
+
+    def _on_start(self):
+        """On-screen Cycle Start — same behaviour as the green button."""
+        self.cycle_start("screen")
+
+    def _start_from_line(self, line: int, source: str) -> str:
         self.clear_error()
         problems = self.tool_table_problems()
         if problems and not self._warn_tool_problems(problems, at_start=True):
-            return
-        success = self._backend.program_run(start_line=0)
+            return "cancelled"
+        success = self._backend.program_run(start_line=line)
         if success:
             self._set_running_state()
-        else:
-            logger.warning("program_run failed")
+            logger.info("Cycle start (%s): program started at line %d", source, line + 1)
+            return "started"
+        logger.warning("program_run failed")
+        return "failed"
 
     def _on_pause_resume(self):
         """Toggle pause/resume."""
         state = self._backend.state
-        if state.interp_state == InterpState.PAUSED:
+        if state.interp_state == InterpState.PAUSED or state.paused:
             self._backend.program_resume()
             self._btn_pause.setText("Pause")
         else:

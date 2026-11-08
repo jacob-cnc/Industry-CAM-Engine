@@ -99,6 +99,8 @@ class LiveBackend(HALBackend):
             # Spindle feedback for display (netted to spindle-vel / spindle-at-speed)
             self._hal_comp.newpin("spindle-rps", hal_module.HAL_FLOAT, hal_module.HAL_IN)
             self._hal_comp.newpin("spindle-at-speed", hal_module.HAL_BIT, hal_module.HAL_IN)
+            # Green cycle button (debounced) — GUI starts programs from it
+            self._hal_comp.newpin("cycle-start", hal_module.HAL_BIT, hal_module.HAL_IN)
             # Control pins — written by GUI
             self._hal_comp.newpin("compound-enable", hal_module.HAL_BIT, hal_module.HAL_OUT)
             self._hal_comp.newpin("compound-angle", hal_module.HAL_FLOAT, hal_module.HAL_OUT)
@@ -131,6 +133,7 @@ class LiveBackend(HALBackend):
             # pins read 0 and the GUI shows 0 RPM.
             self._halcmd_net(["spindle-vel", "compound-slide.spindle-rps"])
             self._halcmd_net(["spindle-at-speed", "compound-slide.spindle-at-speed"])
+            self._halcmd_net(["cycle-go-btn", "compound-slide.cycle-start"])
             time.sleep(self._SWITCH_SETTLE_S)
             self._hal_comp["jog-inhibit"] = False
 
@@ -310,6 +313,7 @@ class LiveBackend(HALBackend):
             task_mode=task_mode,
             interp_state=interp_state,
             program_busy=self._program_busy(s),
+            paused=bool(s.paused),
             x=x_axis,
             z=z_axis,
             spindle=spindle,
@@ -728,6 +732,13 @@ class LiveBackend(HALBackend):
             return (0, 0, 0.0, 0.0)
         c = self._hal_comp
         return (c["mpg-x-in"], c["mpg-z-in"], c["x-jog-scale"], c["z-jog-scale"])
+
+    def read_cycle_start(self) -> bool:
+        """Debounced green cycle-start button (TB3 P10)."""
+        try:
+            return bool(self._hal_comp["cycle-start"]) if self._hal_comp is not None else False
+        except Exception:
+            return False
 
     def get_tool_entry(self, tool_number: int):
         """(diameter, orientation) from LinuxCNC's LOADED tool table, or None

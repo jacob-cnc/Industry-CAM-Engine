@@ -110,6 +110,8 @@ class MachineState:
     # IDLE after reading the whole program while 82 motions were still queued
     # and the tool was cutting. Use this for "is a program running".
     program_busy: bool = False
+    # LinuxCNC program pause (feed hold, M0/M1, red button): stat.paused
+    paused: bool = False
 
     # Axes
     x: AxisState = field(default_factory=AxisState)

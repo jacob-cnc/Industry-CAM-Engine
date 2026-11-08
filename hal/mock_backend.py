@@ -416,6 +416,10 @@ class MockBackend(HALBackend):
         self._z_pos += (z_counts - last_z) * self._MOCK_Z_SCALE
         self._compound_out = (x_counts, z_counts)
 
+    def read_cycle_start(self) -> bool:
+        """Mock: settable from tests via ``_cycle_start``."""
+        return bool(getattr(self, "_cycle_start", False))
+
     def set_mpg_scale_index(self, index: int):
         """Set MPG jog mode index (no-op in mock — no HAL mux8 pins)."""
         pass
@@ -469,6 +473,7 @@ class MockBackend(HALBackend):
             interp_state=self._interp_state,
             program_busy=(self._task_mode == TaskMode.AUTO
                           and self._interp_state != InterpState.IDLE),
+            paused=(self._interp_state == InterpState.PAUSED),
             x=x_axis,
             z=z_axis,
             spindle=spindle,

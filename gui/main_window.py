@@ -69,6 +69,16 @@ class MainWindow(QMainWindow):
         self._status_timer.timeout.connect(self._poll_status_bar)
         self._status_timer.start(200)  # 5 Hz
 
+        # Green cycle button (TB3 P10). Measured presses are ~150 ms, so poll
+        # at 20 ms. HAL resumes a paused program and red pauses (both in
+        # industry-cam.hal, GUI-independent); the GUI only STARTS a program
+        # when nothing is queued, after its tool-table check.
+        self._cycle_btn_prev = False
+        self._cycle_btn_busy = False
+        self._cycle_btn_timer = QTimer(self)
+        self._cycle_btn_timer.timeout.connect(self._poll_cycle_button)
+        self._cycle_btn_timer.start(20)
+
         logger.info("MainWindow initialized (offline preview mode)")
 
     # ------------------------------------------------------------------
@@ -257,6 +267,31 @@ class MainWindow(QMainWindow):
         current = self._tab_widget.widget(index)
         self._setup_tab.set_active(current is self._setup_tab)
         self._run_tab.set_active(current is self._run_tab)
+
+    def _poll_cycle_button(self):
+        """Rising edge of the green button -> cycle start when idle."""
+        if not hasattr(self._backend, "read_cycle_start"):
+            return
+        pressed = self._backend.read_cycle_start()
+        rising = pressed and not self._cycle_btn_prev
+        self._cycle_btn_prev = pressed
+        if not rising or self._cycle_btn_busy:
+            return
+        self._cycle_btn_busy = True          # modal dialogs re-enter the event loop
+        try:
+            self._backend.poll()
+            s = self._backend.state
+            if s.paused or s.program_busy:
+                logger.info("Green button: program %s - handled in HAL / ignored",
+                            "paused" if s.paused else "running")
+                return
+            self._tab_widget.setCurrentWidget(self._run_tab)
+            result = self._run_tab.cycle_start("green button")
+            logger.info("Green button: %s", result)
+        except Exception:
+            logger.exception("Green button handler failed")
+        finally:
+            self._cycle_btn_busy = False
 
     def _on_mode_clicked(self):
         """Ribbon mode chip clicked: return to MANUAL, but never interrupt a

@@ -360,7 +360,7 @@ def _build_demo_pins() -> List[PinInfo]:
     _add("debounce.0.6.out", "bit", "OUT", False, "jog-x-minus")
     _add("debounce.0.7.out", "bit", "OUT", False, "jog-x-plus")
     _add("debounce.0.8.out", "bit", "OUT", False, "cycle-go-btn")
-    _add("debounce.0.9.out", "bit", "OUT", False, "cycle-stop")
+    _add("debounce.0.9.out", "bit", "OUT", False, "cycle-pause-btn")
 
     return pins
 
