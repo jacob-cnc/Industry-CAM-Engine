@@ -65,6 +65,17 @@ Based on the latest commissioning notes:
   `industry-cam.hal` with a jump-free inhibit gate; machine-verified. Controller
   starts `G7 G18`; DRO X displays diameter; Set X and wear `G10 L1` are sent in G7.
   See `session-notes/2026-11-08-compound-slide-routing.md`.
+- 2026-11-08 (lathe-tested-2026-11-08c): controller starts G7 G18, keeps the
+  commanded spindle on through M6, spindle at-speed uses a 0.5x-2x rev/s window
+  (gearbox "64" = 80 RPM measured); soft limits X -0.05..4.25 r, Z +/-5 around the
+  power-up/home-in-place reference; program load no longer forces AUTO; GUI
+  returns to MANUAL (and G7 G18) when no program work remains (program_busy);
+  ID passes use G41, OD G42; roughing G40 with per-pass compensated contours;
+  tool orientation Q per LinuxCNC Fig 2.16 (T1 boring bar Q3); green button =
+  start/resume, red = pause. GCH bore program ran cleanly (air).
+  Software-verified only: tool-offset persistence (radius in tool.tbl), the
+  runtime tool-check pause on the lathe, G7 G18 restore after M2.
+  Session notes 2026-11-08-*.md.
 
 ## Current Machine Configuration
 
