@@ -68,6 +68,7 @@ class ManualTab(QWidget):
         self._arc_logic = CompoundArcLogic()
         # Live compound engine (machine-frame); created on activation
         self._compound_engine: Optional[CompoundJogEngine] = None
+        self._compound_suppress_logged = False
         # Display-frame minus machine-frame offset, for drawing the arc overlay
         self._compound_display_offset = (0.0, 0.0)
         # Fast loop: reads the selected MPG every 20 ms while compound is active
@@ -584,8 +585,14 @@ class ManualTab(QWidget):
         engine.start(mx, mz, mpg_x if self._compound_mpg == "x" else mpg_z,
                      mode=self._compound_mode, angle_deg=self._compound_angle)
         self._compound_engine = engine
+        self._compound_suppress_logged = False
         self._backend.set_compound_angle(self._compound_angle)
         self._compound_timer.start()
+        logger.info(
+            "Compound ACTIVE: mode=%s angle=%.2f mpg=%s machine x_r=%.4f z=%.4f "
+            "limits=(%.4f..%.4f, %.4f..%.4f) start_counts x=%d z=%d",
+            self._compound_mode, self._compound_angle, self._compound_mpg,
+            mx, mz, *engine.limits, mpg_x, mpg_z)
 
     def _compound_deactivate(self):
         """Deactivate compound slide mode."""
@@ -635,6 +642,12 @@ class ManualTab(QWidget):
         # inches per count for the selected position increment (X's is radius).
         step = engine.step(selected, z_scale, x_scale, z_scale)
         if step is None:
+            if engine.suppressed and not self._compound_suppress_logged:
+                self._compound_suppress_logged = True
+                logger.warning(
+                    "Compound pulse suppressed (limit/arc end): x_r=%.4f z=%.4f "
+                    "limits=%s scales x=%g z=%g", engine.x_r, engine.z,
+                    engine.limits, x_scale, z_scale)
             return
         self._backend.set_compound_jog_counts(step.x_total, step.z_total)
         self._compound["lbl_distance"].setText(f"{step.distance:.4f}\"")

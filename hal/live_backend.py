@@ -655,10 +655,19 @@ class LiveBackend(HALBackend):
         return (self._stat.joint[0]["output"], self._stat.joint[1]["output"])
 
     def get_joint_limits(self) -> Tuple[float, float, float, float]:
-        """(x_min, x_max, z_min, z_max) joint position limits, machine units."""
-        j = self._stat.joint
-        return (j[0]["min_position_limit"], j[0]["max_position_limit"],
-                j[1]["min_position_limit"], j[1]["max_position_limit"])
+        """(x_min, x_max, z_min, z_max) wheel-jog limits, machine units.
+
+        Mirrors LinuxCNC: position limits when homed, otherwise a window of
+        +/- full travel around the current position (see compound_router.jog_window).
+        """
+        from hal.compound_router import jog_window
+        self._stat.poll()
+        s = self._stat
+        x = jog_window(bool(s.homed[0]), s.joint[0]["output"],
+                       s.joint[0]["min_position_limit"], s.joint[0]["max_position_limit"])
+        z = jog_window(bool(s.homed[1]), s.joint[1]["output"],
+                       s.joint[1]["min_position_limit"], s.joint[1]["max_position_limit"])
+        return (x[0], x[1], z[0], z[1])
 
     def set_compound_angle(self, angle: float):
         """Set the compound-angle HAL pin (informational, for HAL scope).

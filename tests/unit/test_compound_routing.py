@@ -129,3 +129,27 @@ class TestArc:
             r = math.hypot(eng.x_r - cx, eng.z - cz)
             assert r == pytest.approx(0.25, abs=0.0005)
         assert (eng.x_total, eng.z_total) != (0, 0)
+
+
+class TestJogWindow:
+    """Mirror of LinuxCNC refresh_jog_limits (motion/command.c)."""
+
+    def test_homed_uses_position_limits(self):
+        from hal.compound_router import jog_window
+        assert jog_window(True, 1.0, -0.01, 4.25) == (-0.01, 4.25)
+
+    def test_unhomed_window_follows_position(self):
+        from hal.compound_router import jog_window
+        lo, hi = jog_window(False, -1.5, -0.01, 4.25)
+        assert lo == pytest.approx(-1.5 - 4.26) and hi == pytest.approx(-1.5 + 4.26)
+
+    def test_unhomed_position_outside_ini_limits_still_moves(self):
+        # Regression 2026-11-08: unhomed X at -1.5 (outside -0.01..4.25)
+        # suppressed every compound pulse.
+        from hal.compound_router import jog_window
+        x = jog_window(False, -1.5, -0.01, 4.25)
+        z = jog_window(False, 0.0, -3.0, 3.0)
+        eng = CompoundJogEngine((x[0], x[1], z[0], z[1]))
+        eng.start(-1.5, 0.0, 0, angle_deg=45.0)
+        assert eng.step(400, Z_SCALE, X_SCALE, Z_SCALE) is not None
+        assert eng.suppressed == 0

@@ -36,6 +36,22 @@ from typing import Optional, Tuple
 from hal.compound_logic import CompoundArcLogic, CompoundLinearLogic, Limits
 
 
+def jog_window(homed: bool, position: float,
+               min_limit: float, max_limit: float) -> Tuple[float, float]:
+    """Mirror LinuxCNC's wheel-jog limits for one joint.
+
+    LinuxCNC ``refresh_jog_limits()`` (motion/command.c): a homed joint jogs
+    within its position limits; an UNHOMED joint jogs within
+    ``position +/- (max_limit - min_limit)``, because its machine coordinates
+    are arbitrary (wherever the encoder was at power-up). Using the INI limits
+    on an unhomed joint would suppress motion the controller itself allows.
+    """
+    if homed:
+        return (min_limit, max_limit)
+    span = max_limit - min_limit
+    return (position - span, position + span)
+
+
 @dataclass(frozen=True)
 class CompoundStep:
     """Result of one engine step that produced motion."""
@@ -69,6 +85,7 @@ class CompoundJogEngine:
         self._z_acc = 0.0
         self.x_total = 0
         self.z_total = 0
+        self.suppressed = 0      # pulses dropped by limits/clamp this session
 
     # ------------------------------------------------------------------
 
@@ -90,6 +107,7 @@ class CompoundJogEngine:
         self._z_acc = 0.0
         self.x_total = 0
         self.z_total = 0
+        self.suppressed = 0
         self.linear.reset()
         self.active = True
 
@@ -147,6 +165,7 @@ class CompoundJogEngine:
 
         delta = self._path_delta(count_delta, travel_per_count)
         if delta is None:
+            self.suppressed += 1
             return None
         dx, dz = delta
 
