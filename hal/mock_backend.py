@@ -467,6 +467,8 @@ class MockBackend(HALBackend):
             task_state=self._task_state,
             task_mode=self._task_mode,
             interp_state=self._interp_state,
+            program_busy=(self._task_mode == TaskMode.AUTO
+                          and self._interp_state != InterpState.IDLE),
             x=x_axis,
             z=z_axis,
             spindle=spindle,

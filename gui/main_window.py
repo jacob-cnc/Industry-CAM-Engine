@@ -266,7 +266,7 @@ class MainWindow(QMainWindow):
         s = self._backend.state
         if s.task_mode == TaskMode.MANUAL:
             return
-        if s.interp_state != InterpState.IDLE:
+        if s.program_busy:
             self._status_bar.show_error("Program active - stop it before leaving AUTO")
             logger.info("Mode chip click ignored: interpreter %s", s.interp_state.value)
             return
@@ -313,12 +313,12 @@ class MainWindow(QMainWindow):
         # disables MPG jogging.
         self._status_bar.update_mode(s.task_mode.value)
 
-        # Return to MANUAL whenever LinuxCNC sits in AUTO with the interpreter
-        # idle (program finished, stopped, or rejected at cycle start). LinuxCNC
-        # ignores MPG jog counts outside MANUAL, and nothing else switches back.
-        # Two consecutive polls (>=200 ms) so the AUTO->RUN handoff at cycle
-        # start is never interrupted. PAUSED / WAITING (M0, M6) are not IDLE.
-        if s.task_mode == TaskMode.AUTO and s.interp_state == InterpState.IDLE:
+        # Return to MANUAL when LinuxCNC sits in AUTO with NO program work left
+        # (finished, stopped, or rejected at cycle start). LinuxCNC ignores MPG
+        # jog counts outside MANUAL. program_busy covers interpreter, task exec,
+        # motion queue and pause — interp IDLE alone is true mid-cut once the
+        # whole file has been read (lathe, 2026-11-08). Two consecutive polls.
+        if s.task_mode == TaskMode.AUTO and not s.program_busy:
             self._auto_idle_polls += 1
             if self._auto_idle_polls == 2:
                 logger.info("AUTO and idle: returning to MANUAL")

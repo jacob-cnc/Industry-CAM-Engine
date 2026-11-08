@@ -309,6 +309,7 @@ class LiveBackend(HALBackend):
             task_state=task_state,
             task_mode=task_mode,
             interp_state=interp_state,
+            program_busy=self._program_busy(s),
             x=x_axis,
             z=z_axis,
             spindle=spindle,
@@ -332,6 +333,19 @@ class LiveBackend(HALBackend):
             error_message=error_msg,
         )
 
+    @staticmethod
+    def _program_busy(s) -> bool:
+        """AUTO program still has work: interpreter, task execution, motion
+        queue, pause, or an executing NML command. Interp IDLE alone is not
+        enough (it goes IDLE once the whole file is read, before motion ends)."""
+        if s.task_mode != linuxcnc.MODE_AUTO:
+            return False
+        return (s.interp_state != linuxcnc.INTERP_IDLE
+                or s.exec_state != linuxcnc.EXEC_DONE
+                or s.queue > 0
+                or bool(s.paused)
+                or s.state == linuxcnc.RCS_EXEC)
+
     # ------------------------------------------------------------------
     # Mode Control
     # ------------------------------------------------------------------
@@ -341,10 +355,10 @@ class LiveBackend(HALBackend):
         self._stat.poll()
         if self._stat.task_mode == mode:
             return True
+        if self._program_busy(self._stat):
+            # Never interfere with an AUTO program that still has work queued
+            return False
         if self._stat.interp_state != linuxcnc.INTERP_IDLE:
-            # Never abort a running AUTO program — jog/MDI requests silently fail
-            if self._stat.task_mode == linuxcnc.MODE_AUTO:
-                return False
             # MDI stuck non-idle (e.g. after tool change) — safe to abort
             self._cmd.abort()
             self._cmd.wait_complete()
@@ -556,7 +570,8 @@ class LiveBackend(HALBackend):
         """
         try:
             self._stat.poll()
-            if self._stat.interp_state != linuxcnc.INTERP_IDLE:
+            if (self._stat.interp_state != linuxcnc.INTERP_IDLE
+                    or self._program_busy(self._stat)):
                 return False   # never reload under a running/paused program
             self._cmd.task_plan_synch()
             self._cmd.wait_complete()

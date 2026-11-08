@@ -66,3 +66,20 @@ error shown. Machine verification pending.
 - Fixes: INI TOOL_CHANGE_WITH_SPINDLE_ON = 1; ribbon RPM / direction / at-speed
   now from HAL (encoder rev/s via spindle-vel, spindle-at-speed) instead of stat.
 - Proposed to Codex/owner (CAM): emit S/M3 after T M6 as defence in depth.
+
+## Run tab not tracking; "interpreter IDLE" mid-cut (safety)
+
+- Live read-only sample during the GCH run: mode AUTO, interp IDLE, exec
+  WAIT_MOTION_AND_IO, queue 82, state RCS_EXEC, current_line 107 (end of file),
+  Z moving at X 3.109 dia. The interpreter goes IDLE once the whole file is read
+  while motion is still executing.
+- Consequences: Run tab only tracked while interp READING/PAUSED/WAITING -> no
+  tool dot / reveal for most of the cut; and the AUTO+idle -> MANUAL auto-return
+  fired at 12:59:37 / 12:59:53 (LinuxCNC evidently ignored it — mode stayed AUTO,
+  no error, cut continued).
+- Fix: MachineState.program_busy = AUTO and (interp != IDLE or exec != DONE or
+  queue > 0 or paused or RCS_EXEC). Used by auto-return, mode chip, _ensure_mode,
+  program_open, Run tab completion/tracking. Run tab now always shows the machine
+  position dot and shows RUNNING when busy with interp IDLE.
+- Verified offline against the exact live state and sim states (6/6). Machine
+  verification pending.

@@ -422,9 +422,13 @@ class RunTab(QWidget):
         """Timer callback — update line highlighting and status from machine state."""
         state = self._backend.state
 
-        # Update interpreter state display
+        # Update interpreter state display. The interpreter goes IDLE once it
+        # has read the whole file while motion is still executing, so show
+        # RUNNING whenever the program still has work (program_busy).
         interp_name = state.interp_state.value.upper()
-        if state.interp_state == InterpState.IDLE:
+        if state.program_busy and state.interp_state == InterpState.IDLE:
+            interp_name = "RUNNING"
+        if not state.program_busy and state.interp_state == InterpState.IDLE:
             color = COLORS['text_disabled']
         elif state.interp_state == InterpState.PAUSED:
             color = COLORS['status_warning']
@@ -448,8 +452,8 @@ class RunTab(QWidget):
                 self._sim_viewer.sim_line_changed.emit(-1)
                 self._status_line.setText("Line: —")
 
-        # Detect program completion (was running, now idle)
-        if state.interp_state == InterpState.IDLE and self._is_running:
+        # Detect program completion (was running, now nothing left to do)
+        if not state.program_busy and self._is_running:
             self._set_idle_state()
 
         # Update button state for pause
@@ -458,8 +462,12 @@ class RunTab(QWidget):
         elif state.interp_state == InterpState.READING:
             self._btn_pause.setText("Pause")
 
-        # Live tool position and toolpath reveal from machine state during execution
-        if state.interp_state in (InterpState.READING, InterpState.PAUSED, InterpState.WAITING):
-            x_r = state.x.position / 2.0  # diameter → radius
-            z = state.z.position
+        # Live tool position (work coords, X diameter -> radius) — always shown so
+        # the graph reflects where the machine is; toolpath reveal while a
+        # program has work (interp may be IDLE mid-cut, see program_busy).
+        x_r = state.x.position / 2.0
+        z = state.z.position
+        if state.program_busy:
             self._sim_viewer.update_live_position(motion_line, x_r, z)
+        elif not self._sim_viewer.is_playing():
+            self._sim_viewer.show_machine_position(x_r, z)

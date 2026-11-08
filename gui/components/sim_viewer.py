@@ -401,6 +401,16 @@ class SimViewerWidget(QWidget):
         # Show all toolpath by default after generating
         self._sim_show_all()
 
+    def is_playing(self) -> bool:
+        """True while the offline preview animation is running."""
+        timer = getattr(self, "_timer", None) or getattr(self, "_sim_timer", None)
+        return bool(timer is not None and timer.isActive())
+
+    def show_machine_position(self, x_r: float, z: float):
+        """Show the machine's current position (work coords, X radius) without
+        touching toolpath reveal — used when no program is running."""
+        self._graph.set_tool_position(x_r, z)
+
     def update_live_position(self, motion_line_1based: int, x_r: float, z: float):
         """Update tool dot and toolpath reveal for live machine execution.
 
