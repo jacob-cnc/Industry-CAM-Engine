@@ -83,3 +83,16 @@ error shown. Machine verification pending.
   position dot and shows RUNNING when busy with interp IDLE.
 - Verified offline against the exact live state and sim states (6/6). Machine
   verification pending.
+
+## Modal state after a program (headless 2.9.6 sim, owner question)
+| End of program | comp | plane | G7 |
+|---|---|---|---|
+| Stop/abort mid-cut | G40 | G18 (startup code re-runs) | kept |
+| Normal M2 | G40 | G17 | kept |
+| Error stop | G40 | G17 | kept |
+Cutter comp is never left active; jogging/MPG/compound are never compensated
+(interpreter-only). Fix: when the GUI returns AUTO->MANUAL after a program it calls
+LiveBackend.restore_lathe_modes() (MDI "G7 G18" only if missing). Sim with the real
+backend: after M2 G17 -> restored G18, second call no-op.
+Note: the ribbon G-code list shows the interpreter's read-ahead state (it can
+read M2's resets while motion is still cutting), not the executing block's.

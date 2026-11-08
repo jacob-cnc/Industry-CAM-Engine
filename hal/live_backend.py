@@ -366,6 +366,31 @@ class LiveBackend(HALBackend):
         self._cmd.wait_complete()   # as AXIS ensure_mode does
         return True
 
+    def restore_lathe_modes(self) -> bool:
+        """Re-assert G7 G18 after a program ends, if LinuxCNC dropped them.
+
+        M2 (and an error stop) reset the plane to G17 (LinuxCNC 2.9.6 manual,
+        M2/M30; confirmed in the headless sim 2026-11-08: comp is G40 in every
+        case, G7 is kept, plane becomes G17). The startup code only re-runs on
+        abort. MDI G2/G3 would otherwise run in the XY plane.
+        """
+        try:
+            self._stat.poll()
+            active = set(self._stat.gcodes)
+            if 180 in active and 70 in active:
+                return True
+            if self._program_busy(self._stat):
+                return False
+            if not self._ensure_mode(linuxcnc.MODE_MDI):
+                return False
+            self._cmd.mdi("G7 G18")
+            self._cmd.wait_complete()
+            logger.info("Restored lathe modes G7 G18 after program end")
+            return True
+        except linuxcnc.error as e:
+            logger.warning("restore_lathe_modes failed: %s", e)
+            return False
+
     def set_mode_manual(self) -> bool:
         return self._ensure_mode(linuxcnc.MODE_MANUAL)
 

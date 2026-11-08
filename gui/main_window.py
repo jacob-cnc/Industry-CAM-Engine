@@ -322,6 +322,8 @@ class MainWindow(QMainWindow):
             self._auto_idle_polls += 1
             if self._auto_idle_polls == 2:
                 logger.info("AUTO and idle: returning to MANUAL")
+                if hasattr(self._backend, "restore_lathe_modes"):
+                    self._backend.restore_lathe_modes()   # M2 leaves G17
                 self._backend.set_mode_manual()
         else:
             self._auto_idle_polls = 0
