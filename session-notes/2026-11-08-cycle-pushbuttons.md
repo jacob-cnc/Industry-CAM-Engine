@@ -32,3 +32,9 @@ Red: pause. Pushbuttons primary; GUI buttons kept as backup.
 - 7 GUI tests (mock): idle start, held = one press, paused/running ignored by
   GUI, no-program and machine-off messages, screen resume.
 Machine verification pending.
+
+## Machine evidence (owner bench test, 15:24-15:25)
+Owner: "Everything appears to be working." Log: 15:24:38 green -> program started
+at line 1; 15:24:55-59 green while paused -> resumed by HAL (GUI logs "paused -
+handled in HAL", it samples before halui applies the resume); 15:25:01-06 green
+while running -> ignored. No LinuxCNC errors. MACHINE-VERIFIED.
