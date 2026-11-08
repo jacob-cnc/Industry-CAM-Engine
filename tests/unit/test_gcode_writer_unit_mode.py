@@ -19,6 +19,54 @@ from models.results import PlanResult, TurningPass
 from outputs.gcode_writer import GCodeWriter
 
 
+def _assert_diameter_mode_before_motion(code):
+    active_diameter_mode = False  # Simulate inheriting G8 from the controller.
+    motion_count = 0
+    for line in code.splitlines():
+        words = line.split(";")[0].split()
+        if "G7" in words:
+            active_diameter_mode = True
+        assert "G8" not in words
+        if any(re.fullmatch(r"[XZ][+-]?[\d.]+", w) for w in words):
+            assert active_diameter_mode, line
+            motion_count += 1
+    assert motion_count > 0
+
+
+@pytest.mark.parametrize("unit_mode", ["inch", "metric"])
+@pytest.mark.parametrize("mode", [MachiningMode.OD, MachiningMode.ID])
+def test_program_selects_diameter_mode_without_rescaling_x(unit_mode, mode):
+    from dataclasses import replace
+    plan = _make_simple_plan_result()
+    plan = replace(plan, mode=mode, stock=replace(plan.stock, mode=mode, pilot_hole_dia=0.5))
+    code = GCodeWriter().write(plan, unit_mode=unit_mode)
+    _assert_diameter_mode_before_motion(code)
+    expected_park = "X3.0000 Z3.0000" if unit_mode == "inch" else "X76.200 Z76.200"
+    assert expected_park in code
+
+
+@pytest.mark.parametrize("operation", ["threading", "grooving", "tool_change"])
+def test_block_generators_select_diameter_mode_before_motion(operation):
+    from models.program import ThreadingParams, GroovingParams
+    writer = GCodeWriter()
+    tool = _make_simple_plan_result().tool
+    if operation == "threading":
+        params = ThreadingParams(
+            "UNC", "1/2-13", 0.5, 1 / 13, 0.04, 0.1, -0.5,
+            "radial", 8, 1, 0.0, False, 200, 1,
+        )
+        lines = writer.write_threading_block(params, tool, 1.0)
+    elif operation == "grooving":
+        params = GroovingParams(
+            "single", False, -0.2, -0.3, 0.1, 1.0,
+            False, 0.02, 0.01, 0.002, 200, 1, 0.05,
+        )
+        lines = writer.write_grooving_block(params, tool, 1.0)
+    else:
+        lines = writer.write_tool_change(tool, 200)
+    _assert_diameter_mode_before_motion("\n".join(lines))
+
+
 def _make_simple_plan_result():
     """Create a minimal PlanResult for testing GCodeWriter."""
     profile = ClosedProfile(
