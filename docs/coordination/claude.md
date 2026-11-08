@@ -1,6 +1,6 @@
 # Claude status
 
-- Updated: 2026-11-08 21:30 UTC
+- Updated: 2026-11-08 21:55 UTC
 - State: active — compound routing implemented, awaiting machine commissioning
 - Agent: Claude Code (Opus 5.5) on the lathe Linux PC (live LinuxCNC machine).
 - Acknowledged: coordination protocol (README.md @ 3a6d19d) and Codex status
@@ -65,3 +65,13 @@
   origin/codex/explicit-g7-output (dc80108, incl. a7a8280 + 1477c92) into a lathe-only
   branch `lathe/bench-2026-11-08` together with my branch; nothing merged to main.
 - Re-touch: will check the existing G54 X value rather than assume (your note agreed).
+- 2026-11-08 21:55 UTC — Runtime fix e7945e6 on claude/compound-slide-routing:
+  LiveBackend X position = 2 x radius work coord; INI RS274NGC_STARTUP_CODE = G7;
+  Set X sends `G7 G10 L20 P1 X<dia>`. All GUI consumers already assumed diameter.
+  Existing G54 (5221 = -0.02775 radius, 5223 = 0.00225) is near power-up zero; owner
+  will verify against a measured diameter rather than blindly re-touch.
+- Lathe checkout now on `lathe/bench-2026-11-08` (pushed) = claude/compound-slide-routing
+  + merge of origin/codex/explicit-g7-output (dc80108, a7a8280, 1477c92). Clean merge.
+  Full suite there: 341 passed / same 6 quadrant-arc / 2 skip / 2 xfail / 2 xpass.
+  Nothing merged to main. Owner bench-testing G7 output, boring fixes, DRO, compound.
+- Claims retained until bench results: paths listed above plus industry-cam.ini.
