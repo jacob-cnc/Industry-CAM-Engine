@@ -34,3 +34,10 @@ clear message instead of "Null TopoDS_Shape".
 - 4 new integration tests (test_od_step_to_stock.py). Full suite: 498 passed,
   4 failed (all "arc expected" Q tests), 5 xfailed.
 Simulator verification of the case A/B G-code pending (LinuxCNC was running).
+
+## Simulator (headless 2.9.6, T2 D0.032 Q2) — both programs ran, no errors
+Case B: finish walls X0.5000 / X0.8000, shoulder Z-0.3000, step face Z-0.6000
+(running out to the bar OD); cleanup X0.5100 / X0.8100, Z-0.2950 / -0.5950;
+roughing passes at the step stop at about Z-0.594 (allowance kept).
+Case A: same walls; finish wall ends in the comp lead-out (nose stop verified
+earlier at exactly Z-0.6000 vs -0.6156 without it).
