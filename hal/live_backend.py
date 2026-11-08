@@ -96,6 +96,9 @@ class LiveBackend(HALBackend):
             self._hal_comp.newpin("z-jog-scale", hal_module.HAL_FLOAT, hal_module.HAL_IN)
             # Gates joint/axis jog-enable FALSE while the jog-counts mux switches
             self._hal_comp.newpin("jog-inhibit", hal_module.HAL_BIT, hal_module.HAL_OUT)
+            # Spindle feedback for display (netted to spindle-vel / spindle-at-speed)
+            self._hal_comp.newpin("spindle-rps", hal_module.HAL_FLOAT, hal_module.HAL_IN)
+            self._hal_comp.newpin("spindle-at-speed", hal_module.HAL_BIT, hal_module.HAL_IN)
             # Control pins — written by GUI
             self._hal_comp.newpin("compound-enable", hal_module.HAL_BIT, hal_module.HAL_OUT)
             self._hal_comp.newpin("compound-angle", hal_module.HAL_FLOAT, hal_module.HAL_OUT)
@@ -124,6 +127,10 @@ class LiveBackend(HALBackend):
         if self._hal_comp is not None:
             self._connect_scale_select_pins()
             self._compound_routing_ok = self._connect_compound_routing()
+            # Spindle feedback for the ribbon. Non-critical: on failure the
+            # pins read 0 and the GUI shows 0 RPM.
+            self._halcmd_net(["spindle-vel", "compound-slide.spindle-rps"])
+            self._halcmd_net(["spindle-at-speed", "compound-slide.spindle-at-speed"])
             time.sleep(self._SWITCH_SETTLE_S)
             self._hal_comp["jog-inhibit"] = False
 
@@ -264,11 +271,26 @@ class LiveBackend(HALBackend):
         else:
             spindle_dir = SpindleDirection.STOPPED
 
+        # MEASURED speed from the spindle encoder (rev/s -> RPM) via HAL. The
+        # stat "speed" is the COMMANDED speed (S word, 0 when LinuxCNC thinks
+        # the spindle is off) — on this manual-spindle lathe the two differ,
+        # e.g. after M6 stopped the commanded spindle (2026-11-08).
+        measured_rpm, at_speed = 0.0, False
+        if self._hal_comp is not None:
+            try:
+                measured_rpm = self._hal_comp["spindle-rps"] * 60.0
+                at_speed = bool(self._hal_comp["spindle-at-speed"])
+            except Exception:
+                pass
+        if abs(measured_rpm) >= 1.0:
+            spindle_dir = (SpindleDirection.FORWARD if measured_rpm > 0
+                           else SpindleDirection.REVERSE)
+
         spindle = SpindleState(
-            speed=abs(spindle_speed),
-            commanded_speed=abs(sp.get("speed_cmd", sp.get("commanded", spindle_speed))),
+            speed=abs(measured_rpm),
+            commanded_speed=abs(spindle_speed),
             direction=spindle_dir,
-            at_speed=bool(sp.get("at_speed", False)),
+            at_speed=at_speed,
             override=sp.get("override", 1.0),
         )
 

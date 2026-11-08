@@ -48,3 +48,21 @@ error shown. Machine verification pending.
   (0.5x..2x, same direction). scripts/check_spindle_at_speed.sh: 10/10 PASS.
 - Machine-verified: M3 S64 + spindle at 64 gear -> at-speed TRUE (cmd 1.067 rps,
   meas 1.30-1.42 rps); spindle stopped with M3 active -> FALSE.
+
+## Program held before N90 until the spindle was switched off (and 0 RPM ribbon)
+
+- Simulator (headless LinuxCNC 2.9.6 sim lathe, scratchpad) measured task states:
+  at-speed hold = interp WAITING; single-block between steps = PAUSED/WAITING;
+  MANUAL requested while waiting -> refused by LinuxCNC ("Can't switch mode while
+  mode is AUTO and interpreter is not IDLE"). So the AUTO->MANUAL auto-return did
+  not interfere with the run.
+- Cause: program order `S64 M3` (N30) then `T1 M6` (N50). LinuxCNC stops the
+  commanded spindle on M6 unless [EMCIO] TOOL_CHANGE_WITH_SPINDLE_ON = 1 (manual:
+  "Useful for lathes"). Commanded 0 vs physically running manual spindle ->
+  at-speed FALSE -> held; spindle off -> 0 vs 0 -> TRUE -> released; G95 then fed
+  from the encoder with LinuxCNC believing the spindle was OFF. Ribbon showed the
+  commanded (0) speed.
+- Sim proof: after M6 commanded speed 64 -> 0 without the option, stays 64 with it.
+- Fixes: INI TOOL_CHANGE_WITH_SPINDLE_ON = 1; ribbon RPM / direction / at-speed
+  now from HAL (encoder rev/s via spindle-vel, spindle-at-speed) instead of stat.
+- Proposed to Codex/owner (CAM): emit S/M3 after T M6 as defence in depth.
