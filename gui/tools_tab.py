@@ -513,11 +513,18 @@ class Tools_Tab(QWidget):
         if tool_data is None:
             return
 
-        # Combined X = (geometry_x + wear_x) in radius, convert to diameter for G10
+        # Combined X = (geometry_x + wear_x) in radius, convert to diameter for G10.
+        # LinuxCNC halves X words while G7 is active (interp_read.cc read_x), so
+        # G10 L1 stores this as a RADIUS machine-unit offset, which is what the
+        # tool table holds ("units ... are in machine units", 2.9.6 manual).
+        # Under G8 the same command would store 2x the intended offset, so G7
+        # is put in the same block (G7 executes before G10 in one block,
+        # interp_convert.cc convert_g).
         combined_x_diameter = (tool_data.x_offset + tool_data.x_wear) * 2.0
         combined_z = tool_data.z_offset + tool_data.z_wear
 
-        command = f"G10 L1 P{tool_number} X{combined_x_diameter:.6f} Z{combined_z:.6f}"
+        command = (f"G7 G10 L1 P{tool_number} "
+                   f"X{combined_x_diameter:.6f} Z{combined_z:.6f}")
         self._send_mdi_command(command)
 
     # ------------------------------------------------------------------
