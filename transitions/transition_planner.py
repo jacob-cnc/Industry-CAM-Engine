@@ -28,6 +28,7 @@ class TransitionPlanner:
 
     Transition types:
     - RETRACT_TRAVERSE_PLUNGE: Standard safe transition (retract X → traverse Z → plunge X)
+    - DIAGONAL_RETRACT_APPROACH: Cleanup/finish exit to safe X and the pass approach Z
     - PERPENDICULAR_LINK: Feed perpendicular between offset-contour passes (no retract)
     - STEP_OVER: Simple X step-down for adjacent passes at same Z start
     """
@@ -71,7 +72,8 @@ class TransitionPlanner:
     ) -> Transition:
         """Determine transition type and generate moves between two passes.
 
-        For staircase strategy: always RETRACT_TRAVERSE_PLUNGE
+        Cleanup/finish: coordinated X/Z exit, then the next approach.
+        For roughing staircase strategy: RETRACT_TRAVERSE_PLUNGE
         For offset-contour: PERPENDICULAR_LINK between contour passes,
                            RETRACT_TRAVERSE_PLUNGE for other transitions
         """
@@ -103,17 +105,33 @@ class TransitionPlanner:
 
         safe_x = self._get_safe_x(mode, stock)
 
-        # For now, use RETRACT_TRAVERSE_PLUNGE for all transitions
-        # (PERPENDICULAR_LINK will be added with offset-contour planner)
-        moves = self._retract_traverse_plunge(start_pos, end_pos, safe_x, mode, stock)
-
+        if from_pass.pass_type in (PassType.CLEANUP, PassType.FINISH):
+            moves = self.contour_retract(from_pass, mode, stock)
+            clearance = (safe_x, from_pass.z_start)
+            moves.extend(self._retract_traverse_plunge(clearance, end_pos, safe_x, mode, stock))
+            transition_type = TransitionType.DIAGONAL_RETRACT_APPROACH
+        else:
+            moves = self._retract_traverse_plunge(start_pos, end_pos, safe_x, mode, stock)
+            transition_type = TransitionType.RETRACT_TRAVERSE_PLUNGE
         return Transition(
-            type=TransitionType.RETRACT_TRAVERSE_PLUNGE,
-            start_position=start_pos,
-            end_position=end_pos,
-            safe_x=safe_x,
-            moves=moves,
+            type=transition_type, start_position=start_pos, end_position=end_pos,
+            safe_x=safe_x, moves=moves,
         )
+
+    def contour_retract(self, pass_obj: TurningPass, mode: MachiningMode, stock: StockDef) -> List[ToolMove]:
+        """One simultaneous X/Z rapid to this contour's clear approach plane.
+
+        Uses the same safe-side convention as the existing roughing retracts.
+        The pipeline validates the whole diagonal, including the cutting endpoint.
+        """
+        if not pass_obj.moves:
+            raise ValueError("Cannot retract a contour without cutting moves.")
+        end = pass_obj.moves[-1]
+        safe_x = self._get_safe_x(mode, stock)
+        if abs(end.x - safe_x) < TOLERANCE and abs(end.z - pass_obj.z_start) < TOLERANCE:
+            return []
+        return [ToolMove(move_type=MoveType.RAPID, x=safe_x, z=pass_obj.z_start,
+                         pass_type=PassType.TRANSITION)]
 
     def _retract_traverse_plunge(
         self,

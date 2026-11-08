@@ -149,15 +149,22 @@ def execute(
         all_passes, profile.mode, stock, zone_query, roughing_params.strategy
     )
 
-    # Store the exact incoming links for finish output; the writer must not
-    # invent a return cut between consecutive finishing contours.
+    # Persist contour exits and incoming finish links so output uses validated
+    # motion, including the final contour's exit before travel to park.
     for index, pass_obj in enumerate(all_passes):
-        if pass_obj.pass_type == PassType.FINISH and index > 0:
-            all_passes[index] = replace(pass_obj, approach_moves=tuple(transitions[index - 1].moves))
+        if pass_obj.pass_type in (PassType.CLEANUP, PassType.FINISH):
+            pass_obj = replace(pass_obj, retract_moves=tuple(
+                transition_planner.contour_retract(pass_obj, profile.mode, stock)))
+            if pass_obj.pass_type == PassType.FINISH and index > 0:
+                pass_obj = replace(pass_obj, approach_moves=tuple(transitions[index - 1].moves))
+            all_passes[index] = pass_obj
+    cleanup_passes = [p for p in all_passes if p.pass_type == PassType.CLEANUP]
     finish_passes = [p for p in all_passes if p.pass_type == PassType.FINISH]
 
     # Step 9: Assemble complete move list
     tool_moves = _assemble_moves(all_passes, transitions)
+    if all_passes and all_passes[-1].pass_type in (PassType.CLEANUP, PassType.FINISH):
+        tool_moves.extend(all_passes[-1].retract_moves)
 
     # Step 10: Post-planning validation (Shapely)
     post_results = validate_all_moves(tool_moves, polygons, profile.mode)
