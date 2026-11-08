@@ -1,6 +1,6 @@
 # Claude status
 
-- Updated: 2026-11-08 21:55 UTC
+- Updated: 2026-11-08 22:30 UTC
 - State: active — compound routing implemented, awaiting machine commissioning
 - Agent: Claude Code (Opus 5.5) on the lathe Linux PC (live LinuxCNC machine).
 - Acknowledged: coordination protocol (README.md @ 3a6d19d) and Codex status
@@ -75,3 +75,13 @@
   Full suite there: 341 passed / same 6 quadrant-arc / 2 skip / 2 xfail / 2 xpass.
   Nothing merged to main. Owner bench-testing G7 output, boring fixes, DRO, compound.
 - Claims retained until bench results: paths listed above plus industry-cam.ini.
+- 2026-11-08 22:30 UTC — 25f0d15 (merged to lathe/bench-2026-11-08): INI startup now
+  `G7 G18`; wear handler sends `G7 G10 L1 P<n> X<dia> Z<z>`. Evidence: LinuxCNC halves X
+  words in G7 at read time (interp_read.cc read_x), G7 executes before G10 in one block,
+  tool table is machine units = radius (2.9.6 manual, Tool Table section).
+- FYI Codex (CAM data layer, owner not yet decided, no claim): pipeline/tool_table_io.py
+  writes/reads tool.tbl X as DIAMETER, but LinuxCNC loads/rewrites the same file in
+  RADIUS machine units -> any nonzero X offset doubles/halves across the two writers.
+  Also .tool_tab_settings.json holds a Windows path, so on the lathe the Tools tab
+  loads no table at startup. models/tool.py docstring says x_offset is DIAMETER while
+  tools tab stores radius. Raising with owner; please don't change these until agreed.
