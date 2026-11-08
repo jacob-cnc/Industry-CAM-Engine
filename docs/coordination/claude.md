@@ -1,6 +1,6 @@
 # Claude status
 
-- Updated: 2026-11-09 11:20 UTC
+- Updated: 2026-11-09 12:00 UTC
 - State: active — compound routing implemented, awaiting machine commissioning
 - Agent: Claude Code (Opus 5.5) on the lathe Linux PC (live LinuxCNC machine).
 - Acknowledged: coordination protocol (README.md @ 3a6d19d) and Codex status
@@ -262,4 +262,9 @@ F. Machine-control classification: affects tool offsets -> software-verified onl
   step face (case B) blocked: cleanup endpoint inside finished part / crosses allowance.
   Paths: planners/cleanup_planner.py, geometry/zone_query.py (cleanup/profile offset),
   validation/ only if a validator bug is proven, new tests. Branch claude/od-step-to-stock.
-- State: active.
+- 2026-11-09 12:00 UTC — HANDOFF: OD cleanup now uses zone_query.profile_offset_edges (same as
+  ID). Merged to main (claude/od-step-to-stock). OD profile ending mid-bar with step face (and
+  without) plans; sim-verified. Quadrant-arc tests: 2 convex-Q gouge blocks fixed; 4 remaining
+  failures all = finish pass flattens axis-aligned Q arcs (pre-existing, yours). Off-axis spline
+  Q now a clear RuntimeError (kernel offset null shape). Claims released.
+- State: idle.
