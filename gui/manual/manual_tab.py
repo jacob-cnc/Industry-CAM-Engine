@@ -702,7 +702,7 @@ class ManualTab(QWidget):
         self._update_arc_endpoint_dots()
 
     def _update_arc_endpoint_dots(self, *_):
-        """Show the arc's start (blue) and end (red) on the quadrant graphic,
+        """Show the arc's start (green) and end (red) on the quadrant graphic,
         computed from the same logic that drives the motion."""
         quadrant, start_type = resolve_user_arc(
             self._compound["combo_quadrant"].currentIndex(),
