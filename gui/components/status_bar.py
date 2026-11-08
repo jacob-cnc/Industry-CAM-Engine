@@ -21,6 +21,7 @@ from PyQt5.QtGui import QFont  # noqa: F401 — kept for potential future use
 
 from gui.colors import COLORS, FONTS
 from gui.unit_state import unit_state
+from gui.components.elided_label import ElidedLabel
 
 
 # Machine state color mapping
@@ -29,6 +30,15 @@ _STATE_COLORS = {
     "RUN": COLORS["status_info"],
     "PAUSE": COLORS["status_warning"],
     "ESTOP": COLORS["status_error"],
+}
+
+# Task-mode indicator palette — (fill, border, text).
+# Blue = MANUAL (jog/MPG accepted). Amber = MDI (transient command).
+# Green/red-border = AUTO (running a program — most restrictive).
+_MODE_STYLES = {
+    "MANUAL": (COLORS["status_info"],      COLORS["status_info"],    "#0A1A2A"),
+    "MDI":    (COLORS["graph_threading"],  COLORS["graph_threading"], "#2A1A00"),
+    "AUTO":   (COLORS["status_ok"],        COLORS["status_warning"],  "#0A2A1A"),
 }
 
 
@@ -64,6 +74,7 @@ class StatusBar(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._state = "IDLE"
+        self._mode = "MANUAL"
         self._x_dia = 0.0
         self._z = 0.0
         self._rpm = 0
@@ -93,7 +104,7 @@ class StatusBar(QWidget):
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(12)
+        layout.setSpacing(8)
 
         # --- Shared bubble stylesheet ---
         _bubble_ss = (
@@ -139,6 +150,17 @@ class StatusBar(QWidget):
         self._state_label.setFixedWidth(42)
         layout.addWidget(self._state_label)
 
+        # --- Task Mode Indicator ---
+        # Shows LinuxCNC task_mode: MANUAL (blue) / MDI (amber) / AUTO (green with red border).
+        # MANUAL is the only mode that accepts MPG jog counts; if this reads
+        # MDI unexpectedly, jogging will be silently disabled.
+        self._mode_display = QLabel("MANUAL")
+        self._mode_display.setAlignment(Qt.AlignCenter)
+        self._mode_display.setFixedWidth(84)
+        self._mode_display.setFixedHeight(32)
+        self._apply_mode_style("MANUAL")
+        layout.addWidget(self._mode_display)
+
         # --- DRO Bubble: X and Z ---
         dro_box = QFrame()
         dro_box.setStyleSheet(f"QFrame {{ {_bubble_ss} }}")
@@ -183,7 +205,9 @@ class StatusBar(QWidget):
         gcode_prefix.setStyleSheet(_label_ss)
         gcode_inner.addWidget(gcode_prefix)
 
-        self._gcode_display = QLabel("G90 G20 G40")
+        # ElidedLabel: live mode reports the full modal G-code list, which as a
+        # plain QLabel widened the ribbon (and the window) past 1920 px.
+        self._gcode_display = ElidedLabel("G90 G20 G40", min_width=140)
         self._gcode_display.setStyleSheet(_sec_val_ss)
         gcode_inner.addWidget(self._gcode_display)
 
@@ -256,7 +280,8 @@ class StatusBar(QWidget):
         layout.addWidget(tool_box)
 
         # --- Error message ---
-        self._error_label = QLabel("")
+        # ElidedLabel: hm2/LinuxCNC error text can be very long; full text in tooltip.
+        self._error_label = ElidedLabel("", min_width=110)
         self._error_label.setStyleSheet(
             f"font-family: '{FONTS['mono_family']}'; font-size: 10pt;"
             f"color: {COLORS['text_primary']};"
@@ -266,7 +291,7 @@ class StatusBar(QWidget):
             f"padding: 2px 8px;"
         )
         self._error_label.setVisible(False)
-        layout.addWidget(self._error_label)
+        layout.addWidget(self._error_label, stretch=1)
 
         # --- Spacer + Machine Control Buttons + E-Stop ---
         layout.addStretch()
@@ -435,6 +460,39 @@ class StatusBar(QWidget):
         self._state_label.setStyleSheet(
             f"color: {COLORS['text_primary']}; font-weight: bold; border: none;"
         )
+
+    def _apply_mode_style(self, mode_str: str):
+        """Repaint the mode bubble for the given mode."""
+        fill, border, text = _MODE_STYLES.get(
+            mode_str, (COLORS["bg_surface"], COLORS["border_normal"], COLORS["text_disabled"])
+        )
+        self._mode_display.setStyleSheet(
+            f"QLabel {{"
+            f"  background-color: {fill};"
+            f"  color: {text};"
+            f"  border: 2px solid {border};"
+            f"  border-radius: 5px;"
+            f"  font-family: '{FONTS['ui_family']}';"
+            f"  font-size: 11pt;"
+            f"  font-weight: bold;"
+            f"}}"
+        )
+
+    def update_mode(self, mode_str: str):
+        """Update task-mode indicator (MANUAL / MDI / AUTO).
+
+        Accepts either the TaskMode enum .value ('manual'/'mdi'/'auto') or an
+        already-uppercase string. Repaints only when the mode actually changes.
+
+        Args:
+            mode_str: Current LinuxCNC task mode.
+        """
+        mode_str = mode_str.upper()
+        if mode_str == self._mode:
+            return
+        self._mode = mode_str
+        self._mode_display.setText(mode_str)
+        self._apply_mode_style(mode_str)
 
     def update_rpm(self, rpm: int, direction: str = ""):
         """Update spindle RPM display and direction indicator.

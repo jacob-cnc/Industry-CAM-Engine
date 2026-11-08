@@ -292,6 +292,10 @@ class MainWindow(QMainWindow):
             state_str = "IDLE"
         self._status_bar.update_state(state_str)
 
+        # Task mode (MANUAL / MDI / AUTO) — flags MDI wedging that silently
+        # disables MPG jogging.
+        self._status_bar.update_mode(s.task_mode.value)
+
         # Spindle
         rpm = int(s.spindle.speed)
         direction = ""
