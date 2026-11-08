@@ -96,19 +96,20 @@ class CleanupPlanner:
             # ID: approach from pilot hole outward
             x_start_fin_dia = stock.pilot_hole_dia
 
-        # OD retains its existing route. ID offsets the actual open contour;
-        # artificial stock closures must not replace or erase real shoulders.
-        if mode == MachiningMode.OD:
-            offset_edges = self._compute_offset_profile(segments, fin_allowance_radius, mode, stock, z0_fin, profile)
-        else:
-            edges = zone_query.profile_offset_edges(
-                profile, params.fin_allowance, z_min=stock.z_end + fin_allowance_radius)
-            if not edges:
-                raise RuntimeError("ID cleanup produced no contour for the requested profile.")
-            if any(edge.edge_type not in ("LINE", "ARC") for edge in edges):
-                raise RuntimeError("ID cleanup currently supports line and circular-arc contours only.")
-            offset_edges = [(edge.start, edge.end, edge.edge_type, edge.center, edge.radius)
-                            for edge in edges]
+        # OD and ID both offset the actual open contour with the shared kernel
+        # query and clip it at the operation depth + allowance. (Until
+        # 2026-11-09 OD used a face-offset route that put the cleanup inside the
+        # finished part at an outward step to the stock OD — an OD profile
+        # ending mid-bar, e.g. a turned stub with its step face drawn.)
+        # Artificial stock closures must not replace or erase real shoulders.
+        edges = zone_query.profile_offset_edges(
+            profile, params.fin_allowance, z_min=stock.z_end + fin_allowance_radius)
+        if not edges:
+            raise RuntimeError(f"{mode.name} cleanup produced no contour for the requested profile.")
+        if any(edge.edge_type not in ("LINE", "ARC") for edge in edges):
+            raise RuntimeError(f"{mode.name} cleanup currently supports line and circular-arc contours only.")
+        offset_edges = [(edge.start, edge.end, edge.edge_type, edge.center, edge.radius)
+                        for edge in edges]
 
         if not offset_edges:
             return []
