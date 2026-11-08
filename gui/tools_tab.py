@@ -454,10 +454,16 @@ class Tools_Tab(QWidget):
         self._autosave()
 
     def _on_set_x_clicked(self, value: float) -> None:
-        """Handle Set X touch-off button click.
+        """Handle Set X touch-off button click — sets the G54 X origin.
 
-        Sends G10 L1 MDI command with the entered X diameter value
-        for the currently selected tool.
+        Sends `G10 L20 P1 X<value>` which shifts the G54 work coordinate system
+        so that the current machine position reads `<value>` in X (diameter).
+        This is a WCS origin edit — it does NOT modify the tool table and does
+        NOT command any motion.
+
+        P in `G10 L20` is the coordinate system number (1 = G54). Hardcoded
+        here because registering the workpiece in G54 is the only operation
+        this button is meant to perform.
 
         Args:
             value: The X diameter value from the touch-off spinbox.
@@ -465,20 +471,16 @@ class Tools_Tab(QWidget):
         if self._linuxcnc_command is None:
             return
 
-        selected_tool = self.get_selected_tool()
-        if selected_tool is None:
-            return
-
-        tool_number = selected_tool.tool_number
-        # G10 L20 P<tool> X<diameter>: sets offset so current position reads <value>
-        command = f"G10 L20 P{tool_number} X{value:.6f}"
+        command = f"G10 L20 P1 X{value:.6f}"
         self._send_mdi_command(command)
 
     def _on_set_z_clicked(self, value: float) -> None:
-        """Handle Set Z touch-off button click.
+        """Handle Set Z touch-off button click — sets the G54 Z origin.
 
-        Sends G10 L1 MDI command with the entered Z value
-        for the currently selected tool.
+        Sends `G10 L20 P1 Z<value>` which shifts the G54 work coordinate system
+        so that the current machine position reads `<value>` in Z. This is a
+        WCS origin edit — it does NOT modify the tool table and does NOT
+        command any motion.
 
         Args:
             value: The Z value from the touch-off spinbox.
@@ -486,13 +488,7 @@ class Tools_Tab(QWidget):
         if self._linuxcnc_command is None:
             return
 
-        selected_tool = self.get_selected_tool()
-        if selected_tool is None:
-            return
-
-        tool_number = selected_tool.tool_number
-        # G10 L20 P<tool> Z<value>: sets offset so current position reads <value>
-        command = f"G10 L20 P{tool_number} Z{value:.6f}"
+        command = f"G10 L20 P1 Z{value:.6f}"
         self._send_mdi_command(command)
 
     # ------------------------------------------------------------------
@@ -527,7 +523,11 @@ class Tools_Tab(QWidget):
     # ------------------------------------------------------------------
 
     def _send_mdi_command(self, command: str) -> None:
-        """Send an MDI command to LinuxCNC.
+        """Send an MDI command to LinuxCNC and return to MANUAL mode.
+
+        Returning to MANUAL after the MDI completes is required so the MPG
+        jog counts are accepted again — LinuxCNC ignores jog counts in MDI
+        and AUTO modes.
 
         Args:
             command: The G-code command string to send.
@@ -539,6 +539,8 @@ class Tools_Tab(QWidget):
             self._linuxcnc_command.mode(linuxcnc.MODE_MDI)
             self._linuxcnc_command.wait_complete()
             self._linuxcnc_command.mdi(command)
+            self._linuxcnc_command.wait_complete()
+            self._linuxcnc_command.mode(linuxcnc.MODE_MANUAL)
         except Exception as e:
             logger.error(f"MDI command failed: {command!r} — {e}")
 
