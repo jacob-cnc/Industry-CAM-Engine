@@ -33,3 +33,18 @@ controller stayed in AUTO (MPGs dead) even when switching tabs.
 Mock offscreen (system Python 3.11): AUTO+idle -> MANUAL after 2 polls; stays
 AUTO while READING; chip click refused while running, works when idle; Run tab
 error shown. Machine verification pending.
+
+## Spindle at-speed (program held after N80)
+
+- Cause: near-spindle compared encoder velocity (rev/s) with speed-out-abs (RPM);
+  at-speed never TRUE with the spindle running, so motion held the first G01 after
+  M3 (interp WAITING; extra cycle starts rejected "in auto mode with the interpreter
+  waiting"). Unchanged since 2026-05-18; earlier successful runs likely had no M3.
+- A false "encoder dead" reading at 12:22 was a Mesa power drop at 12:17 under a
+  running LinuxCNC (stale hm2 inputs); after restart the encoder read normally.
+- Measured: gearbox "64" position = 80.3 RPM (8.395 rev / 6.27 s), + in M3.
+- MIN_FORWARD_VELOCITY 100 -> 50 (S64 had been clamped to 100 commanded).
+- Fix (owner choice): in1 = speed-out-rps, in2 = encoder rev/s, scale 2.0
+  (0.5x..2x, same direction). scripts/check_spindle_at_speed.sh: 10/10 PASS.
+- Machine-verified: M3 S64 + spindle at 64 gear -> at-speed TRUE (cmd 1.067 rps,
+  meas 1.30-1.42 rps); spindle stopped with M3 active -> FALSE.
