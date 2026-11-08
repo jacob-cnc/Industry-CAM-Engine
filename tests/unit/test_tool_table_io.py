@@ -102,17 +102,17 @@ class TestSerializeTool:
     def test_basic_format(self, sample_tool):
         line = serialize_tool(sample_tool)
         assert line.startswith("T1 P1 ")
-        assert "X+0.000000" in line
-        assert "Z-1.234567" in line
+        assert "X+0.001000" in line
+        assert "Z-1.236567" in line
         assert "D0.032000" in line
         assert "I95.0" in line
         assert "J175.0" in line
         assert "Q1" in line
 
-    def test_x_offset_stored_as_diameter(self, boring_tool):
-        """X offset 0.5 radius should be written as 1.0 diameter."""
+    def test_x_offset_stored_as_radius(self, boring_tool):
+        """X offset 0.5 radius stays 0.5 machine units."""
         line = serialize_tool(boring_tool)
-        assert "X+1.000000" in line
+        assert "X+0.500000" in line
 
     def test_nose_radius_stored_as_diameter(self, sample_tool):
         """nose_radius 0.016 should be written as D0.032000."""
@@ -121,7 +121,8 @@ class TestSerializeTool:
 
     def test_metadata_encoding(self, sample_tool):
         line = serialize_tool(sample_tool)
-        assert ";type=turning_rh|insert=CNMG|blade=0.000|desc=CNMG 432 roughing" in line
+        assert "type=turning_rh|insert=CNMG|blade=0.000|desc=CNMG 432 roughing" in line
+        assert "ice=2|xwear=0.001000000|zwear=-0.002000000" in line
 
     def test_grooving_type_encoding(self, grooving_tool):
         line = serialize_tool(grooving_tool)
@@ -160,7 +161,7 @@ class TestSerializeTool:
         )
         line = serialize_tool(tool)
         # X = 0.1234567 * 2 = 0.2469134
-        assert "X+0.246913" in line
+        assert "X+0.123457" in line
         assert "Z-0.987654" in line
 
     def test_precision_angles_1_decimal(self):
@@ -175,14 +176,16 @@ class TestSerializeTool:
         assert "I62.5" in line
         assert "J117.5" in line
 
-    def test_wear_offsets_not_stored(self, sample_tool):
-        """Wear offsets should not appear in the serialized line."""
+    def test_wear_is_applied_and_split_is_preserved(self, sample_tool):
         sample_tool.x_wear = 0.005
         sample_tool.z_wear = -0.003
         line = serialize_tool(sample_tool)
-        # The line should not contain wear-specific fields
-        # Wear values should not affect X or Z in the output
-        assert "X+0.000000" in line  # x_offset is 0.0, not affected by wear
+        assert "X+0.005000" in line
+        assert "Z-1.237567" in line
+        recovered = deserialize_tool(line)
+        assert recovered.x_offset == pytest.approx(0.0)
+        assert recovered.x_wear == pytest.approx(0.005)
+        assert recovered.z_wear == pytest.approx(-0.003)
 
 
 # ---------------------------------------------------------------------------
@@ -203,11 +206,11 @@ class TestDeserializeTool:
         assert abs(tool.back_angle - 175.0) < 0.1
         assert abs(tool.z_offset - (-1.234567)) < 1e-7
 
-    def test_x_diameter_to_radius(self):
-        """X in file is diameter; should be halved to radius."""
-        line = "T1 P1 X+1.000000 Z-0.500000 D0.032000 I62.5 J117.5 Q5 ;type=boring_bar|insert=DCMT|blade=0.000|desc=test"
-        tool = deserialize_tool(line)
-        assert abs(tool.x_offset - 0.5) < 1e-7
+    def test_native_x_is_already_radius(self):
+        """Native LinuxCNC X is already in radius machine units."""
+        line = "T1 P1 X+1.000000 Z-0.500000 D0.032000 I62.5 J117.5 Q5 ;native machine table"
+        tool = deserialize_tool(line, unversioned_x_units="radius")
+        assert abs(tool.x_offset - 1.0) < 1e-7
 
     def test_nose_diameter_to_radius(self):
         """D in file is diameter; should be halved to radius."""
