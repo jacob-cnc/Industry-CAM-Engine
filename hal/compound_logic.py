@@ -341,3 +341,47 @@ class CompoundArcLogic:
             z = self.arc_center_z + self.radius * math.cos(angle)
             points.append((x, z))
         return points
+
+
+# ======================================================================
+# Operator selection -> logic arc (shared by activation and the UI graphic)
+# ======================================================================
+
+_USER_QUADRANTS = ["NE", "NW", "SW", "SE"]   # Manual-tab combo order
+
+
+def resolve_user_arc(user_quadrant_idx: int, start_idx: int
+                     ) -> Tuple[Quadrant, ArcStartType]:
+    """Map the Manual-tab combos to the logic quadrant and start type.
+
+    The combo labels use the operator's view of the graph (invertY: X+ is
+    down), while the logic uses atan2(dx, dz) with +X at pi/2, so N/S swap:
+        user NE -> logic SE, NW -> SW, SW -> NW, SE -> NE.
+    The swap also inverts top/bottom for the user's north quadrants, so the
+    start type is flipped there. (Machine-verified mapping, 2026-11-08.)
+
+    Args:
+        user_quadrant_idx: combo index, 0..3 = NE, NW, SW, SE.
+        start_idx: combo index, 0 = "Arc Top", 1 = "Arc Bottom".
+    """
+    quadrant = [Quadrant.SE, Quadrant.SW, Quadrant.NW, Quadrant.NE][user_quadrant_idx]
+    start = ArcStartType.ARC_TOP if start_idx == 0 else ArcStartType.ARC_BOTTOM
+    if user_quadrant_idx in (0, 1):   # user NE / NW
+        start = (ArcStartType.ARC_BOTTOM if start == ArcStartType.ARC_TOP
+                 else ArcStartType.ARC_TOP)
+    return quadrant, start
+
+
+def arc_endpoint_angles(quadrant: Quadrant, start_type: ArcStartType
+                        ) -> Tuple[float, float]:
+    """(start_angle, end_angle) the arc logic will use for this selection.
+
+    Angles are atan2(dx, dz) convention: point = center + R*(sin a, cos a)
+    with dx = X (radius), dz = Z. Derived by activating the real logic, so
+    the UI can never disagree with the motion.
+    """
+    logic = CompoundArcLogic()
+    logic.activate(0.0, 0.0, 1.0, quadrant, start_type)
+    start = logic.current_angle
+    end = logic.angle_end if start == logic.angle_start else logic.angle_start
+    return start, end
