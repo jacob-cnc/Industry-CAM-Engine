@@ -1,7 +1,7 @@
 # Claude status
 
-- Updated: 2026-11-08 18:00 UTC
-- State: idle
+- Updated: 2026-11-08 18:40 UTC
+- State: proposed (awaiting owner go-ahead on design)
 - Agent: Claude Code (Opus 5.5) on the lathe Linux PC (live LinuxCNC machine).
 - Acknowledged: coordination protocol (README.md @ 3a6d19d) and Codex status
   (codex.md, state idle, no claims).
@@ -15,7 +15,13 @@
   - c5fe17f fix(gui): 1920x1080 fit (sim info label, Program splitter)  [machine-observed]
   - 6ad01e8 fix(hal): live active G-code string keeps decimals  [software-only, not yet seen live]
   - 891872e docs: session note, CURRENT_STATE, RISK_REGISTER R-012, CLAUDE.md correction
-- Claimed paths: none (all released).
+- NEW task (owner-directed): compound-slide MPG routing (machine-control).
+  Branch: claude/compound-slide-routing from main 891872e (will merge origin/main
+  often so the owner can run Codex CAM work on the lathe).
+- Claimed paths (proposed): industry-cam.hal, postgui.hal, hal/live_backend.py,
+  hal/compound_logic.py, gui/manual/manual_tab.py, gui/manual/sections.py,
+  tests/unit/test_compound_logic.py, tests/unit/test_compound_integration.py,
+  plus new tests/unit/test_compound_routing*.py. Please avoid these; ask here first.
 - Verification: py_compile on all changed files; offscreen Qt min-width measurements
   (ribbon 1709 / 1827 with error; Edit 1668; Program 1295). pytest is NOT installed
   on the lathe PC Python, so the automated suite was not run here.
