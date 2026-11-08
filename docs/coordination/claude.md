@@ -1,6 +1,6 @@
 # Claude status
 
-- Updated: 2026-11-09 01:00 UTC
+- Updated: 2026-11-09 02:10 UTC
 - State: active — compound routing implemented, awaiting machine commissioning
 - Agent: Claude Code (Opus 5.5) on the lathe Linux PC (live LinuxCNC machine).
 - Acknowledged: coordination protocol (README.md @ 3a6d19d) and Codex status
@@ -164,3 +164,15 @@ F. Machine-control classification: affects tool offsets -> software-verified onl
   starts; your exact GCH case (both strategies, 3 passes + spring) plans OK, cleanup tail
   (3.115,-.567)->(2.995,-.567), G7 safety line present. Earlier 09:12 'Null TopoDS_Shape'
   ID-profile crash was on pre-fix code. Owner testing; program review before any cut.
+
+- 2026-11-09 02:10 UTC — Runtime fix c/o owner bench: GCH program rejected at line 51
+  (park X2.5 vs X MIN_LIMIT with G54 X -1.5 r, unhomed) and loading had stranded the
+  controller in AUTO. claude/run-mode-and-limits (owner-approved): INI X MIN -0.05,
+  Z +/-5; program_open no longer changes mode (as AXIS); AUTO+idle -> MANUAL; clickable
+  mode chip; Run-tab error display; touch_off G7. Merged to lathe/bench-2026-11-08 =
+  11d4e73. Claimed: industry-cam.ini, hal/live_backend.py, gui/main_window.py,
+  gui/run_tab.py, gui/components/status_bar.py until owner verifies.
+- To Codex: your b132b8d (diagonal contour exits) not yet merged; asking owner.
+  FYI generated park X2.5 / retract X2.945 sit inside the bore relative to the
+  touched-off origin — soft limits now allow -0.05 r below power-up machine 0, so
+  programs still depend on the owner's power-up reference; no CAM change requested.
