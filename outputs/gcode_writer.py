@@ -170,7 +170,7 @@ class GCodeWriter:
         # Safety preamble
         unit_code = "G21" if self._metric else "G20"
         unit_label = "mm" if self._metric else "inch"
-        lines.append(self._line(f"{unit_code} G18 G40 G49 G80", f"Safety line - {unit_label}, ZX plane, comp off"))
+        lines.append(self._line(f"{unit_code} G7 G18 G40 G49 G80", f"Safety line - {unit_label}, diameter mode, ZX plane, comp off"))
         lines.append(self._line("G90 G95", "Absolute positioning, feed per revolution"))
         lines.append("")
 
@@ -770,6 +770,8 @@ class GCodeWriter:
             lines.append(f"; Starts: {params.num_starts} (lead = {params.pitch * params.num_starts * conv:{fmt}})")
         lines.append("")
 
+        lines.append(self._line("G7", "Diameter mode"))
+
         # Spindle speed for threading (typically lower than roughing)
         lines.append(self._line(f"S{params.spindle_rpm:.0f} M3", f"Threading speed {params.spindle_rpm:.0f} RPM"))
 
@@ -876,6 +878,8 @@ class GCodeWriter:
         if params.peck_enabled:
             lines.append(f"; Peck: {params.peck_depth * conv:{fmt}} depth, {params.peck_retract * conv:{fmt}} retract")
         lines.append("")
+
+        lines.append(self._line("G7", "Diameter mode"))
 
         # Spindle
         lines.append(self._line(f"S{params.spindle_rpm:.0f} M3", f"Grooving speed {params.spindle_rpm:.0f} RPM"))
@@ -994,6 +998,7 @@ class GCodeWriter:
         """
         lines = []
         lines.append("; === TOOL CHANGE ===")
+        lines.append(self._line("G7", "Diameter mode"))
         lines.append(self._line("G40", "Cutter comp off"))
         if stock_boundary:
             lines.extend(self._safe_retract_to_park(

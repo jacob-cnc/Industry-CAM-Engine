@@ -40,6 +40,7 @@ def build_from_fields(
     x_park: float = 3.0,
     z_park: float = 3.0,
     corner_breaks: Optional[List[Optional[dict]]] = None,
+    stock_back_z: Optional[float] = None,
 ) -> Tuple[ClosedProfile, StockDef, RoughingParams, FinishingParams]:
     """Convert raw UI field values into typed dataclasses.
 
@@ -48,7 +49,8 @@ def build_from_fields(
         stock_dia: Stock diameter (inches)
         x_start: X approach position (diameter)
         z_start: Z approach position (inches, positive)
-        z_end: Z end position (inches, negative)
+        z_end: Legacy argument retained for callers; contour geometry determines depth.
+        stock_back_z: Optional physical stock back face, separate from operation depth.
         mode: "od" or "id"
         pilot_hole_dia: Pilot hole diameter (0 if none)
         doc_dia: Depth of cut (diameter)
@@ -94,69 +96,25 @@ def build_from_fields(
     except ValueError:
         raise ValueError(f"Invalid strategy: '{strategy}'. Must be 'staircase' or 'offset_contour'.")
 
-    # Convert segment dicts to ProfileMove objects
-    profile_moves = []
-    for i, seg in enumerate(segments):
-        seg_type_str = seg.get("type", "line").lower()
-        try:
-            seg_type = SegmentType(seg_type_str)
-        except ValueError:
-            raise ValueError(f"Segment {i+1}: invalid type '{seg_type_str}'. Must be 'line' or 'arc'.")
+    profile = profile_from_fields(segments, mode, corner_breaks)
+    from geometry.zone_builder import contour_z_end
+    from dataclasses import replace
+    operation_z_end = contour_z_end(profile)
+    profile = replace(profile, z_end=operation_z_end)
 
-        x = seg.get("x", seg.get("x_dia", 0.0))
-        z = seg.get("z", 0.0)
-        radius = seg.get("radius", 0.0)
-
-        # Detect quadrant arc: "Q" (convex) or "-Q" (concave)
-        radius_str = str(radius).strip().upper() if not isinstance(radius, (int, float)) else ""
-        is_quadrant = radius_str in ("Q", "-Q")
-        quadrant_sign = -1 if radius_str == "-Q" else 1
-        if is_quadrant:
-            radius_val = 0.0
-        else:
-            radius_val = float(radius)
-
-        profile_moves.append(ProfileMove(
-            segment_type=seg_type,
-            x=float(x),
-            z=float(z),
-            radius=radius_val,
-            quadrant=is_quadrant,
-            quadrant_sign=quadrant_sign,
-        ))
-
-    # Convert corner breaks
-    breaks: List[Optional[CornerBreak]] = []
-    if corner_breaks and len(corner_breaks) == len(profile_moves) - 1:
-        for cb in corner_breaks:
-            if cb is None or cb.get("type", "none") == "none":
-                breaks.append(None)
-            else:
-                cb_type = CornerBreakType(cb["type"])
-                breaks.append(CornerBreak(
-                    break_type=cb_type,
-                    radius=cb.get("radius", 0.0),
-                    size=cb.get("size", 0.0),
-                    angle=cb.get("angle", 45.0),
-                ))
-    else:
-        # Default: no corner breaks
-        breaks = [None] * max(0, len(profile_moves) - 1)
-
-    # Build dataclasses
-    profile = ClosedProfile(
-        segments=profile_moves,
-        corner_breaks=breaks,
-        mode=machining_mode,
-        z_start=0.0,  # Always 0 (finished face)
-        z_end=z_end,
-    )
+    from math import isfinite
+    from models.constants import TOLERANCE
+    if stock_back_z is not None and not isfinite(stock_back_z):
+        raise ValueError("Stock back face must be finite.")
+    if stock_back_z is not None and stock_back_z > operation_z_end + TOLERANCE:
+        raise ValueError("Stock back face must be at or behind the operation Z End.")
 
     stock = StockDef(
         diameter=stock_dia,
         x_start=x_start,
         z_start=_safe_z_start(z_start, fin_allowance),
-        z_end=z_end,
+        z_end=operation_z_end,
+        back_face_z=stock_back_z,
         mode=machining_mode,
         x_park=x_park,
         z_park=z_park,
@@ -208,3 +166,66 @@ def _safe_z_start(z_start: float, fin_allowance: float) -> float:
         return fin_allowance_radius + 0.050
 
     return z_start
+
+
+def profile_from_fields(segments: List[dict], mode: str, corner_breaks=None) -> ClosedProfile:
+    """Parse a contour identically for preview, depth calculation, and generation."""
+    machining_mode = MachiningMode(mode.lower())
+    # Convert segment dicts to ProfileMove objects
+    profile_moves = []
+    for i, seg in enumerate(segments):
+        seg_type_str = seg.get("type", "line").lower()
+        try:
+            seg_type = SegmentType(seg_type_str)
+        except ValueError:
+            raise ValueError(f"Segment {i+1}: invalid type '{seg_type_str}'. Must be 'line' or 'arc'.")
+
+        x = seg.get("x", seg.get("x_dia", 0.0))
+        z = seg.get("z", 0.0)
+        radius = seg.get("radius", 0.0)
+
+        # Detect quadrant arc: "Q" (convex) or "-Q" (concave)
+        radius_str = str(radius).strip().upper() if not isinstance(radius, (int, float)) else ""
+        is_quadrant = radius_str in ("Q", "-Q")
+        quadrant_sign = -1 if radius_str == "-Q" else 1
+        if is_quadrant:
+            radius_val = 0.0
+        else:
+            radius_val = float(radius)
+
+        profile_moves.append(ProfileMove(
+            segment_type=seg_type,
+            x=float(x),
+            z=float(z),
+            radius=radius_val,
+            quadrant=is_quadrant,
+            quadrant_sign=quadrant_sign,
+        ))
+
+    # Convert corner breaks
+    breaks: List[Optional[CornerBreak]] = []
+    if corner_breaks and len(corner_breaks) == len(profile_moves) - 1:
+        for cb in corner_breaks:
+            if cb is None or cb.get("type", "none") == "none":
+                breaks.append(None)
+            else:
+                cb_type = CornerBreakType(cb["type"])
+                breaks.append(CornerBreak(
+                    break_type=cb_type,
+                    radius=cb.get("radius", 0.0),
+                    size=cb.get("size", 0.0),
+                    angle=cb.get("angle", 45.0),
+                ))
+    else:
+        # Default: no corner breaks
+        breaks = [None] * max(0, len(profile_moves) - 1)
+
+    profile = ClosedProfile(
+        segments=profile_moves,
+        corner_breaks=breaks,
+        mode=machining_mode,
+        z_start=0.0,  # Always 0 (finished face)
+        z_end=min(float(seg.get("z", 0.0)) for seg in segments),
+    )
+
+    return profile
