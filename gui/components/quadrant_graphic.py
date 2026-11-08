@@ -6,7 +6,9 @@ highlighted. Used in the compound slide Arc mode UI.
 
 from PyQt5.QtWidgets import QWidget
 from PyQt5.QtGui import QPainter, QPen, QColor
-from PyQt5.QtCore import Qt, QRectF
+import math
+
+from PyQt5.QtCore import Qt, QRectF, QPointF
 
 from gui.colors import COLORS
 from hal.compound_logic import Quadrant
@@ -24,10 +26,22 @@ class QuadrantGraphic(QWidget):
         super().__init__(parent)
         self.setFixedSize(150, 150)
         self._selected = Quadrant.SE
+        self._endpoints = None   # (start_angle, end_angle), logic convention
 
     def set_quadrant(self, quadrant: Quadrant):
         """Update the highlighted quadrant and repaint."""
         self._selected = quadrant
+        self.update()
+
+    def set_endpoints(self, start_angle: float, end_angle: float):
+        """Mark the arc start (blue dot) and end (red dot).
+
+        Angles use the arc logic's convention: point = center + R*(sin a, cos a)
+        with sin -> X (radius) and cos -> Z. On this widget Z+ is right and
+        X+ is down (graph invertY), so the screen point is
+        (cx + r*cos a, cy + r*sin a).
+        """
+        self._endpoints = (start_angle, end_angle)
         self.update()
 
     def paintEvent(self, event):
@@ -71,5 +85,15 @@ class QuadrantGraphic(QWidget):
         painter.setPen(pen_cross)
         painter.drawLine(cx, cy - r - 6, cx, cy + r + 6)
         painter.drawLine(cx - r - 6, cy, cx + r + 6, cy)
+
+        # Arc start (blue) / end (red) dots — drawn last so they sit on top
+        if self._endpoints is not None:
+            dot_r = 7
+            outline = QPen(QColor(COLORS['bg_panel']), 2)
+            for angle, color in zip(self._endpoints, ("#2F8CFF", "#FF3B3B")):
+                pt = QPointF(cx + r * math.cos(angle), cy + r * math.sin(angle))
+                painter.setPen(outline)
+                painter.setBrush(QColor(color))
+                painter.drawEllipse(pt, dot_r, dot_r)
 
         painter.end()

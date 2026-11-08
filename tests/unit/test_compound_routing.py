@@ -208,3 +208,43 @@ class TestJumpGuard:
         assert eng.step(1004, Z_SCALE, X_SCALE, Z_SCALE) is None
         assert eng.rejected == 1
         assert (eng.x_total, eng.z_total) == (0, 0)
+
+
+class TestUserArcSelection:
+    """resolve_user_arc must equal the inline mapping that was machine-verified
+    on 2026-11-08 (manual_tab before refactor)."""
+
+    @staticmethod
+    def _old_mapping(user_idx, start_idx):
+        q = [Quadrant.SE, Quadrant.SW, Quadrant.NW, Quadrant.NE][user_idx]
+        st = ArcStartType.ARC_TOP if start_idx == 0 else ArcStartType.ARC_BOTTOM
+        if user_idx in (0, 1):
+            st = (ArcStartType.ARC_BOTTOM if st == ArcStartType.ARC_TOP
+                  else ArcStartType.ARC_TOP)
+        return q, st
+
+    @pytest.mark.parametrize("u", range(4))
+    @pytest.mark.parametrize("s", range(2))
+    def test_matches_verified_mapping(self, u, s):
+        from hal.compound_logic import resolve_user_arc
+        assert resolve_user_arc(u, s) == self._old_mapping(u, s)
+
+    @pytest.mark.parametrize("u", range(4))
+    @pytest.mark.parametrize("s", range(2))
+    def test_endpoint_angles_match_motion(self, u, s):
+        """Blue dot = where the tool starts, red dot = where the arc ends."""
+        from hal.compound_logic import resolve_user_arc, arc_endpoint_angles
+        q, st = resolve_user_arc(u, s)
+        a0, a1 = arc_endpoint_angles(q, st)
+        eng = CompoundJogEngine(LIMITS)
+        eng.arc.activate(1.0, 0.0, 0.25, q, st)
+        cx, cz = eng.arc.arc_center_x, eng.arc.arc_center_z
+        # start dot == tool position
+        assert 1.0 == pytest.approx(cx + 0.25 * math.sin(a0), abs=1e-9)
+        assert 0.0 == pytest.approx(cz + 0.25 * math.cos(a0), abs=1e-9)
+        # run forward to the end: final position == end dot
+        eng.start(1.0, 0.0, 0, mode="arc")
+        for c in range(1, 2000):
+            eng.step(c, Z_SCALE, X_SCALE, Z_SCALE)
+        assert eng.x_r == pytest.approx(cx + 0.25 * math.sin(a1), abs=0.001)
+        assert eng.z == pytest.approx(cz + 0.25 * math.cos(a1), abs=0.001)

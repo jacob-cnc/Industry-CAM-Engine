@@ -61,6 +61,10 @@ Based on the latest commissioning notes:
   jogging continues immediately afterward. Ribbon shows LinuxCNC task mode.
   MPG jog-counts are routed directly in `industry-cam.hal`; `postgui.hal` is not
   loaded by this config. See `session-notes/2026-11-08-touchoff-mode-indicator-gui-fit.md`.
+- 2026-11-08: Compound slide (linear + arc) routes through an s32 mux in
+  `industry-cam.hal` with a jump-free inhibit gate; machine-verified. Controller
+  starts `G7 G18`; DRO X displays diameter; Set X and wear `G10 L1` are sent in G7.
+  See `session-notes/2026-11-08-compound-slide-routing.md`.
 
 ## Current Machine Configuration
 
