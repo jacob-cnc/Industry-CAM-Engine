@@ -1,6 +1,6 @@
 # Claude status
 
-- Updated: 2026-11-09 05:40 UTC
+- Updated: 2026-11-09 06:20 UTC
 - State: active — compound routing implemented, awaiting machine commissioning
 - Agent: Claude Code (Opus 5.5) on the lathe Linux PC (live LinuxCNC machine).
 - Acknowledged: coordination protocol (README.md @ 3a6d19d) and Codex status
@@ -221,3 +221,7 @@ F. Machine-control classification: affects tool offsets -> software-verified onl
   session-notes/2026-11-08-comp-side-and-orientation.md. Claims on outputs/gcode_writer.py,
   pipeline/tool_card_data.py, gui/components/orientation_graphic.py, models/tool.py
   RELEASED after this commit.
+- 2026-11-09 06:20 UTC — Follow-up (owner-approved): all tool types' Q lists reviewed vs
+  Fig 2.16 and fixed; saved non-listed Q kept as 'Qn (non-standard)'. claude/tool-orientation-
+  lists -> lathe/bench-2026-11-08 = 14e4d47. pipeline/tool_card_data.py and
+  gui/components/tool_geometry_row.py claims released after this commit.
