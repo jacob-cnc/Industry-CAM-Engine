@@ -295,3 +295,5 @@ F. Machine-control classification: affects tool offsets -> software-verified onl
   first contour move is a short collinear sliver) + _check_concave_corners generation-time check
   (line-line only). Writer/contour tests pass except known 4 quadrant-arc. Full suite not run
   (LinuxCNC up). Claims released. State: idle.
+- 2026-11-09 04:20 UTC — Full suite on main 37a78c3 (LinuxCNC down): 518 passed / 4 failed (same known
+  axis-aligned quadrant-arc finish) / 1 skipped / 5 xfailed. State: idle.
