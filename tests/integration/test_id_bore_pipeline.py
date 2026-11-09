@@ -14,7 +14,8 @@ def _without_comp_entries(gcode: str) -> str:
     """Drop the in-air cutter-comp entry/lead-out moves (added 2026-11-08)
     so tests compare only the planned contour moves."""
     return "\n".join(l for l in gcode.splitlines()
-                     if "Comp entry" not in l and "Comp lead-out" not in l)
+                     if "Comp entry" not in l and "Comp lead-out" not in l
+                     and "Contour approach" not in l)
 
 
 

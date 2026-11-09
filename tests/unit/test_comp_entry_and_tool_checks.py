@@ -139,3 +139,58 @@ def test_no_lead_out_past_end_of_bar():
     stock = [(0.0, 0.1), (1.0, 0.1), (1.0, -0.8), (0.0, -0.8)]       # bar ends at -0.8
     part = [(0.5, 0.0), (0.0, 0.0), (0.0, -0.8), (0.8, -0.8), (0.8, -0.3), (0.5, -0.3)]
     assert _lead((0.8, -0.3), (0.8, -0.8), "G42", stock, part, [0.0, -0.3, -0.8]) == []
+
+
+# --- tool type vs OD/ID (owner slip 2026-11-09: boring bar on an OD block) ---
+
+@pytest.mark.parametrize("mode,q,ttype,ok", [
+    ("od", 2, ToolType.TURNING, True),
+    ("od", 3, ToolType.BORING, False),
+    ("od", 8, ToolType.TURNING, False),
+    ("id", 3, ToolType.BORING, True),
+    ("id", 2, ToolType.TURNING, False),
+    ("id", 7, ToolType.TURNING, True),      # along-Z orientations not checked
+])
+def test_program_tab_tool_must_suit_mode(mode, q, ttype, ok):
+    from gui.program_tab import ProgramTab
+    tab = ProgramTab()
+    td = ToolDef(tool_number=1, nose_radius=0.016, tip_angle=80.0, edge_length=0.375,
+                 orientation=ToolOrientation(q), direction=ToolDirection.RIGHT,
+                 tool_type=ttype, description="t")
+    block = SimpleNamespace(display_label="blk")
+    if ok:
+        tab._check_tool_suits_mode(td, mode, block, "roughing")
+    else:
+        with pytest.raises(ValueError, match="T1"):
+            tab._check_tool_suits_mode(td, mode, block, "roughing")
+
+
+# --- contour approach: never at face level; OD face entry one radius before ---
+
+def _od_face_code():
+    from tests.integration.test_od_step_to_stock import _run
+    face = [dict(x=0.0, z=0), dict(x=0.5, z=0), dict(x=0.5, z=-0.3), dict(x=0.8, z=-0.3),
+            dict(x=0.8, z=-0.6), dict(x=1.0, z=-0.6)]
+    return GCodeWriter().write(_run(face).plan_result)
+
+
+def test_contour_approach_rapids_stay_at_clearance():
+    code = _od_face_code()
+    for section in ("; === CLEANUP", "; === FINISH"):
+        body = code.split(section)[1].split("; ===")[0]
+        rapids = [b for b in _blocks(body) if " G00 " in f" {b} "]
+        # every rapid before comp-on that is inside the bar (X < 1.0) is at clearance Z
+        before_comp = body.split("G42")[0]
+        for b in _blocks(before_comp):
+            m = re.match(r"N\d+ G00 X(-?[\d.]+) Z(-?[\d.]+)", b)
+            if m and float(m.group(1)) < 1.0:
+                assert float(m.group(2)) >= 0.1 - 1e-9, b
+
+
+def test_od_face_entry_one_nose_radius_before_centre():
+    code = _od_face_code()
+    fin = code.split("; === FINISH")[1]
+    b = _blocks(fin)
+    i = next(j for j, x in enumerate(b) if re.search(r"\bG42\b", x))
+    assert re.match(r"N\d+ G01 X-0\.0320 Z0\.0000", b[i + 1]), b[i + 1]
+    assert re.match(r"N\d+ G01 X0\.0000 Z0\.0000", b[i + 2]), b[i + 2]
