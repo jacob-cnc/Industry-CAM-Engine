@@ -283,3 +283,7 @@ F. Machine-control classification: affects tool offsets -> software-verified onl
   Previously label-only. Also NIC script exit fix. No claims. State: idle.
 - 2026-11-09 02:10 UTC — main: docs/handoffs/2026-11-08-x-deadband-tuning.md (planned owner-present
   X PID deadband session; INI unchanged). Indexed in ACTIVE.md. No claims. State: idle.
+- 2026-11-09 03:00 UTC — main: Run From rework (gui/run_tab.py, new outputs/run_from_line.py,
+  tests/unit/test_run_from_line.py). From box takes N numbers; resume program = modal-restore
+  preamble + source from chosen block; refuses mid-comp/threading/O-subs/G91/G92/G10/params.
+  Software-verified only. No claims. State: idle.
