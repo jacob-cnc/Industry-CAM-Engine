@@ -1,5 +1,5 @@
 [Unit]
-Description=RT tuning for LinuxCNC (CPU governor + Mesa NIC qdisc)
+Description=RT tuning for LinuxCNC (CPU governor + Mesa NIC qdisc + NIC RX priority)
 After=network.target
 
 [Service]
