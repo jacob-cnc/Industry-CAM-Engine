@@ -273,3 +273,8 @@ F. Machine-control classification: affects tool offsets -> software-verified onl
   Branch claude/approach-clearance.
 - State: idle.
 - 2026-11-09 13:30 UTC — main: approach clearance/centre entry/tool-type check (29df00e), X MAX_LIMIT 5.95 r (691ac62), launcher 10 s Mesa wait + offline tool table (latest). Claims released. Lathe Mesa Ethernet link dropping (62 carrier changes) — hardware.
+- 2026-11-09 01:20 UTC — main 781a1b9: set-cpu-performance.sh (boot service) now enables threaded
+  NAPI on enp1s0 and sets napi/enp1s0-* to SCHED_FIFO 70 (r8169 has no IRQ thread; RX was in
+  ksoftirqd/SCHED_OTHER). Mitigation for hm2 read errors; owner planning Intel NIC. Not run-tested.
+  Also committed owner runtime state (tool.tbl T4 Q2, test-cut engine outputs). No CAM source
+  changes; no claims. State: idle.
