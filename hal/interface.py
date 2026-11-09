@@ -65,6 +65,8 @@ class AxisState:
     Coordinates:
         position: Current WORK position (G54 etc. applied). X = DIAMETER,
             Z = inches. LiveBackend converts from radius machine units.
+        machine_position: Current MACHINE (G53) position, no work, G92 or
+            tool offsets. X = DIAMETER (2 x radius machine units), Z = inches.
         velocity: Current joint velocity (machine units/sec; X is radius)
         commanded: Commanded JOINT position, machine units (X is radius,
             no work offsets) — not comparable to ``position``
@@ -74,6 +76,7 @@ class AxisState:
         enabled: Whether the axis amplifier is enabled
     """
     position: float = 0.0
+    machine_position: float = 0.0
     velocity: float = 0.0
     commanded: float = 0.0
     following_error: float = 0.0

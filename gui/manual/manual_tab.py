@@ -295,10 +295,15 @@ class ManualTab(QWidget):
         self._backend.poll()
         s = self._backend.state
 
-        # DRO — apply unit conversion for display
+        # DRO — work (G54, tool offset applied) or machine (G53) position,
+        # X as diameter either way; apply unit conversion for display.
         dp = unit_state.decimals
-        x_display = unit_state.to_display(s.x.position)
-        z_display = unit_state.to_display(s.z.position)
+        if self._coord_toggle.isChecked():
+            x_src, z_src = s.x.machine_position, s.z.machine_position
+        else:
+            x_src, z_src = s.x.position, s.z.position
+        x_display = unit_state.to_display(x_src)
+        z_display = unit_state.to_display(z_src)
         self._dro_x.setText(f"{x_display:+.{dp}f}")
         self._dro_z.setText(f"{z_display:+.{dp}f}")
 
