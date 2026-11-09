@@ -6,6 +6,12 @@ the distinction between the owner's verbatim request and later design advice.
 
 ## Proposed
 
+- [X Position-Loop Deadband Tuning](2026-11-08-x-deadband-tuning.md)
+  - Status: Planned; owner-present bench session required. Nothing changed yet.
+  - X `DEADBAND = .0005` r lets X park up to .0007 dia off command (observed).
+  - First action: baseline standstill error, then step deadband .0004 → .00025
+    live from the Tuning tab; stop at the first sign of hunting.
+
 - [Define the ID Pocket/Removal Region Explicitly](2026-11-08-id-pocket-removal-model.md)
   - Status: Owner request captured; investigation not started.
   - Priority: Follow-up after the immediate GCH bore-and-shoulder cleanup fix.
