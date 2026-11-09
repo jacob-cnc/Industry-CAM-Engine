@@ -271,4 +271,5 @@ F. Machine-control classification: affects tool offsets -> software-verified onl
   rapids at or below the current face), OD face-at-centreline comp entry (centre nib), tool-type
   vs OD/ID check at generation. Paths: outputs/gcode_writer.py, gui/program_tab.py, tests.
   Branch claude/approach-clearance.
-- State: active.
+- State: idle.
+- 2026-11-09 13:30 UTC — main: approach clearance/centre entry/tool-type check (29df00e), X MAX_LIMIT 5.95 r (691ac62), launcher 10 s Mesa wait + offline tool table (latest). Claims released. Lathe Mesa Ethernet link dropping (62 carrier changes) — hardware.
