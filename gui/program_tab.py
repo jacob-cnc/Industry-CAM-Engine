@@ -1246,6 +1246,10 @@ class ProgramTab(QWidget):
                     description=f"Finish T{finish_tool_num}",
                 )
 
+        for role, td in (("roughing", tool_def), ("finishing", finish_tool_def)):
+            if td is not None:
+                self._check_tool_suits_mode(td, mode, block, role)
+
         pipeline_result = pipeline_execute(
             profile=profile, stock=stock_def, tool=tool_def,
             roughing_params=roughing_params, finishing_params=finishing_params,
@@ -1352,6 +1356,30 @@ class ProgramTab(QWidget):
             unit_mode=unit_state.mode.value,
         ))
         return lines
+
+    # LinuxCNC Fig 2.16 (front-tool lathe): cutting corner toward -X (OD) or +X (ID)
+    _OD_ORIENTATIONS = {1, 2, 6}
+    _ID_ORIENTATIONS = {3, 4, 8}
+
+    def _check_tool_suits_mode(self, tool_def, mode: str, block, role: str) -> None:
+        """Refuse a tool that cannot cut this side of the part.
+
+        Owner slip 2026-11-09: a boring bar (T1, Q3) was selected for an OD
+        profile and the program generated without complaint. The orientation
+        says which way the cutting corner points; Q5/Q7/Q9 (pointing along Z,
+        round) are not checked.
+        """
+        from models.tool import ToolType
+        q = int(getattr(tool_def.orientation, "value", tool_def.orientation) or 0)
+        name = f"T{tool_def.tool_number}"
+        if mode == "od" and (tool_def.tool_type == ToolType.BORING or q in self._ID_ORIENTATIONS):
+            raise ValueError(
+                f"{name} ({role}) is an inside/boring tool (Q{q}) but block "
+                f"'{block.display_label}' is an OD profile. Choose an OD turning tool.")
+        if mode == "id" and q in self._OD_ORIENTATIONS:
+            raise ValueError(
+                f"{name} ({role}) is an OD tool (Q{q}) but block '{block.display_label}' "
+                f"is an ID profile. Choose a boring tool (Q3/Q4/Q8).")
 
     def _require_tool(self, tool_number: int, block, role: str):
         """Resolve a tool from the Tools tab table or fail generation clearly."""

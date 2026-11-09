@@ -312,14 +312,10 @@ class GCodeWriter:
             approach_x = cleanup_pass.x_level  # X_start + fin
             approach_z = cleanup_pass.z_start  # Z0 + fin
 
-            lines.append(self._rapid(safe_x, approach_z, f"Rapid to {'pilot hole' if is_id else 'stock OD'} at Z0+fin"))
-            lines.append(self._rapid(approach_x, approach_z, f"Rapid to X_start+fin={approach_x:.4f}"))
-            self._x = approach_x
-            self._z = approach_z
-
-            for p in pr.cleanup_passes:
+            for n_pass, p in enumerate(pr.cleanup_passes):
                 lines.extend(self._emit_contour_pass(
-                    p.moves, "Cleanup move", pr.tool, is_id, pr.stock.z_start, pr))
+                    p.moves, "Cleanup move", pr.tool, is_id, pr.stock.z_start, pr,
+                    start=(approach_x, approach_z) if n_pass == 0 else None))
 
             if pr.cleanup_passes[-1].retract_moves is None:
                 raise ValueError("Cleanup pass is missing its planned diagonal retract.")
@@ -380,10 +376,6 @@ class GCodeWriter:
             approach_x = finish_pass.x_level  # X_start
             approach_z = finish_pass.z_start  # Z0+fin
 
-            lines.append(self._rapid(safe_x, approach_z, f"Rapid to {'pilot hole' if is_id else 'stock OD'} at Z0+fin"))
-            lines.append(self._rapid(approach_x, approach_z, f"Rapid to X_start={approach_x:.4f}"))
-            self._x = approach_x
-            self._z = approach_z
 
             for pass_number, p in enumerate(pr.finish_passes):
                 if pass_number > 0:
@@ -395,7 +387,8 @@ class GCodeWriter:
                 label = "Spring pass (repeat final contour)" if p.is_spring_pass else f"Finish cutting pass {pass_number + 1}"
                 lines.append(f"; {label}")
                 lines.extend(self._emit_contour_pass(
-                    p.moves, f"{label}: move", finish_tool, is_id, pr.stock.z_start, pr))
+                    p.moves, f"{label}: move", finish_tool, is_id, pr.stock.z_start, pr,
+                    start=(approach_x, approach_z) if pass_number == 0 else None))
             lines.append("")
 
         if pr.finish_passes:
@@ -449,65 +442,80 @@ class GCodeWriter:
     _COMP_ENTRY_MARGIN = 0.010
 
     def _emit_contour_pass(self, moves, label: str, tool, is_id: bool,
-                           z_clear_stock: float, pr=None) -> List[str]:
-        """Emit one cleanup/finish contour with its own G41/G42 entry.
+                           z_clear_stock: float, pr=None, start=None) -> List[str]:
+        """Emit one cleanup/finish contour: safe approach, comp entry, contour.
 
-        Comp is OFF on arrival (G40). Pattern for a contour whose first profile
-        move runs along Z (bores, OD shoulders):
-            G00 X<x0> Z<z_clear>     uncompensated, in air above the start
-            G41/G42
-            G01 X<x0> Z<z0>          entry, collinear with the first profile
-                                     move, longer than 2 x TNR
-            ...profile moves...
-        so LinuxCNC applies the offset on an air move and never sees a corner
-        before the profile. For ID passes the leading radial moves along the
-        face (pilot -> wall at Z0+fin) are air travel, not profile: they are
-        dropped (they sat the tool on the wrong side of G41).
-        Contours that START with a radial profile move (OD face from centre)
-        keep the previous behaviour: comp engaged with that move as the entry.
-        The caller emits G40 before the exit retract.
+        ``start`` is the pass's planned start point (default: current position).
+        The approach never travels at face level: the tool rises to a clearance
+        Z, traverses there, and feeds down in air. (Until 2026-11-09 the writer
+        rapided to the pass start at Z0+fin, i.e. across the uncut face — on an
+        OD job the finish approach rapided 0.0015" below the face surface.)
+
+        Comp entry, per contour type (comp is OFF on arrival; the caller emits
+        G40 before the exit retract):
+          * first profile move along Z (bore wall, OD wall): entry straight down
+            the wall line, collinear with the contour.
+          * OD contour starting with a FACE move (G42): the entry runs down a
+            line one nose radius before the face start, so after LinuxCNC's
+            inside-corner clip the nose centre sits exactly on the face start —
+            the face is cut flat through the centreline (no centre nib, sim
+            2026-11-09) without cutting on the far side of centre.
+        For ID passes the leading radial moves along the face (pilot -> wall
+        at Z0+fin) are air travel, not profile, and are dropped.
         """
         out: List[str] = []
+        sx, sz = start if start is not None else (self._x, self._z)
         has_tnr = tool.nose_radius > 0.0001
         comp_code = self._get_comp_code(tool.direction, is_id) if has_tnr else "G40"
+        r = tool.nose_radius if has_tnr else 0.0
         moves = list(moves)
-        if comp_code == "G40":
-            for j, move in enumerate(moves):
-                out.append(self._emit_move(move, f"{label} {j+1}"))
-            return out
 
-        start = 0
-        if is_id:
-            px, pz = self._x, self._z
-            while start < len(moves) and abs(moves[start].z - pz) < 1e-9 \
-                    and moves[start].move_type in (MoveType.FEED, MoveType.RAPID):
-                px, pz = moves[start].x, moves[start].z
-                start += 1
-            x0, z0 = px, pz
-        else:
-            x0, z0 = self._x, self._z
-        first = moves[start] if start < len(moves) else None
-        axial_first = (first is not None and first.move_type == MoveType.FEED
-                       and abs(first.x - x0) < 1e-9 and first.z < z0)
+        # Contour start: skip approach artefacts at the head of the pass.
+        k, px, pz = 0, sx, sz
+        while k < len(moves) and moves[k].move_type in (MoveType.FEED, MoveType.RAPID):
+            mv = moves[k]
+            radial = abs(mv.z - pz) < 1e-9 and abs(mv.x - px) > 1e-9
+            tiny_axial = abs(mv.x - px) < 1e-9 and 0 < abs(mv.z - pz) < max(2.0 * r, 0.005)
+            nxt_radial = (k + 1 < len(moves) and abs(moves[k + 1].z - mv.z) < 1e-9)
+            if is_id and radial:                      # ID face lead: air
+                px, pz = mv.x, mv.z; k += 1; continue
+            if not is_id and tiny_axial and nxt_radial:   # OD drop onto the face
+                px, pz = mv.x, mv.z; k += 1; continue
+            break
+        first = moves[k] if k < len(moves) else None
+        feed = first.feed if first is not None and first.feed > 0 else 0.0
 
-        if axial_first:
-            min_len = 2.0 * tool.nose_radius + self._COMP_ENTRY_MARGIN
-            z_clear = max(z_clear_stock, z0 + min_len)
-            if self._z < z_clear - 1e-9:
-                out.append(self._rapid(self._x, z_clear, "Comp entry: clear Z (comp off)"))
-            if abs(self._x - x0) > 1e-9 or abs(self._z - z_clear) > 1e-9:
-                out.append(self._rapid(x0, z_clear, "Comp entry: above contour start (comp off)"))
-            out.append(self._line(comp_code, f"Cutter comp on (TNR={tool.nose_radius:.4f})"))
-            out.append(self._feed_line(x0, z0, first.feed, "Comp entry move (in air, collinear with contour)"))
+        min_len = 2.0 * r + self._COMP_ENTRY_MARGIN
+        z_clear = max(z_clear_stock, pz + min_len)
+        face_first = (first is not None and first.move_type == MoveType.FEED
+                      and abs(first.z - pz) < 1e-9 and abs(first.x - px) > 1e-9)
+        od_face_entry = (not is_id) and face_first and comp_code == "G42"
+        if od_face_entry:
+            outward = 1.0 if first.x > px else -1.0
+            entry_x = px - outward * 2.0 * r       # one nose radius before (diameter)
         else:
+            entry_x = px
+
+        # Safe approach: rise, traverse at clearance (comp off).
+        if self._z < z_clear - 1e-9:
+            out.append(self._rapid(self._x, z_clear, "Contour approach: rise to clearance Z (comp off)"))
+        if abs(self._x - entry_x) > 1e-9 or abs(self._z - z_clear) > 1e-9:
+            out.append(self._rapid(entry_x, z_clear, "Contour approach: above entry point (comp off)"))
+        if comp_code != "G40":
             out.append(self._line(comp_code, f"Cutter comp on (TNR={tool.nose_radius:.4f})"))
+            out.append(self._feed_line(entry_x, pz, feed, "Comp entry move (in air)"))
+        else:
+            out.append(self._feed_line(entry_x, pz, feed, "Contour approach: feed down (no TNR)"))
+        if od_face_entry:
+            out.append(self._feed_line(px, pz, feed, "Comp entry: onto face start"))
+
         prev = (self._x, self._z)
-        for j, move in enumerate(moves[start:]):
+        for j, move in enumerate(moves[k:]):
             prev = (self._x, self._z)
             out.append(self._emit_move(move, f"{label} {j+1}"))
-        if pr is not None:
+        if pr is not None and comp_code != "G40":
             out.extend(self._comp_lead_out(prev, (self._x, self._z), tool,
-                                           comp_code, moves[start:], pr))
+                                           comp_code, moves[k:], pr))
         return out
 
     def _comp_lead_out(self, prev, end, tool, comp_code, profile_moves, pr) -> List[str]:

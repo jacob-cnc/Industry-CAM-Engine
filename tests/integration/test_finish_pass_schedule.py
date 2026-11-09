@@ -14,7 +14,8 @@ def _without_comp_entries(gcode: str) -> str:
     """Drop the in-air cutter-comp entry/lead-out moves (added 2026-11-08)
     so tests compare only the planned contour moves."""
     return "\n".join(l for l in gcode.splitlines()
-                     if "Comp entry" not in l and "Comp lead-out" not in l)
+                     if "Comp entry" not in l and "Comp lead-out" not in l
+                     and "Contour approach" not in l)
 
 
 
@@ -58,7 +59,9 @@ def test_cutting_passes_remove_allowance_and_spring_repeats_final(mode, strategy
     # All finish-to-finish links in output are the links already validated by pipeline.
     links = [m for p in plan.finish_passes[1:] for m in p.approach_moves]
     links += list(plan.finish_passes[-1].retract_moves)
-    rapid_moves = [m for m in emitted if m.move_type == MoveType.RAPID][2:]
+    # Writer approach to the first pass (rise/traverse at clearance) is filtered
+    # out above as 'Contour approach'; the rest are the validated links.
+    rapid_moves = [m for m in emitted if m.move_type == MoveType.RAPID]
     assert [m.x for m in rapid_moves] == pytest.approx([m.x for m in links])
     assert [m.z for m in rapid_moves] == pytest.approx([m.z for m in links])
     assert "; Finish Passes: 3" in code

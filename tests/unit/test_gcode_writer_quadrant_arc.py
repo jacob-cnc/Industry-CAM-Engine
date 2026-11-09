@@ -350,8 +350,12 @@ class TestGCodeWriterQuadrantArcOutput:
         g02_lines = [l for l in output.split('\n') if 'G02' in l]
         assert len(g02_lines) == 2
 
-        # First arc should have F word (feed not yet set)
-        assert 'F0.0030' in g02_lines[0]
+        # The finish feed is set once, on or before the first arc. Since
+        # 2026-11-08 the in-air comp entry move carries it, so the first arc
+        # may inherit it modally.
+        finish = output.split('; === FINISH PASS')[1]
+        before_first_arc = finish.split(g02_lines[0])[0] + g02_lines[0]
+        assert before_first_arc.count('F0.0030') == 1
         # Second arc has same feed — F should be suppressed (modal)
         assert 'F' not in g02_lines[1].split(';')[0].split('K')[1], (
             "Feed should be modal — not repeated on subsequent arcs with same feed"
