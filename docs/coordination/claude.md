@@ -278,3 +278,6 @@ F. Machine-control classification: affects tool offsets -> software-verified onl
   ksoftirqd/SCHED_OTHER). Mitigation for hm2 read errors; owner planning Intel NIC. Not run-tested.
   Also committed owner runtime state (tool.tbl T4 Q2, test-cut engine outputs). No CAM source
   changes; no claims. State: idle.
+- 2026-11-09 01:50 UTC — main: AxisState.machine_position added (hal/interface.py, live/mock
+  backends); Manual-tab "Machine Coords (G53)" toggle now actually shows G53 (X diameter).
+  Previously label-only. Also NIC script exit fix. No claims. State: idle.
