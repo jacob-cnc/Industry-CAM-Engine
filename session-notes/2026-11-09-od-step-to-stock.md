@@ -41,3 +41,15 @@ Case B: finish walls X0.5000 / X0.8000, shoulder Z-0.3000, step face Z-0.6000
 roughing passes at the step stop at about Z-0.594 (allowance kept).
 Case A: same walls; finish wall ends in the comp lead-out (nose stop verified
 earlier at exactly Z-0.6000 vs -0.6156 without it).
+
+## Follow-up: contour approach clearance, OD centre entry, tool-type check
+Owner review of a generated OD program (face from centre, step to bar OD):
+(1) boring bar T1 selected for an OD block — now a generation error; (2) finish
+approach rapided at Z0.0010 across a face standing at Z0.0025 and cleanup rapided
+along the face surface — contours now rise to clearance (Stock Z start), traverse,
+feed down in air; (3) comp entry at X0 left a centre nib up to TNR — OD face
+contours now enter one nose radius before the face start.
+Sim (T4 D0.032 Q2): face Z0.0000 with control point X-0.0320 (nose centre on the
+centreline); walls 0.5000/0.8000; step Z-0.6000; no errors. GCH bore unchanged
+(3.1150/3.1160/3.1170, Z-0.5680). Roughing rapids at Z0+fin are over already-cut
+X only (reviewed, unchanged).
