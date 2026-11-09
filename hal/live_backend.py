@@ -226,6 +226,9 @@ class LiveBackend(HALBackend):
         x_pos = 2.0 * (s.actual_position[0] - s.g5x_offset[0]
                        - s.g92_offset[0] - s.tool_offset[0])
         z_pos = s.actual_position[2] - s.g5x_offset[2] - s.g92_offset[2] - s.tool_offset[2]
+        # G53 machine position, same display convention (X diameter).
+        x_mach = 2.0 * s.actual_position[0]
+        z_mach = s.actual_position[2]
 
         x_cmd = s.joint[0]["output"] if len(s.joint) > 0 else 0.0
         z_cmd = s.joint[1]["output"] if len(s.joint) > 1 else 0.0
@@ -241,6 +244,7 @@ class LiveBackend(HALBackend):
 
         x_axis = AxisState(
             position=x_pos,
+            machine_position=x_mach,
             velocity=s.joint[0]["velocity"] if len(s.joint) > 0 else 0.0,
             commanded=x_cmd,
             following_error=x_ferr,
@@ -253,6 +257,7 @@ class LiveBackend(HALBackend):
 
         z_axis = AxisState(
             position=z_pos,
+            machine_position=z_mach,
             velocity=s.joint[1]["velocity"] if len(s.joint) > 1 else 0.0,
             commanded=z_cmd,
             following_error=z_ferr,

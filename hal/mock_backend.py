@@ -437,6 +437,7 @@ class MockBackend(HALBackend):
 
         x_axis = AxisState(
             position=self._x_pos,
+            machine_position=self._x_pos,
             velocity=self._jog_x_vel if self._jog_x_active else 0.0,
             commanded=self._x_pos,
             following_error=0.0,
@@ -449,6 +450,7 @@ class MockBackend(HALBackend):
 
         z_axis = AxisState(
             position=self._z_pos,
+            machine_position=self._z_pos,
             velocity=self._jog_z_vel if self._jog_z_active else 0.0,
             commanded=self._z_pos,
             following_error=0.0,
