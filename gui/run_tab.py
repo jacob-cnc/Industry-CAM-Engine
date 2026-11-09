@@ -13,6 +13,7 @@ Architecture:
 
 import os
 import re
+import tempfile
 import logging
 from typing import Optional, List
 
@@ -29,6 +30,8 @@ from gui.components.sim_viewer import SimViewerWidget, parse_gcode_for_sim, GCod
 from outputs.graph_adapter import convert_from_moves
 from outputs.gcode_parser import parse as parse_gcode
 from hal import get_backend
+from outputs.run_from_line import (
+    RunFromError, ResumePlan, build_resume_program, find_n_line, has_n_numbers)
 from hal.interface import HALBackend, InterpState, TaskMode, TaskState
 
 logger = logging.getLogger(__name__)
@@ -56,6 +59,11 @@ class RunTab(QWidget):
         self._active = False
         self._last_motion_line = -1
         self._is_running = False
+        # Run-from: the resume program LinuxCNC is running (None = the source
+        # file itself) and the file currently opened in LinuxCNC.
+        self._resume_plan: Optional[ResumePlan] = None
+        self._backend_file: str = ""
+        self._uses_n_numbers = False
 
         self._build_ui()
         self._connect_signals()
@@ -161,15 +169,18 @@ class RunTab(QWidget):
         bar_layout.addWidget(sep2)
 
         # Run from line
-        lbl_from = QLabel("From line:")
-        lbl_from.setStyleSheet(f"color: {COLORS['text_secondary']};")
-        bar_layout.addWidget(lbl_from)
+        self._lbl_from = QLabel("From line:")
+        self._lbl_from.setStyleSheet(f"color: {COLORS['text_secondary']};")
+        bar_layout.addWidget(self._lbl_from)
 
+        # Fixed generous range: the value is an N block number (N10, N20 ...)
+        # for numbered programs, so it routinely exceeds the file's line count.
+        # Validity is checked at Run From, not by clamping while typing.
         self._line_spin = QSpinBox()
         self._line_spin.setMinimum(1)
-        self._line_spin.setMaximum(99999)
+        self._line_spin.setMaximum(999999)
         self._line_spin.setValue(1)
-        self._line_spin.setFixedWidth(80)
+        self._line_spin.setFixedWidth(110)
         self._line_spin.setFixedHeight(36)
         bar_layout.addWidget(self._line_spin)
 
@@ -338,12 +349,16 @@ class RunTab(QWidget):
         self._gcode_path = path
         filename = os.path.basename(path)
 
-        # Update line spin max
         line_count = self._gcode_text.count('\n') + 1
-        self._line_spin.setMaximum(line_count)
+        self._uses_n_numbers = has_n_numbers(self._gcode_text)
+        self._lbl_from.setText("From N:" if self._uses_n_numbers else "From line:")
+        self._line_spin.setToolTip(
+            "Block number to start from (the N number shown in the program)"
+            if self._uses_n_numbers else "File line number to start from")
 
         # Tell the backend to open the file (for actual execution)
-        self._backend.program_open(path)
+        self._resume_plan = None
+        self._backend_file = path if self._backend.program_open(path) else ""
 
         # Update UI state
         self._btn_start.setEnabled(True)
@@ -437,11 +452,24 @@ class RunTab(QWidget):
         """On-screen Cycle Start — same behaviour as the green button."""
         self.cycle_start("screen")
 
+    def _ensure_source_loaded(self) -> bool:
+        """Make sure LinuxCNC has the source program open (not a resume file)."""
+        self._resume_plan = None
+        if self._backend_file == self._gcode_path:
+            return True
+        if self._backend.program_open(self._gcode_path):
+            self._backend_file = self._gcode_path
+            return True
+        self.show_error("Could not reopen the program in LinuxCNC - is it still running?")
+        return False
+
     def _start_from_line(self, line: int, source: str) -> str:
         self.clear_error()
         problems = self.tool_table_problems()
         if problems and not self._warn_tool_problems(problems, at_start=True):
             return "cancelled"
+        if not self._ensure_source_loaded():
+            return "failed"
         success = self._backend.program_run(start_line=line)
         if success:
             self._set_running_state()
@@ -465,20 +493,121 @@ class RunTab(QWidget):
         self._backend.program_stop()
         self._set_idle_state()
 
+    def _resolve_start_index(self) -> Optional[int]:
+        """0-based source line for the From box, or None (error shown)."""
+        value = self._line_spin.value()
+        if self._uses_n_numbers:
+            idx = find_n_line(self._gcode_text, value)
+            if idx is None:
+                self.show_error(f"N{value} is not in this program")
+                QMessageBox.warning(self, "Run From",
+                                    f"Block N{value} was not found in this program.")
+            return idx
+        lines = self._gcode_text.count('\n') + 1
+        if value > lines:
+            self.show_error(f"Line {value} is past the end ({lines} lines)")
+            QMessageBox.warning(self, "Run From",
+                                f"The program has only {lines} lines.")
+            return None
+        return value - 1
+
     def _on_run_from_line(self):
-        """Start execution from the specified line number."""
+        """Start from a chosen block with the program's modal state restored.
+
+        LinuxCNC's native start-line skips the earlier blocks' tool change,
+        G43, spindle and feed, so a resume program (restore preamble + the
+        source from the chosen block) is built, confirmed and run instead.
+        """
         if not self._gcode_path:
             return
-        line = self._line_spin.value() - 1  # Convert 1-based to 0-based
         self.clear_error()
+        idx = self._resolve_start_index()
+        if idx is None:
+            return
+        first_block = next((i for i, l in enumerate(self._gcode_text.splitlines())
+                            if re.match(r"\s*N?\d*\s*[GMTSFXZ]", l, re.I)), 0)
+        if idx <= first_block:
+            self._start_from_line(0, "run-from")
+            return
+
+        state = self._backend.state
+        try:
+            plan = build_resume_program(self._gcode_text, idx,
+                                        tool_in_spindle=state.tool_in_spindle)
+        except RunFromError as exc:
+            self.show_error(f"Cannot run from here: {exc}")
+            QMessageBox.warning(self, "Cannot run from this line", str(exc))
+            return
+
+        if not self._confirm_resume(plan, state):
+            return
         problems = self.tool_table_problems()
         if problems and not self._warn_tool_problems(problems, at_start=True):
             return
-        success = self._backend.program_run(start_line=max(0, line))
-        if success:
+
+        path = self._write_resume_file(plan)
+        if path is None:
+            return
+        if not self._backend.program_open(path):
+            self.show_error("LinuxCNC refused to open the resume program")
+            return
+        self._backend_file = path
+        self._resume_plan = plan
+        if self._backend.program_run(start_line=0):
             self._set_running_state()
+            logger.info("Run from source line %d via %s", idx + 1, path)
         else:
-            logger.warning("program_run from line %d failed", line + 1)
+            logger.warning("program_run of resume program failed")
+            self._ensure_source_loaded()
+
+    def _confirm_resume(self, plan: ResumePlan, state) -> bool:
+        st = plan.state
+        lines = self._gcode_text.splitlines()
+        label = (re.match(r"\s*(N\d+)", lines[plan.start_index]) or [None, None])[1] \
+            or f"line {plan.start_index + 1}"
+        expected = (f"X{st.x:.4f} Z{st.z:.4f}" if st.x is not None and st.z is not None
+                    else "unknown (earlier move used machine coordinates)")
+        text = (
+            f"Start at {label}:\n    {plan.first_line.strip()}\n\n"
+            "Restored before it (lines above it are NOT run):\n    "
+            + "\n    ".join(self._preamble_summary(plan.preamble))
+            + f"\n\nProgram expects the tool at: {expected}\n"
+            f"Tool is now at: X{state.x.position:.4f} Z{state.z.position:.4f}\n\n"
+            "The first move goes in a STRAIGHT LINE from where the tool is now. "
+            "Jog to a clear position near the expected point first.")
+        if plan.notes:
+            text += "\n\nNotes:\n    " + "\n    ".join(plan.notes)
+        answer = QMessageBox.question(self, "Run From - confirm", text + "\n\nStart?",
+                                      QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        return answer == QMessageBox.Yes
+
+    @staticmethod
+    def _preamble_summary(preamble: List[str]) -> List[str]:
+        """Preamble as short lines; the O-word tool check shown as one line."""
+        out, in_check = [], False
+        for line in preamble:
+            code = line.split("(")[0].strip()
+            if re.match(r"o\S+\s+if\b", code, re.I):
+                in_check = True
+                out.append("tool table check (pauses on mismatch)")
+            elif re.match(r"o\S+\s+endif\b", code, re.I):
+                in_check = False
+            elif code and not in_check:
+                out.append(code)
+        return out
+
+    def _write_resume_file(self, plan: ResumePlan) -> Optional[str]:
+        folder = os.path.join(tempfile.gettempdir(), "industry-cam-run-from")
+        stem = os.path.splitext(os.path.basename(self._gcode_path))[0]
+        path = os.path.join(folder, f"{stem} - from line {plan.start_index + 1}.ngc")
+        try:
+            os.makedirs(folder, exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(plan.program_text)
+        except OSError as exc:
+            self.show_error(f"Cannot write resume program: {exc}")
+            return None
+        return path
 
     def _set_running_state(self):
         """Update UI for running state."""
@@ -503,6 +632,13 @@ class RunTab(QWidget):
         self._btn_preview.setEnabled(has_file)
         self._btn_pause.setText("Pause")
         self._sim_viewer._graph.highlight_next_segment(-1)
+        if self._resume_plan is not None:
+            # Put the source program back so Start/preview use it, not the
+            # resume file. If LinuxCNC is still stopping this fails quietly and
+            # the next start reopens it (_ensure_source_loaded).
+            self._resume_plan = None
+            if self._backend.program_open(self._gcode_path):
+                self._backend_file = self._gcode_path
 
     # =================================================================
     # Polling — Live Updates During Execution
@@ -532,6 +668,9 @@ class RunTab(QWidget):
 
         # Update current line display and highlighting
         motion_line = state.motion_line
+        if self._resume_plan is not None and motion_line > 0:
+            # LinuxCNC reports lines of the resume file; show source lines.
+            motion_line = self._resume_plan.source_line(motion_line)
         if motion_line != self._last_motion_line:
             self._last_motion_line = motion_line
             if motion_line > 0:
