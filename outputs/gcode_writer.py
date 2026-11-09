@@ -486,6 +486,18 @@ class GCodeWriter:
         feed = first.feed if first is not None and first.feed > 0 else 0.0
 
         min_len = 2.0 * r + self._COMP_ENTRY_MARGIN
+        # If the contour starts straight down the entry line with a sliver
+        # (2026-11-09 GCH ID cleanup: entry stopped at Z0+fin = .0015, first
+        # move .0006 to .0009, then a concave chamfer corner), end the entry
+        # higher - still in air on the same line - so that first contour move
+        # is long enough for LinuxCNC to shorten it at the corner (R*tan(turn/2))
+        # instead of aborting with "straight feed in concave corner cannot be
+        # reached". The entry itself must stay air-only: LinuxCNC moves the
+        # tool sideways onto the offset path along the whole entry move.
+        if (first is not None and first.move_type == MoveType.FEED
+                and abs(first.x - px) < 1e-9 and first.z < pz - 1e-9
+                and pz - first.z < min_len):
+            pz = first.z + min_len
         z_clear = max(z_clear_stock, pz + min_len)
         face_first = (first is not None and first.move_type == MoveType.FEED
                       and abs(first.z - pz) < 1e-9 and abs(first.x - px) > 1e-9)
@@ -510,13 +522,65 @@ class GCodeWriter:
             out.append(self._feed_line(px, pz, feed, "Comp entry: onto face start"))
 
         prev = (self._x, self._z)
+        # Comp-on polyline for the concave-corner check (None = arc end).
+        path = [(entry_x, z_clear), (entry_x, pz)]
+        if od_face_entry:
+            path.append((px, pz))
+
+        def _track(pt):
+            if pt is None or path[-1] is None or \
+                    abs(pt[0] - path[-1][0]) > 1e-9 or abs(pt[1] - path[-1][1]) > 1e-9:
+                path.append(pt)       # zero-length moves are suppressed in output
+
         for j, move in enumerate(moves[k:]):
             prev = (self._x, self._z)
             out.append(self._emit_move(move, f"{label} {j+1}"))
+            _track(None if move.move_type in (MoveType.ARC_CW, MoveType.ARC_CCW)
+                   else (self._x, self._z))
         if pr is not None and comp_code != "G40":
-            out.extend(self._comp_lead_out(prev, (self._x, self._z), tool,
-                                           comp_code, moves[k:], pr))
+            lead = self._comp_lead_out(prev, (self._x, self._z), tool,
+                                       comp_code, moves[k:], pr)
+            out.extend(lead)
+            if lead:
+                _track((self._x, self._z))
+        if comp_code != "G40":
+            self._check_concave_corners(path, r, comp_code, label)
         return out
+
+    @staticmethod
+    def _check_concave_corners(path, r: float, comp_code: str, label: str) -> None:
+        """Reject line-line corners LinuxCNC comp cannot reach (fail at generation).
+
+        At a corner that turns toward the comp side LinuxCNC shortens the
+        incoming line by R*tan(turn/2); if the line is shorter than that it
+        aborts with "straight feed in concave corner cannot be reached by the
+        tool without gouging". Points are (X diameter, Z); ``None`` marks the
+        end of an arc (corners touching arcs are not checked here). Turn sign
+        is in LinuxCNC's G18 plane (Z, X-radius): left (+) = G41 side.
+        """
+        side = 1.0 if comp_code == "G41" else -1.0
+        for i in range(1, len(path) - 1):
+            a, b, c = path[i - 1], path[i], path[i + 1]
+            if a is None or b is None or c is None:
+                continue
+            d1 = (b[1] - a[1], (b[0] - a[0]) / 2.0)
+            d2 = (c[1] - b[1], (c[0] - b[0]) / 2.0)
+            l1, l2 = math.hypot(*d1), math.hypot(*d2)
+            if l1 < 1e-9 or l2 < 1e-9:
+                continue
+            cross = (d1[0] * d2[1] - d1[1] * d2[0]) / (l1 * l2)
+            dot = (d1[0] * d2[0] + d1[1] * d2[1]) / (l1 * l2)
+            if side * cross <= 1e-9:
+                continue                          # straight or convex
+            turn = math.atan2(abs(cross), dot)
+            need = r * math.tan(turn / 2.0)
+            if l1 < need - 1e-6:
+                raise ValueError(
+                    f"{label}: the move to X{b[0]:.4f} Z{b[1]:.4f} is {l1:.4f}\" long "
+                    f"but cutter comp needs {need:.4f}\" before that concave corner "
+                    "(LinuxCNC would stop with 'straight feed in concave corner "
+                    "cannot be reached'). Use a smaller nose radius or a longer "
+                    "segment.")
 
     def _comp_lead_out(self, prev, end, tool, comp_code, profile_moves, pr) -> List[str]:
         """Stop the nose AT the contour end when material lies beyond it.
