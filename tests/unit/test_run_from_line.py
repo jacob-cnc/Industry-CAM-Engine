@@ -165,3 +165,52 @@ def test_run_tab_types_n_number_and_runs_resume_program(monkeypatch, tmp_path):
     tab._set_idle_state()
     assert opened[-1] == str(src) and tab._resume_plan is None
     os.unlink(resume)
+
+
+def test_run_from_mapping_survives_stale_not_busy_polls(monkeypatch, tmp_path):
+    """Owner 2026-11-09: highlight started at the top after Run From.
+
+    The first polls after program_run can still report not-busy; that used to
+    end the run at once and drop the line mapping.
+    """
+    from types import SimpleNamespace
+    from PyQt5.QtWidgets import QApplication, QMessageBox
+    from hal.factory import get_backend
+    from hal.interface import InterpState, TaskMode
+    QApplication.instance() or QApplication([])
+    b = get_backend(force_mock=True)
+    b.estop_reset(); b.machine_on(); b._interp_state = InterpState.IDLE
+    b._task_mode = TaskMode.MANUAL
+    from gui.run_tab import RunTab
+    tab = RunTab()
+    opened = []
+    monkeypatch.setattr(b, "program_open", lambda p: opened.append(p) or True)
+    monkeypatch.setattr(b, "program_run", lambda start_line=0: True)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
+    src = tmp_path / "job.ngc"
+    src.write_text(PROG)
+    tab._load_gcode_file(str(src))
+    tab._line_spin.setValue(110)
+    tab._on_run_from_line()
+    plan = tab._resume_plan
+    shown = []
+    tab._sim_viewer.sim_line_changed.connect(shown.append)
+
+    real = b.state
+
+    def poll(busy, line):
+        st = real
+        fake = SimpleNamespace(**{k: getattr(st, k) for k in st.__dataclass_fields__})
+        fake.program_busy, fake.motion_line = busy, line
+        fake.interp_state = InterpState.READING if busy else InterpState.IDLE
+        monkeypatch.setattr(type(b), "state", property(lambda self: fake))
+        tab._poll()
+
+    poll(False, 0)                      # stale snapshot right after start
+    poll(False, 0)
+    assert tab._is_running and tab._resume_plan is plan
+    poll(True, plan.resume_start_index + 1)
+    assert shown[-1] == find_n_line(PROG, 110)          # 0-based source line
+    assert tab._status_line.text() == f"Line: {find_n_line(PROG, 110) + 1}"
+    poll(False, 0)                      # really finished
+    assert not tab._is_running and opened[-1] == str(src)

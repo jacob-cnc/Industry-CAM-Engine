@@ -64,6 +64,12 @@ class RunTab(QWidget):
         self._resume_plan: Optional[ResumePlan] = None
         self._backend_file: str = ""
         self._uses_n_numbers = False
+        # Completion needs proof the program actually started: right after
+        # program_run the polled state can still show not-busy (stale MANUAL
+        # snapshot), which used to end the run at once and drop the run-from
+        # line mapping. Until busy is seen, wait up to _START_GRACE polls.
+        self._seen_busy = False
+        self._polls_since_start = 0
 
         self._build_ui()
         self._connect_signals()
@@ -609,9 +615,13 @@ class RunTab(QWidget):
             return None
         return path
 
+    _START_GRACE = 30   # polls (100 ms each) to wait for the program to go busy
+
     def _set_running_state(self):
         """Update UI for running state."""
         self._is_running = True
+        self._seen_busy = False
+        self._polls_since_start = 0
         self._btn_start.setEnabled(False)
         self._btn_pause.setEnabled(True)
         self._btn_stop.setEnabled(True)
@@ -682,8 +692,12 @@ class RunTab(QWidget):
                 self._status_line.setText("Line: —")
 
         # Detect program completion (was running, now nothing left to do)
-        if not state.program_busy and self._is_running:
-            self._set_idle_state()
+        if self._is_running:
+            self._polls_since_start += 1
+            if state.program_busy:
+                self._seen_busy = True
+            elif self._seen_busy or self._polls_since_start > self._START_GRACE:
+                self._set_idle_state()
 
         # Update button state for pause
         if state.interp_state == InterpState.PAUSED:
