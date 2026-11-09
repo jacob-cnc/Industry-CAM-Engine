@@ -499,6 +499,15 @@ def main():
 
     # Create and show main window
     window = MainWindow()
+    import os as _os
+    _reason = _os.environ.get("INDUSTRY_CAM_OFFLINE_REASON")
+    if _reason:
+        from PyQt5.QtCore import QTimer as _QT
+        from PyQt5.QtWidgets import QMessageBox as _MB
+        _QT.singleShot(500, lambda: _MB.warning(
+            window, "Offline preview mode",
+            f"{_reason}.\n\nThe GUI is running OFFLINE with simulated data - no "
+            "machine control. Check the Mesa card power/cable and relaunch."))
     window.showMaximized()
 
     sys.exit(app.exec_())

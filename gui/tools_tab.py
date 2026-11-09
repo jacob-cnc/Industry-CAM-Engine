@@ -85,6 +85,11 @@ class Tools_Tab(QWidget):
             try:
                 self._linuxcnc_stat = linuxcnc.stat()
                 self._linuxcnc_command = linuxcnc.command()
+                # The channels construct even with no controller running;
+                # poll() proves LinuxCNC is up. Without this the offline GUI
+                # took the live branch, failed the INI lookup and showed no
+                # tool table (2026-11-08).
+                self._linuxcnc_stat.poll()
             except Exception:
                 # If connection fails, fall back to offline mode
                 self._linuxcnc_stat = None

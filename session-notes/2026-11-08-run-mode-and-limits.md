@@ -96,3 +96,19 @@ LiveBackend.restore_lathe_modes() (MDI "G7 G18" only if missing). Sim with the r
 backend: after M2 G17 -> restored G18, second call no-op.
 Note: the ribbon G-code list shows the interpreter's read-ahead state (it can
 read M2's resets while motion is still cutting), not the executing block's.
+
+## 2026-11-09: launcher wait, offline tool table, Mesa link dropouts
+- Owner launched before the Mesa card answered; launch_gui.sh's single 1 s ping
+  fell back to OFFLINE silently (no tool table, no machine). Now waits up to 10 s
+  (true deadline), then starts offline with a pop-up stating the reason
+  (INDUSTRY_CAM_OFFLINE_REASON). Dry-run: unreachable IP -> offline after 10 s;
+  card up -> LinuxCNC immediately.
+- Tools tab: linuxcnc.stat()/command() construct without a controller; now
+  stat.poll() decides live vs offline, so offline mode loads the local tool.tbl.
+- MPGs dead at 16:17: hm2_7i96s.0.io_error = TRUE after "error finishing read"
+  (all Mesa I/O frozen: MPG and linear-scale raw counts static). enp1s0 (Mesa,
+  100 Mb full) shows 62 carrier changes since boot, 0 packet errors -> physical
+  link dropping (cable/connectors/7i96s supply/NIC power saving). Mid-session
+  dropouts today: 13:14 (then joint 1 following error), 13:47, 16:17.
+  Action: E-stop + restart LinuxCNC after any mid-session read error; inspect
+  the Mesa Ethernet link.
