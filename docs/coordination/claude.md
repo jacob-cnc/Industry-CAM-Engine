@@ -287,3 +287,7 @@ F. Machine-control classification: affects tool offsets -> software-verified onl
   tests/unit/test_run_from_line.py). From box takes N numbers; resume program = modal-restore
   preamble + source from chosen block; refuses mid-comp/threading/O-subs/G91/G92/G10/params.
   Software-verified only. No claims. State: idle.
+- 2026-11-09 03:30 UTC — CLAIM (owner-reported): LinuxCNC 'straight feed in concave corner' on ID
+  cleanup — comp entry stops at Z0+fin, first cleanup move .0006 long before a concave chamfer.
+  Paths: outputs/gcode_writer.py (_emit_contour_pass entry merge + concave-corner check), tests.
+  Branch claude/comp-entry-merge.
