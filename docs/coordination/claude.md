@@ -291,3 +291,7 @@ F. Machine-control classification: affects tool offsets -> software-verified onl
   cleanup — comp entry stops at Z0+fin, first cleanup move .0006 long before a concave chamfer.
   Paths: outputs/gcode_writer.py (_emit_contour_pass entry merge + concave-corner check), tests.
   Branch claude/comp-entry-merge.
+- 2026-11-09 04:00 UTC — HANDOFF: main has comp-entry fix (_emit_contour_pass raises entry end in air when
+  first contour move is a short collinear sliver) + _check_concave_corners generation-time check
+  (line-line only). Writer/contour tests pass except known 4 quadrant-arc. Full suite not run
+  (LinuxCNC up). Claims released. State: idle.
