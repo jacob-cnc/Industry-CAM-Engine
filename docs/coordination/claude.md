@@ -281,3 +281,5 @@ F. Machine-control classification: affects tool offsets -> software-verified onl
 - 2026-11-09 01:50 UTC — main: AxisState.machine_position added (hal/interface.py, live/mock
   backends); Manual-tab "Machine Coords (G53)" toggle now actually shows G53 (X diameter).
   Previously label-only. Also NIC script exit fix. No claims. State: idle.
+- 2026-11-09 02:10 UTC — main: docs/handoffs/2026-11-08-x-deadband-tuning.md (planned owner-present
+  X PID deadband session; INI unchanged). Indexed in ACTIVE.md. No claims. State: idle.
