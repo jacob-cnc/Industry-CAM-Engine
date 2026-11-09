@@ -33,7 +33,11 @@ if [ -w /sys/class/net/$NIC/threaded ]; then
     for p in $pids; do
         chrt -f -p $NAPI_PRIO "$p" && echo "RT FIFO $NAPI_PRIO: $(cat /proc/$p/comm) (pid $p)"
     done
-    [ -z "${pids// /}" ] && echo "WARNING: no napi/irq thread found for $NIC"
+    if [ -z "${pids// /}" ]; then
+        echo "WARNING: no napi/irq thread found for $NIC"
+    fi
 else
     echo "WARNING: /sys/class/net/$NIC/threaded not available"
 fi
+
+exit 0
