@@ -300,7 +300,7 @@ class Tools_Tab(QWidget):
         Args:
             tool_number: The tool number of the card that changed.
         """
-        if self._autosave():
+        if self._autosave(edited_tool=tool_number):
             self.tool_changed.emit(tool_number)
 
     def _on_card_clicked(self, tool_number: int) -> None:
@@ -551,12 +551,12 @@ class Tools_Tab(QWidget):
     # Autosave
     # ------------------------------------------------------------------
 
-    def _autosave(self) -> bool:
+    def _autosave(self, edited_tool: Optional[int] = None) -> bool:
         """Persist combined offsets, then reload/verify the live controller."""
         if self._linuxcnc_command is None and not self._active_file_path:
             return True
         try:
-            self._persist_table()
+            self._persist_table(edited_tool)
             return True
         except Exception as exc:
             # Restore the last accepted values, so unapplied edits are not shown
@@ -607,12 +607,21 @@ class Tools_Tab(QWidget):
         if result != linuxcnc.RCS_DONE:
             raise RuntimeError("LinuxCNC did not confirm the tool-table command.")
 
-    def _refresh_active_offset(self):
-        # Reloading the table does not reapply an already active G43 offset.
+    def _refresh_active_offset(self, edited_tool: Optional[int] = None):
+        """Re-issue G43 so reloaded offsets take effect on the spindle tool.
+
+        Reloading the table does not reapply an already active G43 offset.
+        When the edited tool IS the tool in the spindle, G43 is applied even if
+        it was not active (e.g. after a restart the spindle tool is known but
+        G49 is in effect) - an edit to the active tool's geometry/wear must take
+        effect without a redundant tool change (owner 2026-11-09). No motion.
+        """
         self._linuxcnc_stat.poll()
-        if 430 not in getattr(self._linuxcnc_stat, "gcodes", ()):
-            return
         active_tool = self._linuxcnc_stat.tool_in_spindle
+        g43_active = 430 in getattr(self._linuxcnc_stat, "gcodes", ())
+        if not g43_active and not (edited_tool is not None and edited_tool > 0
+                                   and edited_tool == active_tool):
+            return
         if active_tool <= 0:
             raise RuntimeError("Cannot refresh G43 without an identified active tool.")
         self._linuxcnc_command.mode(linuxcnc.MODE_MDI)
@@ -647,7 +656,7 @@ class Tools_Tab(QWidget):
                        for entry in matches):
                 raise RuntimeError(f"LinuxCNC table does not match saved offsets for T{tool.tool_number}.")
 
-    def _persist_table(self):
+    def _persist_table(self, edited_tool: Optional[int] = None):
         live = self._linuxcnc_command is not None
         if self._table_sync_failed:
             raise RuntimeError("Tool table synchronization failed; reload and verify the controller table before editing.")
@@ -672,7 +681,7 @@ class Tools_Tab(QWidget):
                 self._linuxcnc_command.load_tool_table()
                 self._wait_table_command()
                 self._verify_controller_table(tools)
-                self._refresh_active_offset()
+                self._refresh_active_offset(edited_tool)
         except Exception as error:
             # Restore the disk snapshot and attempt to restore controller state.
             if previous is not None:

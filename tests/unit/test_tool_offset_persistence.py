@@ -228,3 +228,23 @@ def test_stale_windows_settings_falls_back_to_local_table(tab, monkeypatch, tmp_
 
 
 _AUTOLOAD = tools_tab.Tools_Tab._load_settings_and_auto_load
+
+
+def test_wear_edit_on_spindle_tool_applies_g43_even_when_inactive(live):
+    # Owner 2026-11-09: T1 already in the spindle, wear edited, offset only
+    # took effect after a redundant tool change (G43 was not active).
+    tab, path, stat, command = live
+    stat.gcodes = ()                       # G49 in effect, tool 2 in spindle
+    edit_wear(tab)
+    assert tab._autosave(edited_tool=2)
+    command.mdi.assert_called_once_with("G43 H2")
+    assert stat.tool_offset[0] == pytest.approx(.502)
+    assert stat.task_mode == 1
+
+
+def test_edit_of_other_tool_does_not_turn_on_g43(live):
+    tab, path, stat, command = live
+    stat.gcodes = ()
+    edit_wear(tab)
+    assert tab._autosave(edited_tool=7)    # not the spindle tool
+    command.mdi.assert_not_called()
