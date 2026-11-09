@@ -1,0 +1,99 @@
+; Industry CAM Engine — Generated Program
+; Profile: 5 segments, Mode: OD
+; Stock: 1.0000 dia, Z 0.1000 to -0.7500
+; DOC: 0.0500 dia, Rough Feed: 0.0080
+; Fin Allowance: 0.0050 dia, Finish Feed: 0.0030
+; RPM: 1200
+; Tool: T1 Default T1 CNMG
+
+N10 G20 G18 G40 G49 G80  (Safety line - inch, ZX plane, comp off)
+N20 G90 G95  (Absolute positioning, feed per revolution)
+
+N30 S1200 M3  (Spindle CW - enables encoder for feed/rev)
+N40 G00 X1.10000 Z2.0000  (Move to park position)
+
+N50 T1 M6  (Load tool T1 - Default T1 CNMG)
+N60 G43  (Tool length comp on)
+N70 G42  (Cutter radius compensation on)
+
+; === FACE PASSES (4 passes) ===
+N80 G00 X1.0000 Z0.1000  (Approach: Stock OD, Z_start)
+N90 G01 X1.0000 Z0.0750 F0.0080  (Face pass 1: feed Z to 0.0750)
+
+N100 G01 X0.0000 Z0.0750  (Face pass 1: feed to X_start)
+N110 G00 X1.0000 Z0.1000  (Retract X to stock OD, Z=0.1000 (prev pass))
+N120 G01 X1.0000 Z0.0500  (Face pass 2: feed Z to 0.0500)
+
+N130 G01 X0.0000 Z0.0500  (Face pass 2: feed to X_start)
+N140 G00 X1.0000 Z0.0750  (Retract X to stock OD, Z=0.0750 (prev pass))
+N150 G01 X1.0000 Z0.0250  (Face pass 3: feed Z to 0.0250)
+
+N160 G01 X0.0000 Z0.0250  (Face pass 3: feed to X_start)
+N170 G00 X1.0000 Z0.0500  (Retract X to stock OD, Z=0.0500 (prev pass))
+N180 G01 X1.0000 Z0.0025  (Face pass 4: feed Z to 0.0025)
+
+N190 G01 X0.0000 Z0.0025  (Face pass 4: feed to X_start)
+N200 G00 X1.0000 Z0.0250  (Retract X to stock OD, Z=0.0250 (prev pass))
+
+; === ROUGHING PASSES (9 passes) ===
+N210 G00 X1.0000 Z0.0025  (Rough pass 1: traverse Z to 0.0025 at X1.0000)
+N220 G01 X0.9500 Z0.0025  (Rough pass 1: feed X to DOC level 0.9500)
+N230 G01 X0.9500 Z-0.6944  (Rough pass 1 cut)
+N240 G00 X1.0000 Z0.0025  (Diagonal retract to prev X level 1.0000 (clears shoulder))
+N250 G00 X0.9500 Z0.0025  (Rough pass 2: traverse Z to 0.0025 at X0.9500)
+N260 G01 X0.9000 Z0.0025  (Rough pass 2: feed X to DOC level 0.9000)
+N270 G01 X0.9000 Z-0.6444  (Rough pass 2 cut)
+N280 G00 X0.9500 Z0.0025  (Diagonal retract to prev X level 0.9500 (clears shoulder))
+N290 G00 X0.9000 Z0.0025  (Rough pass 3: traverse Z to 0.0025 at X0.9000)
+N300 G01 X0.8500 Z0.0025  (Rough pass 3: feed X to DOC level 0.8500)
+N310 G01 X0.8500 Z-0.5944  (Rough pass 3 cut)
+N320 G00 X0.9000 Z0.0025  (Diagonal retract to prev X level 0.9000 (clears shoulder))
+N330 G00 X0.8500 Z0.0025  (Rough pass 4: traverse Z to 0.0025 at X0.8500)
+N340 G01 X0.8000 Z0.0025  (Rough pass 4: feed X to DOC level 0.8000)
+N350 G01 X0.8000 Z-0.5444  (Rough pass 4 cut)
+N360 G00 X0.8500 Z0.0025  (Diagonal retract to prev X level 0.8500 (clears shoulder))
+N370 G00 X0.8000 Z0.0025  (Rough pass 5: traverse Z to 0.0025 at X0.8000)
+N380 G01 X0.7500 Z0.0025  (Rough pass 5: feed X to DOC level 0.7500)
+N390 G01 X0.7500 Z-0.4975  (Rough pass 5 cut)
+N400 G00 X0.8000 Z0.0025  (Diagonal retract to prev X level 0.8000 (clears shoulder))
+N410 G00 X0.7500 Z0.0025  (Rough pass 6: traverse Z to 0.0025 at X0.7500)
+N420 G01 X0.7000 Z0.0025  (Rough pass 6: feed X to DOC level 0.7000)
+N430 G01 X0.7000 Z-0.4975  (Rough pass 6 cut)
+N440 G00 X0.7500 Z0.0025  (Diagonal retract to prev X level 0.7500 (clears shoulder))
+N450 G00 X0.7000 Z0.0025  (Rough pass 7: traverse Z to 0.0025 at X0.7000)
+N460 G01 X0.6500 Z0.0025  (Rough pass 7: feed X to DOC level 0.6500)
+N470 G01 X0.6500 Z-0.4975  (Rough pass 7 cut)
+N480 G00 X0.7000 Z0.0025  (Diagonal retract to prev X level 0.7000 (clears shoulder))
+N490 G00 X0.6500 Z0.0025  (Rough pass 8: traverse Z to 0.0025 at X0.6500)
+N500 G01 X0.6000 Z0.0025  (Rough pass 8: feed X to DOC level 0.6000)
+N510 G01 X0.6000 Z-0.4975  (Rough pass 8 cut)
+N520 G00 X0.6500 Z0.0025  (Diagonal retract to prev X level 0.6500 (clears shoulder))
+N530 G00 X0.6000 Z0.0025  (Rough pass 9: traverse Z to 0.0025 at X0.6000)
+N540 G01 X0.5500 Z0.0025  (Rough pass 9: feed X to DOC level 0.5500)
+N550 G01 X0.5500 Z-0.4975  (Rough pass 9 cut)
+N560 G00 X0.6000 Z0.0025  (Diagonal retract to prev X level 0.6000 (clears shoulder))
+
+; === CLEANUP PASS (semi-finish, roughing boundary contour) ===
+N570 G00 X1.0000 Z0.0025  (Rapid to stock OD at Z0+fin)
+N580 G00 X0.0050 Z0.0025  (Rapid to X_start+fin=0.0050)
+N590 G01 X0.5050 Z0.0025  (Cleanup move 1)
+N600 G01 X0.5050 Z-0.4975  (Cleanup move 2)
+N610 G01 X0.7531 Z-0.4975  (Cleanup move 3)
+N620 G01 X1.0056 Z-0.7500  (Cleanup move 4)
+N630 G00 X1.0000 Z-0.7500  (Retract X after cleanup)
+N640 G00 X1.0000 Z0.1000  (Traverse Z to Z_start)
+
+; === FINISH PASS (profile contour) ===
+N650 G00 X1.0000 Z0.0010  (Rapid to stock OD at Z0+fin)
+N660 G00 X0.0000 Z0.0010  (Rapid to X_start=0.0000)
+N670 G01 X0.0000 Z0.0000 F0.0030  (Finish move 1)
+N680 G01 X0.5000 Z0.0000  (Finish move 2)
+N690 G01 X0.5000 Z-0.5000  (Finish move 3)
+N700 G01 X0.7500 Z-0.5000  (Finish move 4)
+N710 G01 X1.0000 Z-0.7500  (Finish move 5)
+
+; === PROGRAM END ===
+N720 G40  (Cutter comp cancel)
+N730 G00 X1.10000 Z1.0000  (Return to park)
+N740 M5  (Spindle stop)
+N750 M2  (Program end)
