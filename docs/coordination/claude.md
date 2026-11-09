@@ -297,3 +297,5 @@ F. Machine-control classification: affects tool offsets -> software-verified onl
   (LinuxCNC up). Claims released. State: idle.
 - 2026-11-09 04:20 UTC — Full suite on main 37a78c3 (LinuxCNC down): 518 passed / 4 failed (same known
   axis-aligned quadrant-arc finish) / 1 skipped / 5 xfailed. State: idle.
+- 2026-11-09 05:00 UTC — main: Run tab completion waits for busy (fixes run-from highlight); Tools tab re-issues
+  G43 when the edited tool is in the spindle. Full suite 521 pass / 4 known. No claims. State: idle.
