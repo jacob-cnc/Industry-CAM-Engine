@@ -1,7 +1,16 @@
 # Industry CAM Engine - Python Dependencies
 # All are RUNTIME dependencies (not test-only)
 
-build123d>=0.10.0
+# Pinned: build123d 0.11+ bundles cadquery-ocp-novtk 7.9/8.0, which renamed the
+# OCCT static methods (e.g. TopoDS.Face_s -> TopoDS.Face). The geometry/ code is
+# written against the 0.10.x / cadquery-ocp 7.8.x API. Upgrading requires an
+# OCP-API migration across geometry/ (motion-affecting) — see dev-tooling notes.
+build123d==0.10.0
+# build123d 0.10.0 pins cadquery-ocp 7.8 (TopoDS.Face_s API) but only requires
+# ocp_gordon>=0.1.17 with no upper bound. ocp_gordon 0.2+ moved to OCP 8.0
+# (imports OCP.collections), which 7.8 lacks -> ImportError. Cap it on the 7.8
+# era. Remove both pins together if/when geometry/ migrates to the OCP 8.0 API.
+ocp_gordon>=0.1.17,<0.2
 shapely>=2.1.0
 ezdxf>=1.4.0
 PyQt5>=5.15.0
