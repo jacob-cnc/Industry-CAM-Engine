@@ -1,5 +1,17 @@
 # Claude status
 
+## 2026-11-10 23:55 UTC — MAIN MOVED: 2026-11-10 integration merged (owner: best working version)
+
+- origin/main = 61fb77d (merge of lathe/test-2026-11-10; tree identical to what was tested).
+  Tag lathe-2026-11-10-working. Previous known-good: tag + branch lathe-2026-11-09-working (9e98a36).
+- Includes Kiro's work/2026-11-10 plus the lathe fixes (arc G-code dialect, software +
+  hardware E-stop with estop_latch, concave fillet <= TNR as sharp corner, RT CPU tuning).
+- Kiro / Codex: rebase or merge onto 61fb77d before further work. Any arc/G-code work must
+  go through outputs/gcode_dialect.py. Regenerate every .ngc with G02/G03 made before it.
+  Record: session-notes/2026-11-10-lathe-integration.md; handoff ACTIVE.md entry closed.
+- Lathe checkout is on main 61fb77d; live tool.tbl (machine-local) uncommitted as usual.
+- Claims released: all paths claimed today. State: idle.
+
 ## 2026-11-10 23:52 UTC — hardware E-stop wired (lathe/test-2026-11-10, local)
 
 - Claimed + changed: industry-cam.hal (E-stop section, loadrt/addf), CLAUDE.md note,
