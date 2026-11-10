@@ -31,6 +31,9 @@ STATUS_COLORS = {
     "smoothed": COLORS["status_info"],
     "skipped": COLORS["status_error"],
     "unvalidated": COLORS["text_disabled"],
+    # Concave fillet not larger than the finish tool's nose radius: cut as a
+    # sharp corner, the tool leaves its own radius (gcode_writer).
+    "tool radius": COLORS["status_warning"],
 }
 
 

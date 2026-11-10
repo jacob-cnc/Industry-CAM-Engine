@@ -209,3 +209,47 @@ def test_linuxcnc_arc_matches_internal_geometry(tmp_path):
         a1 = math.atan2(xe - xc, ze - zc)
         d = (a1 - a0 + math.pi) % (2 * math.pi) - math.pi     # signed minor sweep, Z->X positive
         assert (d > 0) == (rot > 0), (g, rot, math.degrees(d))
+
+
+# ----------------------------------------------------------------------
+# Concave fillets not larger than the nose radius (owner decision 2026-11-10)
+# ----------------------------------------------------------------------
+
+def _od_step_with_concave_fillet(radius):
+    """OD step-up: Ø.500 to Z-.5, face up to Ø1.000. The corner at
+    (Ø.500, Z-.5) is concave (inside corner) for the turning tool."""
+    segs = [_seg(0.5, 0.0), _seg(0.5, -0.5), _seg(1.0, -0.5), _seg(1.0, -1.0)]
+    breaks = [None, {"type": "fillet", "radius": radius, "size": 0.0, "angle": 45.0}, None]
+    return _fields(segs, breaks, "od", 1.1, -1.0)
+
+
+def _finish_and_cleanup_arcs(code):
+    tail = code.split("; === CLEANUP")[-1] if "; === CLEANUP" in code else code
+    return re.findall(r"^N\d+ G0[23] .*$", tail, re.M)
+
+
+def test_concave_fillet_below_nose_radius_is_cut_sharp_with_a_note():
+    plan, _ = _generate(_od_step_with_concave_fillet(0.010))    # CNMG TNR .016
+    w = GCodeWriter()
+    code = w.write(plan)
+    assert not _finish_and_cleanup_arcs(code), _finish_and_cleanup_arcs(code)
+    assert w.notes and all("sharp corner" in n for n in w.notes)
+    assert "; NOTE:" in code
+    # The comp contour now meets the sharp vertex (Ø.500, Z-.5) exactly.
+    assert re.search(r"^N\d+ G01 X0\.5000 Z-0\.5000\b", code, re.M), code
+
+
+def test_concave_fillet_larger_than_nose_radius_keeps_its_arc():
+    plan, _ = _generate(_od_step_with_concave_fillet(0.030))
+    w = GCodeWriter()
+    code = w.write(plan)
+    assert _finish_and_cleanup_arcs(code)
+    assert not w.notes
+
+
+@pytest.mark.skipif(RS274 is None, reason="LinuxCNC rs274 not installed")
+@pytest.mark.parametrize("radius", [0.010, 0.016, 0.030])
+def test_linuxcnc_runs_concave_fillet_around_nose_radius(tmp_path, radius):
+    _, code = _generate(_od_step_with_concave_fillet(radius))
+    out, canon = _rs274(tmp_path, code)
+    assert "PROGRAM_END" in canon, out[-600:]

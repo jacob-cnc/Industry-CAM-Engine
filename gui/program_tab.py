@@ -225,6 +225,7 @@ class ProgramTab(QWidget):
         self._state = ProgramState.IDLE
         self._active_tool: Optional[ToolDef] = None
         self._tool_resolver = None  # Callable[[int], Optional[ToolDef]] set by main_window
+        self._generate_notes = []   # writer notes from the last Generate
         self._program_file_path: Optional[str] = None
         self._last_gcode_text: str = ""  # Last generated G-code for saving
         self._profile_contour_segments: list = []  # Profile overlay for toolpath display
@@ -1182,6 +1183,7 @@ class ProgramTab(QWidget):
 
             # Generate each block — collect G-code sections and the first plan_result
             all_gcode_sections = []
+            self._generate_notes = []
             first_plan_result = None
             prev_tool_number = None
             writer = GCodeWriter()
@@ -1248,13 +1250,24 @@ class ProgramTab(QWidget):
             self.set_state(ProgramState.DISPLAYING)
 
             block_count = len(active_blocks)
-            self._status_label.setText(
-                f"Program ready — {block_count} block{'s' if block_count > 1 else ''}, "
-                f"{len(sim_moves)} moves"
-            )
-            self._status_label.setStyleSheet(
-                f"color: {COLORS['text_secondary']}; font-size: {FONTS['small_size']}pt;"
-            )
+            ready = (f"Program ready — {block_count} block{'s' if block_count > 1 else ''}, "
+                     f"{len(sim_moves)} moves")
+            notes = getattr(self, "_generate_notes", [])
+            if notes:
+                # Not an error: the program runs. The part differs from the
+                # drawing (e.g. a corner radius set by the tool nose).
+                self._status_label.setText(
+                    f"⚠ {ready} — {len(notes)} note{'s' if len(notes) > 1 else ''} "
+                    f"(hover for details)")
+                self._status_label.setToolTip("\n\n".join(notes))
+                self._status_label.setStyleSheet(
+                    f"color: {COLORS['status_warning']}; font-size: {FONTS['small_size']}pt;")
+            else:
+                self._status_label.setText(ready)
+                self._status_label.setToolTip("")
+                self._status_label.setStyleSheet(
+                    f"color: {COLORS['text_secondary']}; font-size: {FONTS['small_size']}pt;"
+                )
 
         except Exception as e:
             import traceback as tb_module
@@ -1379,7 +1392,11 @@ class ProgramTab(QWidget):
             return None, None
 
         plan_result = pipeline_result.plan_result
-        gcode_text = GCodeWriter().write(plan_result, unit_mode=unit_state.mode.value)
+        block_writer = GCodeWriter()
+        gcode_text = block_writer.write(plan_result, unit_mode=unit_state.mode.value)
+        for note in block_writer.notes:
+            logger.warning("Generate note (%s): %s", block.display_label, note)
+            self._generate_notes.append(f"{block.display_label}: {note}")
         return gcode_text, plan_result
 
     def _generate_threading_block(self, block, writer, prev_tool_number):
@@ -1929,6 +1946,7 @@ class ProgramTab(QWidget):
         breaks = self._segment_list.get_corner_breaks()
         result = self._od_corner_result(segs, breaks)
         reports = {r.vertex - 1: r for r in (result.reports if result else [])}
+        self._flag_fillets_within_nose_radius(result, reports)
         notes = {i: (r.status, r.message) for i, r in reports.items()}
         self._segment_list.set_vertex_notes(notes)
         if not self._btn_cb_tool.isChecked():
@@ -1957,6 +1975,40 @@ class ProgramTab(QWidget):
                          "corner": "" if is_id else kinds.get(i, ""),
                          "badge": badge, "status": status, "message": msg})
         self._cb_panel.set_vertices(rows)
+
+    def _finish_nose_radius(self) -> float:
+        """Nose radius of the block's finishing tool (0 if unknown)."""
+        if not self._tool_resolver:
+            return 0.0
+        try:
+            tool = self._tool_resolver(self._finish_tool_num.value())
+        except Exception:
+            tool = None
+        return float(getattr(tool, "nose_radius", 0.0) or 0.0)
+
+    def _flag_fillets_within_nose_radius(self, result, reports: dict) -> None:
+        """Mark concave fillets the finishing tool cannot follow.
+
+        The writer cuts a concave fillet with R <= the nose radius as a sharp
+        corner (the nose leaves its own radius there); say so on the vertex
+        before Generate. Reports are updated in place (status 'tool radius').
+        """
+        tnr = self._finish_nose_radius()
+        if result is None or tnr <= 0:
+            return
+        for i, rep in reports.items():
+            if rep.break_type != "fillet" or rep.corner != "concave" \
+                    or rep.status in ("skipped", "unvalidated"):
+                continue
+            g = result.geometry.get(i)
+            radius = g.radius if g is not None and g.radius > 0 else rep.requested
+            if radius > tnr + 0.0001:
+                continue
+            extra = (f"{rep.label}: concave R{radius:.4f} is not larger than the finishing "
+                     f"tool's nose radius ({tnr:.4f}). It will be cut as a sharp inside "
+                     f"corner: the tool leaves R{tnr:.4f} there, not R{radius:.4f}.")
+            rep.message = f"{rep.message}\n{extra}" if rep.message else extra
+            rep.status = "tool radius"
 
     CB_TOOL_LABEL_OFF = "Corner Breaks"
     CB_TOOL_LABEL_ON = "Done - Back to Segment Builder  (Esc)"

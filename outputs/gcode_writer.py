@@ -59,6 +59,9 @@ class GCodeWriter:
         self._x = 0.0
         self._z = 0.0
         self._feed = None
+        # Operator notes from this write (e.g. concave fillets the tool nose
+        # cannot follow). The Program tab shows them after Generate.
+        self.notes: List[str] = []
         self._n = 10
         self._ocode = 9000
         self._metric = unit_mode == "metric"
@@ -532,20 +535,101 @@ class GCodeWriter:
                     abs(pt[0] - path[-1][0]) > 1e-9 or abs(pt[1] - path[-1][1]) > 1e-9:
                 path.append(pt)       # zero-length moves are suppressed in output
 
-        for j, move in enumerate(moves[k:]):
+        contour = moves[k:]
+        if comp_code != "G40":
+            contour = self._sharpen_small_concave_arcs(
+                contour, (px, pz), r, comp_code, label, out)
+        for j, move in enumerate(contour):
             prev = (self._x, self._z)
             out.append(self._emit_move(move, f"{label} {j+1}"))
             _track(None if move.move_type in (MoveType.ARC_CW, MoveType.ARC_CCW)
                    else (self._x, self._z))
         if pr is not None and comp_code != "G40":
             lead = self._comp_lead_out(prev, (self._x, self._z), tool,
-                                       comp_code, moves[k:], pr)
+                                       comp_code, contour, pr)
             out.extend(lead)
             if lead:
                 _track((self._x, self._z))
         if comp_code != "G40":
             self._check_concave_corners(path, r, comp_code, label)
         return out
+
+    # A concave arc this close to the nose radius (or smaller) has no usable
+    # cutter-comp offset path (offset radius <= 0.0001").
+    _SMALL_CONCAVE_ARC_MARGIN = 0.0001
+
+    def _sharpen_small_concave_arcs(self, moves, start, r: float, comp_code: str,
+                                    label: str, out: List[str]) -> list:
+        """Cut concave arcs with radius <= the nose radius as a sharp corner.
+
+        Owner decision 2026-11-10: the nose cannot make an inside radius
+        smaller than itself, so a concave fillet R <= TNR is cut exactly like
+        the sharp inside corner (the tool leaves R = TNR there). LinuxCNC
+        cannot offset such an arc under G41/G42 ("Tool radius not less than
+        arc radius with comp"). The two neighbouring lines are extended to
+        their intersection and the arc is dropped; each one is reported in
+        ``self.notes`` and as a comment in the program. Not silent: the part
+        gets a larger corner radius than drawn.
+
+        Concave = the arc turns toward the comp side. Turn sign is LinuxCNC's
+        (outputs/gcode_dialect.py): G03 turns left in G18 (Z, X-radius), and
+        left is the G41 side (same rule as _check_concave_corners).
+        """
+        from dataclasses import replace
+        from outputs.gcode_dialect import gcode_for_arc
+        side = 1.0 if comp_code == "G41" else -1.0
+        arcs = (MoveType.ARC_CW, MoveType.ARC_CCW)
+        mv = list(moves)
+        i = 0
+        while i < len(mv):
+            m = mv[i]
+            if m.move_type not in arcs:
+                i += 1
+                continue
+            turn = 1.0 if gcode_for_arc(m.move_type) == "G03" else -1.0
+            radius = math.hypot(m.center_i / 2.0, m.center_k)
+            if turn * side <= 0 or radius > r + self._SMALL_CONCAVE_ARC_MARGIN:
+                i += 1
+                continue
+            a_end = (mv[i - 1].x, mv[i - 1].z) if i > 0 else start
+            where = f"{label}: concave arc R{radius:.4f} ending at X{m.x:.4f} Z{m.z:.4f}"
+            prev_ok = i > 0 and mv[i - 1].move_type == MoveType.FEED
+            next_ok = i + 1 < len(mv) and mv[i + 1].move_type == MoveType.FEED
+            if not (prev_ok and next_ok):
+                raise ValueError(
+                    f"{where} is not larger than the tool nose radius ({r:.4f}) and is "
+                    "not between two straight moves, so it cannot be cut as a sharp "
+                    "corner. Use a fillet larger than the nose radius, or a tool with "
+                    "a smaller nose radius.")
+            p0 = (mv[i - 2].x, mv[i - 2].z) if i > 1 else start
+            corner = self._line_intersection(p0, a_end, (m.x, m.z), (mv[i + 1].x, mv[i + 1].z))
+            if corner is None:
+                raise ValueError(f"{where}: the lines on either side are parallel; "
+                                 "it cannot be cut as a sharp corner.")
+            mv[i - 1] = replace(mv[i - 1], x=corner[0], z=corner[1])
+            del mv[i]
+            conv, fmt = self._conv, self._fmt
+            note = (f"{label}: concave R{radius * conv:{fmt}} at X{corner[0] * conv:{fmt}} "
+                    f"Z{corner[1] * conv:{fmt}} is not larger than the tool nose radius "
+                    f"({r * conv:{fmt}}); cut as a sharp corner - the tool leaves "
+                    f"R{r * conv:{fmt}} there.")
+            self.notes.append(note)
+            out.append(f"; NOTE: {note}")
+        return mv
+
+    @staticmethod
+    def _line_intersection(p0, p1, q0, q1):
+        """Intersection of line p0-p1 with line q0-q1; points are (X dia, Z).
+        Solved in (X radius, Z). None if parallel."""
+        ax, az = p0[0] / 2.0, p0[1]
+        dx, dz = p1[0] / 2.0 - ax, p1[1] - az
+        bx, bz = q0[0] / 2.0, q0[1]
+        ex, ez = q1[0] / 2.0 - bx, q1[1] - bz
+        den = dx * ez - dz * ex
+        if abs(den) < 1e-12 * max(1.0, math.hypot(dx, dz) * math.hypot(ex, ez)):
+            return None
+        s = ((bx - ax) * ez - (bz - az) * ex) / den
+        return (2.0 * (ax + s * dx), az + s * dz)
 
     @staticmethod
     def _check_concave_corners(path, r: float, comp_code: str, label: str) -> None:
