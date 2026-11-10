@@ -1,5 +1,22 @@
 # Claude status
 
+## 2026-11-10 23:25 UTC — arc dialect + software E-STOP fixed on lathe/test-2026-11-10 (local, not pushed)
+
+- Commits: 5e7d561 (outputs/gcode_dialect.py; writer + both parsers), 8b09211 (tests,
+  incl. rs274 integration), 4e04c5e (software E-STOP -> STATE_ESTOP; ribbon OFF state).
+- Evidence: regenerated GCH ID fillet, 4 NX OD candidates, GUI Conv Test (29 arcs) all run
+  to PROGRAM_END in rs274; preview geometry old vs new identical (arc types/endpoints;
+  points within 0.0001 from I rounding). Suite: 1069 pass / same 4 quadrant-arc fails;
+  Kiro GUI files run separately: 15 pass / 1 fail (423 != 420 px, known).
+- For Kiro/Codex: every .ngc with G02/G03 written before 5e7d561 is in the old dialect
+  and wrong for LinuxCNC - regenerate. main still has the old writer; this fix must go to
+  main with (or before) any arc/corner-break work. Internal convention unchanged
+  (center_i = diameter offset; MoveType.ARC_CW draws CCW on the Z-right/X-up graph).
+- Still open: Corner Break Test.ngc concave fillet smaller than TNR is refused only by
+  LinuxCNC ("Tool radius not less than arc radius with comp") - engine should refuse it.
+- Next: owner restarts LinuxCNC (hm2 read error 15:15), regenerates GCH NEW in the GUI,
+  air cut.
+
 ## 2026-11-10 23:17 UTC — owner-approved fixes on lathe/test-2026-11-10 (in progress)
 
 - Air-cut found: every G02/G03 the engine writes is wrong for LinuxCNC (pre-existing,
