@@ -346,12 +346,13 @@ class TestGCodeWriterUnitMode:
         inch_output = writer.write(pr, unit_mode="inch")
         metric_output = writer.write(pr, unit_mode="metric")
 
-        # Arc move has center_i=0.25, center_k=-0.25
-        assert "I0.2500" in inch_output
+        # Arc move has center_i=0.25 (DIAMETER), center_k=-0.25. LinuxCNC reads
+        # I as a radius offset, so I = 0.125 (outputs/gcode_dialect.py).
+        assert "I0.1250" in inch_output
         assert "K-0.2500" in inch_output
 
-        # In metric: 0.25 * 25.4 = 6.350, -0.25 * 25.4 = -6.350
-        assert "I6.350" in metric_output
+        # In metric: 0.125 * 25.4 = 3.175, -0.25 * 25.4 = -6.350
+        assert "I3.175" in metric_output
         assert "K-6.350" in metric_output
 
     def test_metric_preamble_comment_says_mm(self):

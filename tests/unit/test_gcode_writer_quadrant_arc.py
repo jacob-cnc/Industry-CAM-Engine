@@ -101,8 +101,8 @@ class TestGCodeWriterQuadrantArcOutput:
     The G-code writer should handle these identically to regular circular arcs.
     """
 
-    def test_single_cw_arc_emits_g02(self):
-        """A single CW arc ToolMove (from decomposition) emits G02 X Z I K.
+    def test_single_cw_arc_emits_g03(self):
+        """A single CW arc ToolMove (from decomposition) emits G03 X Z I K.
 
         **Validates: Requirements 8.1, 8.2, 8.3**
         """
@@ -119,19 +119,19 @@ class TestGCodeWriterQuadrantArcOutput:
         writer = GCodeWriter()
         output = writer.write(pr, unit_mode="inch")
 
-        # Find the G02 line
-        g02_lines = [l for l in output.split('\n') if 'G02' in l]
-        assert len(g02_lines) == 1, f"Expected exactly one G02 line, got {len(g02_lines)}"
+        # Find the G03 line
+        g03_lines = [l for l in output.split('\n') if 'G03' in l]
+        assert len(g03_lines) == 1, f"Expected exactly one G03 line, got {len(g03_lines)}"
 
-        line = g02_lines[0]
+        line = g03_lines[0]
         # Verify X, Z, I, K are all present
         assert re.search(r'X1\.8000', line), f"Missing X1.8000 in: {line}"
         assert re.search(r'Z-0\.3000', line), f"Missing Z-0.3000 in: {line}"
         assert re.search(r'I0\.0000', line), f"Missing I0.0000 in: {line}"
         assert re.search(r'K-0\.3000', line), f"Missing K-0.3000 in: {line}"
 
-    def test_single_ccw_arc_emits_g03(self):
-        """A single CCW arc ToolMove (from decomposition) emits G03 X Z I K.
+    def test_single_ccw_arc_emits_g02(self):
+        """A single CCW arc ToolMove (from decomposition) emits G02 X Z I K.
 
         **Validates: Requirements 8.1, 8.2, 8.3**
         """
@@ -148,21 +148,22 @@ class TestGCodeWriterQuadrantArcOutput:
         writer = GCodeWriter()
         output = writer.write(pr, unit_mode="inch")
 
-        # Find the G03 line
-        g03_lines = [l for l in output.split('\n') if 'G03' in l]
-        assert len(g03_lines) == 1, f"Expected exactly one G03 line, got {len(g03_lines)}"
+        # Find the G02 line
+        g02_lines = [l for l in output.split('\n') if 'G02' in l]
+        assert len(g02_lines) == 1, f"Expected exactly one G02 line, got {len(g02_lines)}"
 
-        line = g03_lines[0]
+        line = g02_lines[0]
         assert re.search(r'X1\.6000', line), f"Missing X1.6000 in: {line}"
         assert re.search(r'Z-0\.5000', line), f"Missing Z-0.5000 in: {line}"
-        assert re.search(r'I-0\.2000', line), f"Missing I-0.2000 in: {line}"
+        # I is the RADIUS offset: center_i -0.2 (diameter) -> I-0.1000
+        assert re.search(r'I-0\.1000', line), f"Missing I-0.1000 in: {line}"
         assert re.search(r'K-0\.2500', line), f"Missing K-0.2500 in: {line}"
 
     def test_multiple_arcs_simulate_quadrant_decomposition(self):
         """Multiple arc ToolMoves (simulating a decomposed quarter-ellipse) emit G2/G3 sequence.
 
         This mimics the finish planner decomposing a quadrant arc into 3 sub-arcs.
-        Each should emit its own G02/G03 line with X, Z, I, K.
+        Each should emit its own G03/G02 line with X, Z, I, K.
 
         **Validates: Requirements 8.1, 8.2, 8.3**
         """
@@ -200,12 +201,12 @@ class TestGCodeWriterQuadrantArcOutput:
         writer = GCodeWriter()
         output = writer.write(pr, unit_mode="inch")
 
-        # Should have exactly 3 G02 lines
-        g02_lines = [l for l in output.split('\n') if 'G02' in l]
-        assert len(g02_lines) == 3, f"Expected 3 G02 lines, got {len(g02_lines)}"
+        # Should have exactly 3 G03 lines
+        g03_lines = [l for l in output.split('\n') if 'G03' in l]
+        assert len(g03_lines) == 3, f"Expected 3 G03 lines, got {len(g03_lines)}"
 
-        # Each G02 line must have X, Z, I, K
-        for line in g02_lines:
+        # Each G03 line must have X, Z, I, K
+        for line in g03_lines:
             assert re.search(r'X-?\d+\.\d{4}', line), f"Missing X in: {line}"
             assert re.search(r'Z-?\d+\.\d{4}', line), f"Missing Z in: {line}"
             assert re.search(r'I-?\d+\.\d{4}', line), f"Missing I in: {line}"
@@ -245,7 +246,7 @@ class TestGCodeWriterQuadrantArcOutput:
         writer = GCodeWriter()
         output = writer.write(pr, unit_mode="inch")
 
-        # Only G00, G01, G02, G03 motion codes should appear (plus setup codes)
+        # Only G00, G01, G03, G02 motion codes should appear (plus setup codes)
         motion_codes = re.findall(r'G0[4-9]|G[1-9]\d', output)
         allowed_high = {'G18', 'G20', 'G21', 'G40', 'G41', 'G42', 'G43',
                         'G49', 'G80', 'G90', 'G95'}
@@ -291,22 +292,22 @@ class TestGCodeWriterQuadrantArcOutput:
         out_regular = writer.write(pr_regular, unit_mode="inch")
         out_quadrant = writer.write(pr_quadrant, unit_mode="inch")
 
-        # Extract the G02 lines from each
-        g02_regular = [l for l in out_regular.split('\n') if 'G02' in l]
-        g02_quadrant = [l for l in out_quadrant.split('\n') if 'G02' in l]
+        # Extract the G03 lines from each
+        g03_regular = [l for l in out_regular.split('\n') if 'G03' in l]
+        g03_quadrant = [l for l in out_quadrant.split('\n') if 'G03' in l]
 
-        assert len(g02_regular) == 1
-        assert len(g02_quadrant) == 1
+        assert len(g03_regular) == 1
+        assert len(g03_quadrant) == 1
 
         # Both should have identical G-code content (before the comment)
         def extract_gcode_part(line):
-            """Extract just the G-code part (N## G02 X... Z... I... K... F...)."""
+            """Extract just the G-code part (N## G03 X... Z... I... K... F...)."""
             if ';' in line:
                 return line.split(';')[0].strip()
             return line.strip()
 
-        regular_gcode = extract_gcode_part(g02_regular[0])
-        quadrant_gcode = extract_gcode_part(g02_quadrant[0])
+        regular_gcode = extract_gcode_part(g03_regular[0])
+        quadrant_gcode = extract_gcode_part(g03_quadrant[0])
 
         # Strip N-numbers for comparison (they differ due to line sequencing)
         regular_body = re.sub(r'^N\d+\s+', '', regular_gcode)
@@ -347,17 +348,17 @@ class TestGCodeWriterQuadrantArcOutput:
         writer = GCodeWriter()
         output = writer.write(pr, unit_mode="inch")
 
-        g02_lines = [l for l in output.split('\n') if 'G02' in l]
-        assert len(g02_lines) == 2
+        g03_lines = [l for l in output.split('\n') if 'G03' in l]
+        assert len(g03_lines) == 2
 
         # The finish feed is set once, on or before the first arc. Since
         # 2026-11-08 the in-air comp entry move carries it, so the first arc
         # may inherit it modally.
         finish = output.split('; === FINISH PASS')[1]
-        before_first_arc = finish.split(g02_lines[0])[0] + g02_lines[0]
+        before_first_arc = finish.split(g03_lines[0])[0] + g03_lines[0]
         assert before_first_arc.count('F0.0030') == 1
         # Second arc has same feed — F should be suppressed (modal)
-        assert 'F' not in g02_lines[1].split(';')[0].split('K')[1], (
+        assert 'F' not in g03_lines[1].split(';')[0].split('K')[1], (
             "Feed should be modal — not repeated on subsequent arcs with same feed"
         )
 
@@ -379,15 +380,15 @@ class TestGCodeWriterQuadrantArcOutput:
         writer = GCodeWriter()
         output = writer.write(pr, unit_mode="metric")
 
-        g02_lines = [l for l in output.split('\n') if 'G02' in l]
-        assert len(g02_lines) == 1
+        g03_lines = [l for l in output.split('\n') if 'G03' in l]
+        assert len(g03_lines) == 1
 
-        line = g02_lines[0]
+        line = g03_lines[0]
         # X: 2.0 * 25.4 = 50.800
         assert 'X50.800' in line
         # Z: -0.5 * 25.4 = -12.700
         assert 'Z-12.700' in line
-        # I: 0.1 * 25.4 = 2.540
-        assert 'I2.540' in line
+        # I (radius offset): 0.1 / 2 * 25.4 = 1.270
+        assert 'I1.270' in line
         # K: -0.25 * 25.4 = -6.350
         assert 'K-6.350' in line
