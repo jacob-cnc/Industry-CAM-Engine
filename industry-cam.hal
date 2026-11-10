@@ -46,7 +46,7 @@ loadrt or2 names=or2.jog-vel-mode
 #   mux-gen.00 = X jog-counts mux, mux-gen.01 = Z jog-counts mux (s32 in -> s32 out)
 #   and2/not gate jog-enable so the GUI can switch mux inputs without a count jump
 loadrt mux_generic config="ss2,ss2"
-loadrt and2 names=and2.mpg-jog-gate,and2.cycle-resume
+loadrt and2 names=and2.mpg-jog-gate,and2.cycle-resume,and2.estop-chain
 loadrt not names=not.compound-jog-inhibit
 
 # Debounce for switches and buttons
@@ -57,6 +57,7 @@ setp debounce.0.delay 5
 # 2. Add functions to servo thread
 # ----------------------------------------------------------------------------
 addf hm2_7i96s.0.read          servo-thread
+addf and2.estop-chain               servo-thread   # right after the read: E-stop input first
 # Jog routing must run between hm2 read and motion-controller so the joints see
 # this cycle's MPG counts and the current jog-enable gate.
 addf mux-gen.00                     servo-thread
@@ -204,10 +205,19 @@ net spindle-at-speed near-spindle.out        => spindle.0.at-speed
 # ============================================================================
 # 8. E-Stop (7i96s TB3 P5 → gpio.004)
 # ============================================================================
-# iov2 estop loop — user-enable-out goes HIGH after RESET command clears aux.estop.
-# When hardware E-stop button is wired, add a second input to the net:
-#   net estop-loop  iocontrol.0.user-enable-out  hm2_7i96s.0.gpio.004.in  =>  iocontrol.0.emc-enable-in
-net estop-loop  iocontrol.0.user-enable-out  =>  iocontrol.0.emc-enable-in
+# Hardware E-stop: normally-closed button on TB3 P5 (24V+ -> NC contact -> P5).
+#   gpio.004.in TRUE  = released (safe),  FALSE = pressed OR wire broken (fail-safe).
+#   Verified live 2026-11-10: three press/release cycles, only gpio.004 changed,
+#   clean transitions at 50 ms polling.
+# emc-enable-in = user-enable-out AND button. iov2 raises user-enable-out after
+# a RESET command clears aux.estop; the button can only take enable away.
+# Pressing the button drops LinuxCNC into ESTOP; releasing it does NOT re-arm -
+# the operator must press Reset (and the button must be released for Reset to
+# hold). A HAL net has exactly one driver, so the button cannot simply be added
+# to the old estop-loop net (both pins are outputs) - hence the and2.
+net estop-user-enable  iocontrol.0.user-enable-out  =>  and2.estop-chain.in0
+net estop-button-ok    hm2_7i96s.0.gpio.004.in      =>  and2.estop-chain.in1
+net estop-loop         and2.estop-chain.out         =>  iocontrol.0.emc-enable-in
 
 # ============================================================================
 # 9. Jog Buttons — velocity mode (7i96s TB3 P6–P9)
