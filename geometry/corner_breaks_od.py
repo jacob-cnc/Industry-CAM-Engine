@@ -50,7 +50,9 @@ class VertexReport:
     x_dia: float
     break_type: str              # "chamfer" | "fillet"
     requested: float             # chamfer leg or fillet radius
-    status: str                  # "ok" | "trimmed" | "unvalidated" | "skipped"
+    # "ok" | "trimmed" (NX-style, may leave a kink) | "smoothed" (rolled onto
+    # / adjusted for a neighbour, tangent) | "unvalidated" | "skipped"
+    status: str
     message: str = ""
     kink_deg: float = 0.0        # direction change left at a cut-short end
     corner: str = ""             # "convex" | "concave" | "" (OD material side)
@@ -84,6 +86,14 @@ class OdCornerResult:
     @property
     def trims(self) -> List[VertexReport]:
         return [r for r in self.reports if r.status == "trimmed"]
+
+    @property
+    def smoothable(self) -> List[VertexReport]:
+        """NX-style cut-short fillets that 'smooth' could roll onto their
+        earlier neighbour (point indices = vertex - 1)."""
+        return [r for r in self.reports if r.status == "trimmed"
+                and r.break_type == "fillet" and r.kink_deg > 0
+                and "Smoothing" not in r.message]
 
 
 # ----------------------------------------------------------------------
@@ -272,18 +282,58 @@ def build_od_corner_coords(profile: ClosedProfile) -> OdCornerResult:
                 arriving = u_in
                 if consumed_from_start[i] > EPS and break_end_dir[i] is not None:
                     arriving = break_end_dir[i]
-                center, t_out, kink = _cliff_fillet(anchor, c, u_out, size, center,
-                                                    incoming_dir=arriving)
-                t_in = anchor
-                rep.status = "trimmed"
-                rep.kink_deg = kink
-                rep.message = (
-                    f"{rep.label}: fillet R{_fmt(size)} cut short. The segment into "
-                    f"{rep.label} had {_fmt(room_in)} left"
-                    + (f" after the V{i} break" if consumed_from_start[i] > EPS else "")
-                    + f" (needs {_fmt(t)}). The arc keeps R{_fmt(size)} and its "
-                    f"tangency to the next segment, and ends at that break with a "
-                    f"{kink:.1f}° direction change.")
+                rolled = None
+                smooth_note = ""
+                if getattr(cb, "trim", "nx") == "smooth":
+                    prev_g = geometry.get(i - 1)
+                    if consumed_from_start[i] > EPS and prev_g is not None:
+                        rolled = _roll_onto(prev_g, c, u_out, size, center, room_out)
+                        if rolled is None:
+                            smooth_note = (" Smoothing was not possible here (no tangent "
+                                           "fit on the earlier break), so it was cut short.")
+                    else:
+                        smooth_note = (" Smoothing needs an earlier break to roll onto; "
+                                       "there is none, so it was cut short.")
+                if rolled is not None:
+                    t_in, t_out, center, prev_new_end = rolled
+                    prev_g = geometry[i - 1]
+                    old_len = _break_length(prev_g)
+                    prev_g.t_out = prev_new_end
+                    pt_in, pel = plan[i - 1]
+                    pel["x_radius"], pel["z"] = prev_new_end
+                    if prev_g.kind == "fillet":
+                        pel["radius"] = _signed_arc_radius(prev_g.t_in, prev_new_end,
+                                                           prev_g.center, prev_g.radius)
+                    prev_rep = next((r for r in reports if r.vertex == i), None)
+                    if prev_rep is not None:
+                        new_len = _break_length(prev_g)
+                        verb = "lengthened" if new_len > old_len + 1e-9 else "shortened"
+                        prev_rep.status = "smoothed"
+                        prev_rep.message = (
+                            f"{prev_rep.label}: {prev_g.kind} {verb} from "
+                            f"{_fmt(old_len)} to {_fmt(new_len)} long (along its own "
+                            f"line/arc) so the smoothed {rep.label} fillet meets it "
+                            f"tangentially.")
+                    rep.status = "smoothed"
+                    rep.kink_deg = 0.0
+                    rep.message = (
+                        f"{rep.label}: fillet R{_fmt(size)} smoothed. The segment into "
+                        f"{rep.label} had {_fmt(room_in)} left after the V{i} break (needs "
+                        f"{_fmt(t)}), so the fillet keeps R{_fmt(size)} and rolls onto the "
+                        f"V{i} {prev_g.kind}: tangent to it, no kink.")
+                else:
+                    center, t_out, kink = _cliff_fillet(anchor, c, u_out, size, center,
+                                                        incoming_dir=arriving)
+                    t_in = anchor
+                    rep.status = "trimmed"
+                    rep.kink_deg = kink
+                    rep.message = (
+                        f"{rep.label}: fillet R{_fmt(size)} cut short. The segment into "
+                        f"{rep.label} had {_fmt(room_in)} left"
+                        + (f" after the V{i} break" if consumed_from_start[i] > EPS else "")
+                        + f" (needs {_fmt(t)}). The arc keeps R{_fmt(size)} and its "
+                        f"tangency to the next segment, and ends at that break with a "
+                        f"{kink:.1f}° direction change." + smooth_note)
             elif t > room_out + EPS and t <= room_in + EPS:
                 anchor = _add(c, _mul(u_out, room_out))
                 center, t_in, kink = _cliff_fillet(anchor, c, _mul(u_in, -1.0), size,
@@ -342,6 +392,118 @@ def build_od_corner_coords(profile: ClosedProfile) -> OdCornerResult:
                            "quadrant": seg.quadrant,
                            "quadrant_sign": seg.quadrant_sign})
     return OdCornerResult(coords, reports, geometry)
+
+
+def _break_length(g: "VertexGeometry") -> float:
+    """Length of a break element (chamfer chord or fillet arc)."""
+    if g.kind == "fillet" and g.center is not None:
+        a = _unit(_sub(g.t_in, g.center))
+        b = _unit(_sub(g.t_out, g.center))
+        return g.radius * math.radians(_angle_between(a, b))
+    return _len(_sub(g.t_out, g.t_in))
+
+
+def _on_minor_arc(p, g, tol=1e-9) -> bool:
+    """Is p on the minor arc of fillet g (between g.t_in and g.t_out)?"""
+    a = _unit(_sub(g.t_in, g.center))
+    b = _unit(_sub(g.t_out, g.center))
+    q = _unit(_sub(p, g.center))
+    full = _angle_between(a, b)
+    return abs(_angle_between(a, q) + _angle_between(q, b) - full) < 1e-6 \
+        and _angle_between(a, q) > 1e-7
+
+
+def _roll_onto(prev_g, corner, u_out, radius, nominal_center, room_out):
+    """'Smooth' trim: a fillet of `radius` tangent to the outgoing line
+    (through `corner` along `u_out`) AND tangent to the earlier break
+    `prev_g` (chamfer line or fillet arc), instead of ending at its end.
+
+    Returns (start on the earlier break, end on the outgoing line, centre,
+    new end of the earlier break) or None when no valid tangent fit exists:
+    the touch point must lie on the earlier break itself, the end point on
+    the outgoing segment's room, and the joint must be truly tangent.
+    """
+    normal = (-u_out[1], u_out[0])
+    if _dot(_sub(nominal_center, corner), normal) < 0:
+        normal = _mul(normal, -1.0)
+    base = _add(corner, _mul(normal, radius))      # centre line: base + s*u_out
+
+    def end_ok(t_out):
+        along = _dot(_sub(t_out, corner), u_out)
+        return -1e-9 <= along <= room_out + 1e-9
+
+    candidates = []
+    if prev_g.kind == "chamfer":
+        d = _unit(_sub(prev_g.t_out, prev_g.t_in))
+        n_d = (-d[1], d[0])
+        # Centre is `radius` from the chamfer line, on the nominal side.
+        for sgn in (1.0, -1.0):
+            off = _add(prev_g.t_in, _mul(n_d, sgn * radius))
+            # base + s*u_out lies on the line off + k*d
+            den = _cross(u_out, d)
+            if abs(den) < 1e-12:
+                continue
+            s = _cross(_sub(off, base), d) / den
+            center = _add(base, _mul(u_out, s))
+            touch = _sub(center, _mul(n_d, sgn * radius))
+            k = _dot(_sub(touch, prev_g.t_in), d)
+            # The touch point may be on the chamfer (it is shortened) or on
+            # its extension through the leftover segment room (it is
+            # lengthened, along its own line): both stay one straight line.
+            if k <= 1e-9:
+                continue
+            t_out = _sub(center, _mul(normal, radius))
+            if end_ok(t_out):
+                candidates.append((touch, t_out, center, touch))
+    elif prev_g.kind == "fillet" and prev_g.center is not None:
+        c2, r2 = prev_g.center, prev_g.radius
+        for dist in (radius + r2, abs(radius - r2)):
+            if dist < 1e-9:
+                continue
+            dd = _sub(base, c2)
+            bq = 2.0 * _dot(dd, u_out)
+            cq = _dot(dd, dd) - dist * dist
+            disc = bq * bq - 4.0 * cq
+            if disc < 0:
+                continue
+            for s in ((-bq + math.sqrt(disc)) / 2.0, (-bq - math.sqrt(disc)) / 2.0):
+                center = _add(base, _mul(u_out, s))
+                for touch in (_add(c2, _mul(_unit(_sub(center, c2)), r2)),
+                              _sub(c2, _mul(_unit(_sub(center, c2)), r2))):
+                    if abs(_len(_sub(touch, center)) - radius) > 1e-7:
+                        continue
+                    if not _on_minor_arc(touch, prev_g):
+                        continue
+                    t_out = _sub(center, _mul(normal, radius))
+                    if end_ok(t_out):
+                        candidates.append((touch, t_out, center, touch))
+    # Tangency in the direction of travel at the joint.
+    good = []
+    for touch, t_out, center, new_end in candidates:
+        prev_dir = _prev_end_dir(prev_g, touch)
+        rad = _unit(_sub(touch, center))
+        arc_dir = (-rad[1], rad[0])
+        if _dot(arc_dir, _sub(t_out, touch)) < 0:
+            arc_dir = _mul(arc_dir, -1.0)
+        if _angle_between(prev_dir, arc_dir) < 1e-4:
+            good.append((touch, t_out, center, new_end))
+    if not good:
+        return None
+    return min(good, key=lambda g: _len(_sub(g[2], nominal_center)))
+
+
+def _prev_end_dir(prev_g, at):
+    """Travel direction of the earlier break element at point `at`."""
+    if prev_g.kind == "chamfer":
+        return _unit(_sub(prev_g.t_out, prev_g.t_in))
+    rad = _unit(_sub(at, prev_g.center))
+    d = (-rad[1], rad[0])
+    # Orient along the arc's travel (from t_in toward t_out).
+    rad_in = _unit(_sub(prev_g.t_in, prev_g.center))
+    turn = _cross(rad_in, _unit(_sub(prev_g.t_out, prev_g.center)))
+    if (turn > 0) != (_cross(rad, d) > 0):
+        d = _mul(d, -1.0)
+    return d
 
 
 def od_vertex_kinds(profile: ClosedProfile) -> dict:

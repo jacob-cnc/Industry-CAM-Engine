@@ -217,6 +217,7 @@ def profile_from_fields(segments: List[dict], mode: str, corner_breaks=None) -> 
                     radius=cb.get("radius", 0.0),
                     size=cb.get("size", 0.0),
                     angle=cb.get("angle", 45.0),
+                    trim=cb.get("trim", "nx"),
                 ))
     else:
         # Default: no corner breaks

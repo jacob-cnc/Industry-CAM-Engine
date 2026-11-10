@@ -88,8 +88,9 @@ def build_zones(
     # Positive offset expands the face outward in all directions
     offset_amount = fin_allowance_radius
 
-    from build123d import offset as b3d_offset, Kind
-    keep_zone_face = b3d_offset(finished_part_face, amount=offset_amount, kind=Kind.INTERSECTION)
+    from geometry.kernel_offset import offset_face
+    keep_zone_face = offset_face(finished_part_face, offset_amount,
+                                 what="finished part (finish allowance band)")
 
     # Clip the keep zone to stock boundaries (offset may extend beyond Z_end or below X=0)
     # Build a clipping rectangle matching the stock extent

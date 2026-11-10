@@ -901,8 +901,14 @@ class ProgramTab(QWidget):
         self._segment_list.corner_breaks_changed.connect(lambda *_: self._on_segments_changed(self.get_segments()))
         self._segment_list.selection_changed.connect(self._on_segment_selection_changed)
 
-        # Corner-break tool
+        # Corner-break tool (Esc anywhere on the Program tab leaves it)
         self._btn_cb_tool.toggled.connect(self._on_cb_tool_toggled)
+        from PyQt5.QtWidgets import QShortcut
+        from PyQt5.QtGui import QKeySequence
+        self._cb_esc = QShortcut(QKeySequence(Qt.Key_Escape), self)
+        self._cb_esc.setContext(Qt.WidgetWithChildrenShortcut)
+        self._cb_esc.activated.connect(
+            lambda: self._btn_cb_tool.setChecked(False) if self._btn_cb_tool.isChecked() else None)
         self._cb_panel.selection_changed.connect(self._on_cb_panel_selection)
         self._cb_panel.apply_requested.connect(self._on_cb_apply)
         self._cb_panel.remove_requested.connect(self._on_cb_remove)
@@ -1947,7 +1953,12 @@ class ProgramTab(QWidget):
                          "badge": badge, "status": status, "message": msg})
         self._cb_panel.set_vertices(rows)
 
+    CB_TOOL_LABEL_OFF = "Corner Breaks"
+    CB_TOOL_LABEL_ON = "Done - Back to Segment Builder  (Esc)"
+
     def _on_cb_tool_toggled(self, on: bool):
+        # The same button leaves the tool: say so while it is on.
+        self._btn_cb_tool.setText(self.CB_TOOL_LABEL_ON if on else self.CB_TOOL_LABEL_OFF)
         self._segment_list.setVisible(not on)
         self._cb_panel.setVisible(on)
         if not on:
@@ -1968,15 +1979,43 @@ class ProgramTab(QWidget):
         before_status = {r.vertex - 1: r.status for r in (before.reports if before else [])}
         self._segment_list.set_vertex_breaks(new_breaks)
         after = self._od_corner_result(segs, new_breaks)
-        notes = []
-        for rep in (after.reports if after else []):
-            i = rep.vertex - 1
-            if rep.status == "ok":
-                continue
-            if i in touched or before_status.get(i) != rep.status:
-                notes.append(rep.message)
+
+        def notes_for(result):
+            out = []
+            for rep in (result.reports if result else []):
+                i = rep.vertex - 1
+                if rep.status != "ok" and (i in touched or before_status.get(i) != rep.status):
+                    out.append(rep)
+            return out
+
+        notes = notes_for(after)
+        # NX-style is the default. If fillets were cut short (leaving a kink),
+        # offer to smooth them: roll each onto its earlier neighbour.
+        smoothable = [r for r in (after.smoothable if after else []) if r in notes]
+        if smoothable:
+            listing = "\n\n".join(r.message for r in notes)
+            answer = QMessageBox.question(
+                self, "Corner breaks trimmed",
+                f"{listing}\n\nSmooth the trimmed fillet"
+                f"{'s' if len(smoothable) > 1 else ''} "
+                f"({', '.join(r.label for r in smoothable)})?\n\n"
+                "Yes: the fillet keeps its radius and rolls onto the earlier break "
+                "(tangent, no kink; the earlier break is shortened or extended).\n"
+                "No: keep it cut short (NX style).",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if answer == QMessageBox.Yes:
+                breaks = self._segment_list.get_corner_breaks()
+                for r in smoothable:
+                    if breaks[r.vertex - 1]:
+                        breaks[r.vertex - 1]["trim"] = "smooth"
+                self._segment_list.set_vertex_breaks(breaks)
+                result = self._od_corner_result(segs, breaks)
+                QMessageBox.information(self, "Corner breaks smoothed",
+                                        "\n\n".join(r.message for r in notes_for(result)))
+            return
         if notes:
-            QMessageBox.information(self, "Corner breaks adjusted", "\n\n".join(notes))
+            QMessageBox.information(self, "Corner breaks adjusted",
+                                    "\n\n".join(r.message for r in notes))
 
     def _on_cb_apply(self, kind: str, size: float):
         idx = [i for i in self._cb_selected]

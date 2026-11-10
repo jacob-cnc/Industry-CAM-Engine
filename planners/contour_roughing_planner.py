@@ -128,8 +128,9 @@ class ContourRoughingPlanner:
 
     def _do_offset(self, face, dist):
         """Offset face outward by dist. Returns OCP face or None."""
+        from geometry.kernel_offset import offset_face
         try:
-            r = b3d_offset(face, amount=dist, kind=Kind.INTERSECTION)
+            r = offset_face(face, dist, what="contour roughing pass")
             fs = r.faces() if hasattr(r, 'faces') else []
             return fs[0].wrapped if fs else None
         except Exception:

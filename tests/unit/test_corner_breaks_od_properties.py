@@ -205,3 +205,79 @@ def test_chamfers_run_through_full_pipeline(size):
                   FinishingParams(passes=1, doc_dia=0.002, feed=0.003))
     assert res.plan_result is not None, [v.message for v in res.validations]
     assert "G0" in GCodeWriter().write(res.plan_result, unit_mode="inch")
+
+
+# ----------------------------------------------------------------------
+# Smooth trim (roll onto the earlier neighbour)
+# ----------------------------------------------------------------------
+
+def _joint_kinks(els):
+    return [math.degrees(_angle(_tangent_dir(a, False), _tangent_dir(b, True)))
+            for a, b in zip(els, els[1:])]
+
+
+def test_smooth_rolls_fillet_onto_fillet_tangentially():
+    """Owner's snapshot: V2 R.0625 concave + V3 R.25 convex on a 0.25 step."""
+    pts = [(0.5, 0.0), (0.5, -0.5), (1.0, -0.5), (1.0, -1.0)]
+    for trim, expect_kink in (("nx", True), ("smooth", False)):
+        breaks = [None, CornerBreak(CornerBreakType.FILLET, radius=0.0625),
+                  CornerBreak(CornerBreakType.FILLET, radius=0.25, trim=trim)]
+        res = build_od_corner_coords(_profile(pts, breaks))
+        els = _walk(pts, res)
+        arcs = [e for e in els if e[0] == "arc"]
+        assert sorted(round(abs(a[3]), 9) for a in arcs) == [0.0625, 0.25]   # radii kept
+        i = els.index(arcs[0])
+        kink = _joint_kinks(els)[i]                       # V2 arc -> V3 arc
+        assert (kink > 1.0) == expect_kink
+        if trim == "smooth":
+            assert kink < 1e-4
+            assert [r.status for r in res.reports] == ["smoothed", "smoothed"]
+
+
+def test_smooth_extends_chamfer_on_nx_part_v9():
+    pts = [(6, 0), (6, -6), (12, -6), (12, -12), (6, -12), (6, -18), (15, -18),
+           (15, -21), (12, -21), (12, -27), (18, -27), (18, -33)]
+    C1 = CornerBreak(CornerBreakType.CHAMFER, size=1.0)
+    R = lambda r, t="nx": CornerBreak(CornerBreakType.FILLET, radius=r, trim=t)
+    res = build_od_corner_coords(_profile(pts, [C1, C1, R(1), R(1), R(1), R(1), C1, C1,
+                                                R(1, "smooth"), R(3), None]))
+    g8, g9 = res.geometry[7], res.geometry[8]
+    # Hand result: R1 tangent to the chamfer line r = z + 13.75 (radius units:
+    # chamfer from (r 7.5, z -20) at 45°) and to r = 6 -> centre (r 7, z -21.9142).
+    assert g9.radius == pytest.approx(1.0)
+    assert g9.center == pytest.approx((7.0, -20.5 - math.sqrt(2)), abs=1e-9)
+    assert math.dist(g8.t_out, g9.t_in) < 1e-12               # chamfer meets fillet
+    by_v = {r.vertex: r for r in res.reports}
+    assert by_v[8].status == by_v[9].status == "smoothed"
+    assert "lengthened" in by_v[8].message
+
+
+@pytest.mark.parametrize("seed", range(150))
+def test_smooth_random_profiles_have_no_kink_where_smoothed(seed):
+    """Every smoothed fillet keeps its radius and joins its neighbour
+    tangentially; where smoothing is impossible it falls back to NX style
+    and says so."""
+    rng = random.Random(1000 + seed)
+    pts = _random_step_profile(rng)
+    breaks = []
+    for _ in range(len(pts) - 1):
+        r = rng.random()
+        if r < 0.45:
+            breaks.append(CornerBreak(CornerBreakType.FILLET, radius=rng.uniform(0.02, 0.15),
+                                      trim="smooth"))
+        elif r < 0.75:
+            breaks.append(CornerBreak(CornerBreakType.CHAMFER, size=rng.uniform(0.02, 0.12)))
+        else:
+            breaks.append(None)
+    res = build_od_corner_coords(_profile(pts, breaks))
+    els = _walk(pts, res)
+    kinks = _joint_kinks(els)
+    for rep in res.reports:
+        g = res.geometry.get(rep.vertex - 1)
+        if rep.status == "smoothed" and rep.break_type == "fillet" and g is not None:
+            assert g.radius == pytest.approx(rep.requested, abs=1e-9)
+            idx = next(k for k, e in enumerate(els)
+                       if e[0] == "arc" and math.dist(e[1], g.t_in) < 1e-9)
+            assert kinks[idx - 1] < 1e-3                   # tangent to the neighbour
+        if rep.status == "trimmed" and rep.break_type == "fillet" and rep.kink_deg > 0:
+            assert "Smoothing" in rep.message or "after the V" not in rep.message

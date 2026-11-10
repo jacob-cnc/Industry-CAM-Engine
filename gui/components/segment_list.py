@@ -666,8 +666,10 @@ class SegmentListWidget(QWidget):
                 badge = self.break_badge(self._vertex_breaks[row])
                 status, message = self._vertex_notes.get(row, ("ok", ""))
                 if badge:
-                    if status != "ok":
-                        badge += "!"
+                    if status == "smoothed":
+                        badge += "~"              # adjusted, tangent (no kink)
+                    elif status != "ok":
+                        badge += "!"              # trimmed with a kink / skipped
                     label += "\n" + badge
                     tip = f"V{row + 1}: {badge}" + (f"\n{message}" if message else "")
             item = self._table.verticalHeaderItem(row) or QTableWidgetItem()

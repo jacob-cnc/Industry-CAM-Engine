@@ -386,8 +386,12 @@ def _assemble_moves(passes: List[TurningPass], transitions: list) -> List[ToolMo
     for move in all_moves[1:]:
         prev = filtered[-1]
         if abs(move.x - prev.x) < TOLERANCE and abs(move.z - prev.z) < TOLERANCE:
-            # Zero-length — skip unless it's an arc or dwell (both are intentionally stationary)
-            if move.move_type not in (MoveType.ARC_CW, MoveType.ARC_CCW, MoveType.DWELL):
+            # Zero-length — skip unless it's a dwell (intentionally stationary).
+            # Arcs below tolerance are dropped too: a turned profile never
+            # contains a full circle, and sub-tolerance arcs are kernel noise
+            # (e.g. the rounded join a fallback offset puts at a corner-break
+            # kink), which would otherwise fail pre-output validation.
+            if move.move_type != MoveType.DWELL:
                 continue
         filtered.append(move)
 

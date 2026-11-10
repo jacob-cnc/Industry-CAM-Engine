@@ -45,6 +45,12 @@ class CornerBreak:
     radius: float = 0.0       # Fillet radius (inches). Used when type=FILLET.
     size: float = 0.0         # Chamfer size (inches along each segment). Used when type=CHAMFER.
     angle: float = 45.0       # Chamfer angle (degrees). Used when type=CHAMFER.
+    # How a fillet that does not fit beside an earlier break is trimmed:
+    # "nx" (default) - cut short at the earlier break's end, leaving a kink
+    #                  (matches the NX reference part);
+    # "smooth"       - roll onto the earlier break: stay tangent to it and
+    #                  shorten it, no kink. Falls back to "nx" if impossible.
+    trim: str = "nx"
 
 
 @dataclass(frozen=True)

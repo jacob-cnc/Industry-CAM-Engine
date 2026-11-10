@@ -28,6 +28,7 @@ COLUMNS = ["V", "Z", "Ø", "Corner", "Break", "Status"]
 STATUS_COLORS = {
     "ok": COLORS["text_primary"],
     "trimmed": COLORS["status_warning"],
+    "smoothed": COLORS["status_info"],
     "skipped": COLORS["status_error"],
     "unvalidated": COLORS["text_disabled"],
 }

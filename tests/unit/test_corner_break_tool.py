@@ -47,12 +47,21 @@ def test_tie_then_selected_then_chooser():
 # Program tab integration
 # ----------------------------------------------------------------------
 
-def _program_window(monkeypatch):
+def _program_window(monkeypatch, smooth_answer=None):
+    """smooth_answer: QMessageBox.Yes / .No for the 'smooth?' prompt
+    (default No = keep NX style). Prompt texts are recorded too."""
     from PyQt5.QtWidgets import QMessageBox
     from gui.main_window import MainWindow
     popups = []
+    answer = QMessageBox.No if smooth_answer is None else smooth_answer
+
+    def question(parent, title, text, *args, **kwargs):
+        popups.append(text)
+        return answer
+
     monkeypatch.setattr(QMessageBox, "information",
                         staticmethod(lambda parent, title, text: popups.append(text)))
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(question))
     w = MainWindow()
     w.resize(1918, 1034)
     w.show()
@@ -156,5 +165,54 @@ def test_preview_draws_engine_geometry(monkeypatch):
                     for g in geo.values() for p in (g.t_in, g.t_out))
         assert worst < 1e-9
         assert math.dist(drawn[0], geo[0].t_in) < 1e-9       # starts at V1's chamfer
+    finally:
+        _close(w)
+
+
+def test_tool_button_says_how_to_leave_and_esc_leaves(monkeypatch):
+    w, pt, _ = _program_window(monkeypatch)
+    try:
+        pt._btn_cb_tool.click()
+        _app.processEvents()
+        assert "Back to Segment Builder" in pt._btn_cb_tool.text()
+        pt._cb_esc.activated.emit()                        # Esc
+        _app.processEvents()
+        assert not pt._btn_cb_tool.isChecked()
+        assert pt._btn_cb_tool.text() == "Corner Breaks"
+        assert pt._segment_list.isVisible() and not pt._cb_panel.isVisible()
+    finally:
+        _close(w)
+
+
+def test_trim_prompt_no_keeps_nx_style(monkeypatch):
+    w, pt, popups = _program_window(monkeypatch)            # answers No
+    try:
+        pt._btn_cb_tool.click()
+        _apply(pt, [8], "chamfer", 0.1)
+        _apply(pt, [9], "fillet", 0.1)
+        assert len(popups) == 1 and "Smooth the trimmed fillet (V9)?" in popups[0]
+        breaks = pt._segment_list.get_corner_breaks()
+        assert breaks[8].get("trim", "nx") == "nx"
+        assert pt._cb_panel._table.item(8, 5).text() == "trimmed"
+    finally:
+        _close(w)
+
+
+def test_trim_prompt_yes_smooths(monkeypatch):
+    from PyQt5.QtWidgets import QMessageBox
+    w, pt, popups = _program_window(monkeypatch, smooth_answer=QMessageBox.Yes)
+    try:
+        pt._btn_cb_tool.click()
+        _apply(pt, [8], "chamfer", 0.1)
+        _apply(pt, [9], "fillet", 0.1)
+        assert len(popups) == 2                             # question + result
+        assert "rolls onto the V8 chamfer" in popups[1]
+        breaks = pt._segment_list.get_corner_breaks()
+        assert breaks[8]["trim"] == "smooth"
+        t = pt._cb_panel._table
+        assert t.item(7, 5).text() == "smoothed" and t.item(8, 5).text() == "smoothed"
+        pt._btn_cb_tool.click()
+        hdr = pt._segment_list._table.verticalHeaderItem
+        assert hdr(8).text().endswith("R.1~") and hdr(7).text().endswith("C.1~")
     finally:
         _close(w)
