@@ -15,6 +15,7 @@ import re
 from typing import List, Optional
 
 from models.moves import ToolMove, MoveType, PassType
+from outputs.gcode_dialect import arc_type_for_gcode, center_i_from_i_word
 
 
 def parse(gcode_text: str) -> List[ToolMove]:
@@ -63,10 +64,9 @@ def parse(gcode_text: str) -> List[ToolMove]:
                 current_mode = MoveType.RAPID
             elif g_int == 1:
                 current_mode = MoveType.FEED
-            elif g_int == 2:
-                current_mode = MoveType.ARC_CW
-            elif g_int == 3:
-                current_mode = MoveType.ARC_CCW
+            elif g_int in (2, 3):
+                # LinuxCNC G2/G3 -> internal arc type (outputs/gcode_dialect.py)
+                current_mode = arc_type_for_gcode(g_int)
             # Other G-codes (G20, G40, G41, G42, G90, etc.) — skip, not motion
 
         # Extract axis words
@@ -101,7 +101,7 @@ def parse(gcode_text: str) -> List[ToolMove]:
 
             if current_mode in (MoveType.ARC_CW, MoveType.ARC_CCW):
                 if i_val is not None:
-                    center_i = i_val
+                    center_i = center_i_from_i_word(i_val)   # I is a radius offset
                 if k_val is not None:
                     center_k = k_val
                 if r_val is not None:

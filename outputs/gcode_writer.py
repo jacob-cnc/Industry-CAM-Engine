@@ -667,11 +667,15 @@ class GCodeWriter:
         """Emit G02/G03 — always shows both X and Z."""
         fmt = self._fmt
         conv = self._conv
-        g_code = "G02" if move.move_type == MoveType.ARC_CW else "G03"
+        # Internal arc -> LinuxCNC G-code: see outputs/gcode_dialect.py
+        # (direction word swapped, I written as a RADIUS offset).
+        from outputs.gcode_dialect import gcode_for_arc, i_word_from_center_i
+        g_code = gcode_for_arc(move.move_type)
         parts = f"{g_code} X{move.x * conv:{fmt}} Z{move.z * conv:{fmt}}"
 
         if self._arc_format == "ijk":
-            parts += f" I{move.center_i * conv:{fmt}} K{move.center_k * conv:{fmt}}"
+            i_word = i_word_from_center_i(move.center_i)
+            parts += f" I{i_word * conv:{fmt}} K{move.center_k * conv:{fmt}}"
         else:
             parts += f" R{abs(move.radius) * conv:{fmt}}"
 

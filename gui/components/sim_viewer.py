@@ -135,15 +135,18 @@ def parse_gcode_for_sim(gcode_text: str) -> List[SimMove]:
 
         if modal_motion == "G00": move_type = "rapid"
         elif modal_motion == "G01": move_type = "feed"
-        elif modal_motion == "G02": move_type = "arc_cw"
-        elif modal_motion == "G03": move_type = "arc_ccw"
+        # LinuxCNC G02/G03 -> internal arc type (outputs/gcode_dialect.py):
+        # G02 is the internal ARC_CCW, G03 the internal ARC_CW.
+        elif modal_motion == "G02": move_type = "arc_ccw"
+        elif modal_motion == "G03": move_type = "arc_cw"
         else: move_type = "feed"
 
         moves.append(SimMove(
             move_type=move_type, start_x=x, start_z=z,
             end_x=end_x, end_z=end_z, line_idx=line_idx,
             feed_rate=feed,
-            center_i=new_i if new_i is not None else 0.0,
+            # I is a radius offset in LinuxCNC; SimMove.center_i is diameter.
+            center_i=new_i * 2.0 if new_i is not None else 0.0,
             center_k=new_k if new_k is not None else 0.0,
         ))
         x = end_x
@@ -757,7 +760,9 @@ class SimViewerWidget(QWidget):
                     angle_end = math.atan2(ez - cz, ex_r - cx_r)
                     diff = angle_end - angle_start
 
-                    # Pure G-code interpretation: G02/G03 determines sweep direction.
+                    # Sweep from the INTERNAL arc type (the parser maps LinuxCNC
+                    # G02/G03 onto it, see outputs/gcode_dialect.py). Labels below
+                    # are the historical internal names, not the G-code word.
                     # In G18 (ZX plane), G02 = CW viewed from +Y = negative angular
                     # sweep in our display coords (X-radius right, Z up).
                     # G03 = CCW = positive angular sweep.
