@@ -135,15 +135,18 @@ def parse_gcode_for_sim(gcode_text: str) -> List[SimMove]:
 
         if modal_motion == "G00": move_type = "rapid"
         elif modal_motion == "G01": move_type = "feed"
-        elif modal_motion == "G02": move_type = "arc_cw"
-        elif modal_motion == "G03": move_type = "arc_ccw"
+        # LinuxCNC G02/G03 -> internal arc type (outputs/gcode_dialect.py):
+        # G02 is the internal ARC_CCW, G03 the internal ARC_CW.
+        elif modal_motion == "G02": move_type = "arc_ccw"
+        elif modal_motion == "G03": move_type = "arc_cw"
         else: move_type = "feed"
 
         moves.append(SimMove(
             move_type=move_type, start_x=x, start_z=z,
             end_x=end_x, end_z=end_z, line_idx=line_idx,
             feed_rate=feed,
-            center_i=new_i if new_i is not None else 0.0,
+            # I is a radius offset in LinuxCNC; SimMove.center_i is diameter.
+            center_i=new_i * 2.0 if new_i is not None else 0.0,
             center_k=new_k if new_k is not None else 0.0,
         ))
         x = end_x
@@ -339,6 +342,11 @@ class SimViewerWidget(QWidget):
 
     sim_line_changed = pyqtSignal(int)
     editor_toggle_requested = pyqtSignal()
+    playing_changed = pyqtSignal(bool)   # True when playback starts, False when it stops
+
+    # Path steps advanced per 16 ms frame for each speed label. Halved
+    # 2026-11-10 (owner): "1x" now runs at the former 0.5x rate, etc.
+    SPEED_STEPS = {"0.25x": 0.5, "0.5x": 1.0, "1x": 2.0, "2x": 4.0, "5x": 8.0, "10x": 16.0}
 
     def __init__(self, parent=None, show_gcode_panel: bool = True):
         super().__init__(parent)
@@ -348,7 +356,8 @@ class SimViewerWidget(QWidget):
         self._sim_timer = QTimer(self)
         self._sim_timer.timeout.connect(self._sim_advance)
         self._sim_speed = 16  # ms per frame (~60fps)
-        self._steps_per_tick = 4  # default 1x
+        self._steps_per_tick = self.SPEED_STEPS["1x"]  # may be fractional
+        self._step_accum = 0.0                          # carries fractional steps
 
         self._path: List[tuple] = []
         self._path_len = 0
@@ -751,7 +760,9 @@ class SimViewerWidget(QWidget):
                     angle_end = math.atan2(ez - cz, ex_r - cx_r)
                     diff = angle_end - angle_start
 
-                    # Pure G-code interpretation: G02/G03 determines sweep direction.
+                    # Sweep from the INTERNAL arc type (the parser maps LinuxCNC
+                    # G02/G03 onto it, see outputs/gcode_dialect.py). Labels below
+                    # are the historical internal names, not the G-code word.
                     # In G18 (ZX plane), G02 = CW viewed from +Y = negative angular
                     # sweep in our display coords (X-radius right, Z up).
                     # G03 = CCW = positive angular sweep.
@@ -794,6 +805,7 @@ class SimViewerWidget(QWidget):
         if self._sim_timer.isActive():
             self._sim_timer.stop()
             self._btn_play.setText("Play")
+            self.playing_changed.emit(False)
         else:
             # If already at the end, auto-reset to beginning before playing
             if self._sim_step >= self._path_len - 1:
@@ -801,12 +813,17 @@ class SimViewerWidget(QWidget):
                 self._graph.hide_all_toolpath()
                 if self._material_enabled:
                     self._graph.set_material_to_stock()
+            self._step_accum = 0.0
             self._sim_timer.start(self._sim_speed)
             self._btn_play.setText("Pause")
+            self.playing_changed.emit(True)
 
     def _sim_stop(self):
+        was_playing = self._sim_timer.isActive()
         self._sim_timer.stop()
         self._btn_play.setText("Play")
+        if was_playing:
+            self.playing_changed.emit(False)
         self._sim_step = 0
         self._graph.hide_all_toolpath()
         self._emit_line()
@@ -839,8 +856,11 @@ class SimViewerWidget(QWidget):
             self._update_display()
 
     def _sim_show_all(self):
+        was_playing = self._sim_timer.isActive()
         self._sim_timer.stop()
         self._btn_play.setText("Play")
+        if was_playing:
+            self.playing_changed.emit(False)
         self._sim_step = self._path_len - 1
         self._graph.show_all_toolpath()
         self._emit_line()
@@ -852,14 +872,20 @@ class SimViewerWidget(QWidget):
         if self._sim_step >= self._path_len - 1:
             self._sim_timer.stop()
             self._btn_play.setText("Play")
+            self.playing_changed.emit(False)
             return
-        self._sim_step = min(self._sim_step + self._steps_per_tick, self._path_len - 1)
+        # Fractional speeds (0.25x = half a step per frame) accumulate.
+        self._step_accum += self._steps_per_tick
+        whole = int(self._step_accum)
+        if whole < 1:
+            return
+        self._step_accum -= whole
+        self._sim_step = min(self._sim_step + whole, self._path_len - 1)
         self._emit_line()
         self._update_display()
 
     def _on_speed(self, text):
-        speed_map = {"0.25x": 1, "0.5x": 2, "1x": 4, "2x": 8, "5x": 16, "10x": 32}
-        self._steps_per_tick = speed_map.get(text, 4)
+        self._steps_per_tick = self.SPEED_STEPS.get(text, self.SPEED_STEPS["1x"])
 
     def _on_slider(self, value):
         if not self._sim_timer.isActive():

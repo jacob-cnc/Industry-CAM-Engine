@@ -413,6 +413,20 @@ class LiveBackend(HALBackend):
     # E-Stop & Power
     # ------------------------------------------------------------------
 
+    def estop(self) -> bool:
+        """Software E-STOP: LinuxCNC task state ESTOP (aborts motion, disables
+        the machine, needs Reset before On). If the command cannot be sent,
+        fall back to machine off so motion still stops."""
+        logger.warning("estop: sending STATE_ESTOP")
+        try:
+            self._cmd.state(linuxcnc.STATE_ESTOP)
+            logger.info("estop: command accepted")
+            return True
+        except linuxcnc.error as e:
+            logger.error("estop: FAILED (%s) - falling back to machine off", e)
+            self.machine_off()
+            return False
+
     def estop_reset(self) -> bool:
         logger.info("estop_reset: sending STATE_ESTOP_RESET")
         try:

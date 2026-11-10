@@ -16,8 +16,8 @@ except ImportError:
 from PyQt5.QtWidgets import (
     QWidget, QHBoxLayout, QLabel, QFrame, QPushButton,
 )
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import QFont  # noqa: F401 — kept for potential future use
+from PyQt5.QtCore import Qt, QEvent, QSize, QTimer, pyqtSignal
+from PyQt5.QtGui import QColor, QFont, QPainter  # noqa: F401 (QFont kept for future use)
 
 from gui.colors import COLORS, FONTS
 from gui.unit_state import unit_state
@@ -30,6 +30,7 @@ _STATE_COLORS = {
     "RUN": COLORS["status_info"],
     "PAUSE": COLORS["status_warning"],
     "ESTOP": COLORS["status_error"],
+    "OFF": COLORS["text_disabled"],
 }
 
 # Task-mode indicator palette — (fill, border, text).
@@ -40,6 +41,42 @@ _MODE_STYLES = {
     "MDI":    (COLORS["graph_threading"],  COLORS["graph_threading"], "#2A1A00"),
     "AUTO":   (COLORS["status_ok"],        COLORS["status_warning"],  "#0A2A1A"),
 }
+
+
+class _StatusDot(QWidget):
+    """Filled machine-state circle with an exact pixel diameter.
+
+    Drawn, not a "●" font glyph: a glyph's size depends on the installed font
+    (it rendered ~8 px here and differs on the lathe), a drawn circle does not.
+    """
+
+    def __init__(self, diameter: int, color: str, parent=None):
+        super().__init__(parent)
+        self._diameter = diameter
+        self._color = QColor(color)
+        self.setFixedWidth(diameter)
+
+    @property
+    def diameter(self) -> int:
+        return self._diameter
+
+    def color(self) -> str:
+        """Current fill colour as '#rrggbb'."""
+        return self._color.name()
+
+    def set_color(self, color: str) -> None:
+        if QColor(color) != self._color:
+            self._color = QColor(color)
+            self.update()
+
+    def paintEvent(self, _event):  # noqa: N802 (Qt naming)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setPen(Qt.NoPen)
+        p.setBrush(self._color)
+        d = self._diameter
+        p.drawEllipse((self.width() - d) // 2, (self.height() - d) // 2, d, d)
+        p.end()
 
 
 class _Separator(QFrame):
@@ -71,6 +108,9 @@ class StatusBar(QWidget):
     machine_on_clicked = pyqtSignal()
     machine_off_clicked = pyqtSignal()
     mode_clicked = pyqtSignal()   # operator asks to return to MANUAL
+
+    MIN_GAP = 8   # px; smallest gap between ribbon items (see _fit_spacing)
+    STATE_DOT_DIAMETER = 28   # px; machine-state circle
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -104,8 +144,17 @@ class StatusBar(QWidget):
         )
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(8)
+        # 5 px top/bottom: the 62 px control buttons centre exactly in the
+        # 72 px ribbon. Readouts are pinned at 56 px below, so they still sit
+        # 8 px from the top and bottom as before.
+        # Left/right margins and the gap between items are fitted to the width
+        # at runtime (_fit_spacing): one equal gap between items AND at both
+        # screen edges, as wide as fits.
+        layout.setContentsMargins(self.MIN_GAP, 5, self.MIN_GAP, 5)
+        layout.setSpacing(self.MIN_GAP)
+        # Equal stretch before the first and after the last item centres the
+        # whole row horizontally (the matching addStretch is at the end).
+        layout.addStretch()
 
         # --- Shared bubble stylesheet ---
         _bubble_ss = (
@@ -135,20 +184,20 @@ class StatusBar(QWidget):
         )
 
         # --- Machine State Indicator ---
-        self._state_dot = QLabel("\u25CF")
-        self._state_dot.setFixedWidth(14)
-        self._state_dot.setAlignment(Qt.AlignCenter)
-        self._state_dot.setStyleSheet(
-            f"color: {_STATE_COLORS['IDLE']}; font-size: 14px; border: none;"
-        )
+        # 28 px circle: the old "●" glyph drew ~8 px; owner asked for +20 px.
+        self._state_dot = _StatusDot(self.STATE_DOT_DIAMETER, _STATE_COLORS["IDLE"])
         layout.addWidget(self._state_dot)
 
+        # Same bubble (fill, 1 px border, 5 px radius) as the readouts, text
+        # centred. Font = the app default in bold, which is what update_state
+        # has always applied at runtime; it now only changes the text.
         self._state_label = QLabel("IDLE")
+        self._state_label.setAlignment(Qt.AlignCenter)
         self._state_label.setStyleSheet(
-            f"font-family: '{FONTS['ui_family']}'; font-size: 9pt; font-weight: bold;"
-            f" color: {COLORS['text_primary']}; border: none;"
+            f"QLabel {{ {_bubble_ss} color: {COLORS['text_primary']};"
+            f" font-weight: bold; }}"
         )
-        self._state_label.setFixedWidth(42)
+        self._state_label.setFixedWidth(70)
         layout.addWidget(self._state_label)
 
         # --- Task Mode Indicator ---
@@ -180,7 +229,7 @@ class StatusBar(QWidget):
 
         self._x_dro = QLabel("0.0000")
         self._x_dro.setStyleSheet(_dro_val_ss)
-        self._x_dro.setMinimumWidth(180)
+        self._x_dro.setMinimumWidth(self._dro_value_width(self._x_dro))
         dro_inner.addWidget(self._x_dro)
 
         dro_sep = QFrame()
@@ -195,7 +244,7 @@ class StatusBar(QWidget):
 
         self._z_dro = QLabel("0.0000")
         self._z_dro.setStyleSheet(_dro_val_ss)
-        self._z_dro.setMinimumWidth(180)
+        self._z_dro.setMinimumWidth(self._dro_value_width(self._z_dro))
         dro_inner.addWidget(self._z_dro)
 
         layout.addWidget(dro_box)
@@ -285,26 +334,20 @@ class StatusBar(QWidget):
 
         layout.addWidget(tool_box)
 
-        # --- Error message ---
-        # ElidedLabel: hm2/LinuxCNC error text can be very long; full text in tooltip.
-        self._error_label = ElidedLabel("", min_width=110)
-        self._error_label.setStyleSheet(
-            f"font-family: '{FONTS['mono_family']}'; font-size: 10pt;"
-            f"color: {COLORS['text_primary']};"
-            f"background-color: {COLORS['status_error']};"
-            f"border: 1px solid {COLORS['border_error']};"
-            f"border-radius: 5px;"
-            f"padding: 2px 8px;"
-        )
-        self._error_label.setVisible(False)
-        layout.addWidget(self._error_label, stretch=1)
+        # Readouts keep their original 56 px height (72 - 2 x 8 px margins).
+        for readout in (self._state_dot, self._state_label, dro_box,
+                        gcode_box, rpm_box, feed_box, tool_box):
+            readout.setFixedHeight(56)
 
-        # --- Spacer + Machine Control Buttons + E-Stop ---
-        layout.addStretch()
+        # --- Machine Control Buttons + E-Stop ---
+        # Packed right after the Tool readout (same fitted gap as between the
+        # readouts). All six share one size: 90 x 62 px, the size the app
+        # stylesheet already gave INCH (min-height 44 + 2 x 8 px padding + border).
+        _ctrl_size = (90, 62)
 
         # --- Unit Toggle Button (left of Reset) ---
         self._unit_toggle = QPushButton("INCH")
-        self._unit_toggle.setFixedSize(90, 36)
+        self._unit_toggle.setFixedSize(*_ctrl_size)
         self._unit_toggle.setCursor(Qt.PointingHandCursor)
         self._unit_toggle.setToolTip("Toggle display units (Inch / Metric)")
         self._unit_toggle.setStyleSheet(
@@ -344,6 +387,7 @@ class StatusBar(QWidget):
             f"QPushButton:hover {{ background: #e6a817; }}"
         )
         self._btn_reset.setToolTip("Reset E-Stop")
+        self._btn_reset.setFixedSize(*_ctrl_size)
         layout.addWidget(self._btn_reset)
 
         self._btn_on = QPushButton("ON")
@@ -354,11 +398,13 @@ class StatusBar(QWidget):
             f"QPushButton:hover {{ background: #6FB8A8; }}"
         )
         self._btn_on.setToolTip("Machine On")
+        self._btn_on.setFixedSize(*_ctrl_size)
         layout.addWidget(self._btn_on)
 
         self._btn_off = QPushButton("OFF")
         self._btn_off.setStyleSheet(_ctrl_btn_ss)
         self._btn_off.setToolTip("Machine Off")
+        self._btn_off.setFixedSize(*_ctrl_size)
         layout.addWidget(self._btn_off)
 
         # Connect machine control signals
@@ -367,8 +413,7 @@ class StatusBar(QWidget):
         self._btn_off.clicked.connect(self.machine_off_clicked.emit)
 
         self._estop_btn = QPushButton("E-STOP")
-        self._estop_btn.setFixedHeight(36)
-        self._estop_btn.setMinimumWidth(80)
+        self._estop_btn.setFixedSize(*_ctrl_size)
         self._estop_btn.setCursor(Qt.PointingHandCursor)
         self._estop_btn.setToolTip("Software E-Stop — immediately halt all motion")
         self._estop_btn.setStyleSheet(
@@ -401,8 +446,95 @@ class StatusBar(QWidget):
             f"border-radius: 5px;"
             f"padding: 4px 10px;"
         )
+        self._offline_badge.setAlignment(Qt.AlignCenter)
+        self._offline_badge.setFixedSize(*_ctrl_size)
         self._offline_badge.setVisible(False)
         layout.addWidget(self._offline_badge)
+
+        # Matches the leading stretch: the row is centred.
+        layout.addStretch()
+
+        # --- Error message ---
+        # NOT part of the ribbon row: MainWindow re-parents it into the empty
+        # right side of the tab row (see error_label), so an error never
+        # widens the ribbon. ElidedLabel: hm2/LinuxCNC error text can be very
+        # long; the full text is in the tooltip.
+        self._error_label = ElidedLabel("", min_width=110)
+        self._error_label.setStyleSheet(
+            f"font-family: '{FONTS['mono_family']}'; font-size: 10pt;"
+            f"color: {COLORS['text_primary']};"
+            f"background-color: {COLORS['status_error']};"
+            f"border: 1px solid {COLORS['border_error']};"
+            f"border-radius: 5px;"
+            f"padding: 2px 8px;"
+        )
+        self._error_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self._error_label.setVisible(False)
+
+    # Widest DRO readings to reserve room for: 8 characters covers anything
+    # under 100 in (4 decimals) or 1000 mm (3 decimals), negative included.
+    # '8' is the widest digit in proportional fallback fonts.
+    DRO_WIDEST = ("-88.8888", "-888.888")
+
+    @classmethod
+    def _dro_value_width(cls, label: QLabel) -> int:
+        """Width that fits the widest DRO reading in the label's real font,
+        so the box never resizes (and shifts the ribbon) while jogging and
+        never cuts off a digit. Was a fixed 180 px (~50 px of empty space)."""
+        label.ensurePolished()               # apply the stylesheet font first
+        fm = label.fontMetrics()
+        return max(fm.horizontalAdvance(s) for s in cls.DRO_WIDEST) + 2
+
+    # --- Ribbon spacing: as wide as the screen allows ---
+
+    def _ribbon_items(self):
+        """Layout items of the ribbon's shown widgets (spacers excluded)."""
+        lay = self.layout()
+        items = (lay.itemAt(i) for i in range(lay.count()))
+        return [it for it in items
+                if it.widget() is not None and not it.widget().isHidden()]
+
+    def _fit_spacing(self):
+        """One equal gap between ribbon items and at both screen edges:
+        the largest that fits the width with every item at its minimum width
+        (never below MIN_GAP). The 0..n px that don't divide evenly go to the
+        centring stretches, half each side. Re-run on resize and whenever an
+        item shows/hides."""
+        lay = self.layout()
+        items = self._ribbon_items()
+        if lay is None or len(items) < 2:
+            return
+        need = sum(it.minimumSize().width() for it in items)
+        gap = max(self.MIN_GAP, (self.width() - need) // (len(items) + 1))
+        m = lay.contentsMargins()
+        if gap != lay.spacing() or gap != m.left() or gap != m.right():
+            lay.setSpacing(gap)
+            lay.setContentsMargins(gap, m.top(), gap, m.bottom())
+
+    def minimumSizeHint(self):  # noqa: N802 (Qt naming)
+        """Minimum width with MIN_GAP gaps and edges, so the window can still
+        shrink (the fitted gap then shrinks with it)."""
+        hint = super().minimumSizeHint()
+        items = self._ribbon_items()
+        if self.layout() is None or not items:
+            return hint
+        need = sum(it.minimumSize().width() for it in items)
+        return QSize(need + self.MIN_GAP * (len(items) + 1), hint.height())
+
+    def resizeEvent(self, event):  # noqa: N802
+        super().resizeEvent(event)
+        self._fit_spacing()
+
+    def event(self, event):
+        handled = super().event(event)
+        if event.type() == QEvent.LayoutRequest:   # an item was shown/hidden
+            self._fit_spacing()
+        return handled
+
+    @property
+    def error_label(self) -> ElidedLabel:
+        """The error message label, for the window to place in the tab row."""
+        return self._error_label
 
     def _on_unit_toggle(self):
         """Handle unit toggle button click."""
@@ -454,18 +586,14 @@ class StatusBar(QWidget):
         """Update machine state indicator.
 
         Args:
-            state_str: One of "IDLE", "RUN", "PAUSE", "ESTOP".
+            state_str: One of "IDLE", "RUN", "PAUSE", "ESTOP", "OFF".
         """
         state_str = state_str.upper()
         self._state = state_str
         color = _STATE_COLORS.get(state_str, COLORS["text_disabled"])
-        self._state_dot.setStyleSheet(
-            f"color: {color}; font-size: 16px; border: none;"
-        )
-        self._state_label.setText(state_str)
-        self._state_label.setStyleSheet(
-            f"color: {COLORS['text_primary']}; font-weight: bold; border: none;"
-        )
+        self._state_dot.set_color(color)
+        if self._state_label.text() != state_str:
+            self._state_label.setText(state_str)
 
     def _apply_mode_style(self, mode_str: str):
         """Repaint the mode bubble for the given mode."""
@@ -559,7 +687,7 @@ class StatusBar(QWidget):
         self._gcode_display.setText(gcodes)
 
     def show_error(self, msg: str):
-        """Display an error message in the ribbon. Auto-clears after 8 seconds.
+        """Display an error message (in the tab row). Auto-clears after 8 seconds.
 
         Args:
             msg: Error text from LinuxCNC error channel.

@@ -88,8 +88,9 @@ def build_zones(
     # Positive offset expands the face outward in all directions
     offset_amount = fin_allowance_radius
 
-    from build123d import offset as b3d_offset, Kind
-    keep_zone_face = b3d_offset(finished_part_face, amount=offset_amount, kind=Kind.INTERSECTION)
+    from geometry.kernel_offset import offset_face
+    keep_zone_face = offset_face(finished_part_face, offset_amount,
+                                 what="finished part (finish allowance band)")
 
     # Clip the keep zone to stock boundaries (offset may extend beyond Z_end or below X=0)
     # Build a clipping rectangle matching the stock extent
@@ -187,6 +188,20 @@ def _profile_to_radius_coords(profile: ClosedProfile) -> List[dict]:
 
     if not segments:
         return []
+
+    # OD: dedicated vertex solver, validated against an NX reference part
+    # (geometry/corner_breaks_od.py). ID keeps the legacy code below until an
+    # ID reference part validates its different build parameters.
+    if profile.mode == MachiningMode.OD:
+        from geometry.corner_breaks_od import build_od_corner_coords
+        result = build_od_corner_coords(profile)
+        if result.reports:
+            import logging
+            log = logging.getLogger(__name__)
+            for rep in result.reports:
+                if rep.status != "ok":
+                    log.info("Corner break %s", rep.message)
+        return result.coords
 
     # Pre-compute segment endpoints in radius for direction calculations
     seg_endpoints = []

@@ -327,17 +327,15 @@ class ZoneQueryAPI:
         if remaining_allowance_dia == 0:
             offset_wire = wire
         else:
+            from geometry.kernel_offset import offset_wire
             try:
-                offset = wire.offset_2d(remaining_allowance_dia / 2.0,
-                                        kind=Kind.INTERSECTION, side=side, closed=False).clean()
-            except Exception as exc:
-                # OCCT returns a null shape for some contours (e.g. off-axis
-                # quadrant arcs built as splines). Fail with a usable message
-                # instead of the raw kernel error.
+                offset = offset_wire(wire, remaining_allowance_dia / 2.0, side=side,
+                                     closed=False, what="cleanup/finish contour")
+            except RuntimeError as exc:
+                # Also seen for off-axis quadrant arcs built as splines.
                 raise RuntimeError(
-                    f"Cleanup/finish offset of this contour failed in the geometry "
-                    f"kernel ({exc}). Contours with spline/elliptical segments "
-                    f"(e.g. off-axis quadrant arcs) are not supported yet.") from exc
+                    f"{exc}\n\nContours with spline/elliptical segments (e.g. off-axis "
+                    f"quadrant arcs) are not supported yet.") from exc
             offset_wire = Wire(offset.edges())
         if z_min is not None:
             from build123d import Compound

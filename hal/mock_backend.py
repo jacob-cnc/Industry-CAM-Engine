@@ -162,6 +162,11 @@ class MockBackend(HALBackend):
     # E-Stop & Power
     # ------------------------------------------------------------------
 
+    def estop(self) -> bool:
+        self._task_state = TaskState.ESTOP
+        self._machine_on = False
+        return True
+
     def estop_reset(self) -> bool:
         if self._task_state == TaskState.ESTOP:
             self._task_state = TaskState.ESTOP_RESET

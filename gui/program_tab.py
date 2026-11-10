@@ -225,11 +225,16 @@ class ProgramTab(QWidget):
         self._state = ProgramState.IDLE
         self._active_tool: Optional[ToolDef] = None
         self._tool_resolver = None  # Callable[[int], Optional[ToolDef]] set by main_window
+        self._generate_notes = []   # writer notes from the last Generate
         self._program_file_path: Optional[str] = None
         self._last_gcode_text: str = ""  # Last generated G-code for saving
         self._profile_contour_segments: list = []  # Profile overlay for toolpath display
         self._active_block_id: int = -1  # Currently displayed block ID
         self._selected_segment_index: int = -1  # Currently selected segment in builder
+        # Corner-break tool state: point indices selected, graph overlay items.
+        self._cb_selected: list = []
+        self._cb_overlay_items: list = []
+        self._cb_vertex_screen_cache = None
         self._setup_ui()
         self._connect_signals()
         self._update_ui_for_state()
@@ -254,6 +259,9 @@ class ProgramTab(QWidget):
         self._state = new_state
         self._update_ui_for_state()
         self.state_changed.emit(new_state.name)
+        # A freshly loaded toolpath replaces the plot; put the tool's dots back.
+        if getattr(self, "_btn_cb_tool", None) is not None:
+            self._sync_cb_overlay()
 
     def get_stock_values(self) -> dict:
         """Return current stock field values as a dict."""
@@ -352,13 +360,52 @@ class ProgramTab(QWidget):
         self._right_panel = self._build_right_panel()
         self._splitter.addWidget(self._right_panel)
 
-        # Splitter proportions: left panel starts ~320px, right pane takes the rest.
-        # Previous values (600px initial, 400px minimum) caused the window to exceed
-        # 1920x1080 under LinuxCNC's launch path.
-        self._splitter.setSizes([320, 1200])
+        # Programming column opens at 420 px every launch (nothing cut off at
+        # that width); the user can drag it narrower (220 px min) or wider.
+        # It also widens on its own when the segment table needs more room
+        # (r column open for a selected ARC row) and returns afterwards; see
+        # _fit_program_column.
+        self._user_column_width = self.PROGRAM_COLUMN_WIDTH
+        self._splitter.setSizes([self.PROGRAM_COLUMN_WIDTH, 1200])
         self._splitter.setStretchFactor(0, 0)
         self._splitter.setStretchFactor(1, 1)
         self._left_panel.setMinimumWidth(220)
+        self._splitter.splitterMoved.connect(self._on_splitter_moved)
+        self._segment_list.required_width_changed.connect(
+            lambda _w: self._fit_program_column())
+        # Widening changes the chrome (scrollbars, margins) around the table:
+        # re-check after every resize so the final fit has no overflow.
+        self._segment_list.installEventFilter(self)
+        for section in (self._section_parameters, self._section_profile):
+            section.toggled.connect(lambda _e: self._fit_program_column())
+
+    PROGRAM_COLUMN_WIDTH = 420   # px, default programming-column width
+
+    def eventFilter(self, obj, event):  # noqa: N802 (Qt naming)
+        from PyQt5.QtCore import QEvent
+        if obj is getattr(self, "_segment_list", None) and \
+                event.type() in (QEvent.Resize, QEvent.Show):
+            self._fit_program_column()
+        return super().eventFilter(obj, event)
+
+    def _on_splitter_moved(self, pos: int, index: int):
+        """A user drag sets the column width to return to."""
+        self._user_column_width = self._splitter.sizes()[0]
+
+    def _fit_program_column(self):
+        """Column = the user's width, widened just enough that the segment
+        table never overflows (e.g. +r column for a selected ARC row)."""
+        sizes = self._splitter.sizes()
+        if len(sizes) != 2 or sum(sizes) <= 0:
+            return
+        target = self._user_column_width
+        seg = self._segment_list
+        if seg.isVisible() and seg.width() > 0:
+            chrome = self._left_panel.width() - seg.width()  # margins, scrollbar
+            target = max(target, seg.required_width() + chrome)
+        if target != sizes[0]:
+            total = sum(sizes)
+            self._splitter.setSizes([target, max(0, total - target)])
 
     def _build_left_panel(self) -> QWidget:
         """Build the left panel with collapsible accordion sections.
@@ -386,11 +433,26 @@ class ProgramTab(QWidget):
 
         # Block list (multi-operation management) — inside a collapsible section
         from gui.components.collapsible_section import CollapsibleSection as CS
-        self._section_blocks = CS("Blocks", expanded=True)
+        # First view shows the whole workflow: Parameters and Profile Segments
+        # open, the setup sections inside Parameters collapsed.
+        self._section_blocks = CS("Blocks", expanded=False)
         self._block_list = BlockListWidget()
         self._section_blocks.add_widget(self._block_list)
         self._section_blocks.setMinimumHeight(240)
-        panel_layout.addWidget(self._section_blocks)
+
+        # Parameters: one collapsible parent for everything defined before
+        # the profile (Blocks, Stock, Roughing, Finishing, and the Threading/
+        # Grooving/Parting panels). Collapse it once set, and Profile
+        # Segments below gets nearly the whole column height. Order follows a
+        # lathe program's decisions: toolpath type -> parameters -> profile.
+        self._section_parameters = CS("Parameters", expanded=True)
+        params_layout = self._section_parameters.content_layout()
+        params_layout.setContentsMargins(8, 2, 0, 2)   # slight indent: nested
+        # Exactly as tall as its contents: spare height goes to Profile
+        # Segments (or below it), never into gaps between these sections.
+        from PyQt5.QtWidgets import QSizePolicy
+        self._section_parameters.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        params_layout.addWidget(self._section_blocks)
 
         # Scrollable area for the accordion sections
         scroll = QScrollArea()
@@ -408,34 +470,29 @@ class ProgramTab(QWidget):
         self._section_type = CollapsibleSection("Toolpath Type", expanded=True)
         self._build_block_type_content(self._section_type)
         self._section_type.setVisible(False)
-        sections_layout.addWidget(self._section_type)
+        params_layout.addWidget(self._section_type)
 
         # --- Stock section ---
-        self._section_stock = CollapsibleSection("Stock", expanded=True)
+        self._section_stock = CollapsibleSection("Stock", expanded=False)
         self._build_stock_content(self._section_stock)
-        sections_layout.addWidget(self._section_stock)
+        params_layout.addWidget(self._section_stock)
 
         # --- Roughing section ---
         self._section_roughing = CollapsibleSection("Roughing", expanded=False)
         self._build_roughing_content(self._section_roughing)
-        sections_layout.addWidget(self._section_roughing)
+        params_layout.addWidget(self._section_roughing)
 
         # --- Finishing section ---
         self._section_finishing = CollapsibleSection("Finishing", expanded=False)
         self._build_finishing_content(self._section_finishing)
-        sections_layout.addWidget(self._section_finishing)
-
-        # --- Profile Segments section ---
-        self._section_profile = CollapsibleSection("Profile Segments", expanded=True)
-        self._build_profile_content(self._section_profile)
-        sections_layout.addWidget(self._section_profile, stretch=1)
+        params_layout.addWidget(self._section_finishing)
 
         # --- Threading Parameters section (hidden by default) ---
         from gui.components.threading_panel import ThreadingPanel
         self._section_threading = CollapsibleSection("Threading Parameters", expanded=True)
         self._threading_panel = ThreadingPanel()
         self._section_threading.add_widget(self._threading_panel)
-        sections_layout.addWidget(self._section_threading)
+        params_layout.addWidget(self._section_threading)
         self._section_threading.setVisible(False)
 
         # --- Grooving Parameters section (hidden by default) ---
@@ -443,15 +500,27 @@ class ProgramTab(QWidget):
         self._section_grooving = CollapsibleSection("Grooving Parameters", expanded=True)
         self._grooving_panel = GroovingPanel()
         self._section_grooving.add_widget(self._grooving_panel)
-        sections_layout.addWidget(self._section_grooving)
+        params_layout.addWidget(self._section_grooving)
         self._section_grooving.setVisible(False)
 
         # --- Parting Parameters section (hidden by default) ---
         self._section_parting = CollapsibleSection("Parting Parameters", expanded=True)
         self._parting_panel = GroovingPanel(is_parting=True)
         self._section_parting.add_widget(self._parting_panel)
-        sections_layout.addWidget(self._section_parting)
+        params_layout.addWidget(self._section_parting)
         self._section_parting.setVisible(False)
+
+        sections_layout.addWidget(self._section_parameters)
+
+        # --- Profile Segments section (below Parameters; takes the height) ---
+        self._section_profile = CollapsibleSection("Profile Segments", expanded=True)
+        self._build_profile_content(self._section_profile)
+        sections_layout.addWidget(self._section_profile, stretch=1)
+
+        # Leftover height collects here, below the last section, so collapsed
+        # headers stay packed at the top instead of being spread apart. An
+        # expanded Profile Segments (stretch=1) still takes the height first.
+        sections_layout.addStretch()
 
         scroll.setWidget(container)
         panel_layout.addWidget(scroll, stretch=1)
@@ -607,7 +676,7 @@ class ProgramTab(QWidget):
 
         self._rough_fin_allowance = NumericField(NumericFieldConfig(
             min_value=0.0, max_value=0.1, decimals=4,
-            default_value=0.005, suffix="dia",
+            default_value=0.002, suffix="dia",
         ))
         form.addRow("Fin Allow:", self._rough_fin_allowance)
 
@@ -658,7 +727,7 @@ class ProgramTab(QWidget):
 
         self._finish_doc = NumericField(NumericFieldConfig(
             min_value=0.0, max_value=20.0, decimals=6,
-            default_value=0.005, suffix="dia",
+            default_value=0.002, suffix="dia",   # = allowance 0.002 / 1 pass
         ))
         self._finish_doc.setReadOnly(True)
         self._finish_doc.setToolTip("Finish allowance divided by cutting passes; spring pass is excluded.")
@@ -687,14 +756,39 @@ class ProgramTab(QWidget):
         section.add_layout(form)
 
     def _build_profile_content(self, section):
-        """Populate the Profile Segments section."""
+        """Populate the Profile Segments section.
+
+        Corner Breaks toggle (top) switches between the segment builder and
+        the corner-break tool panel; both fill the section's height.
+        """
+        from PyQt5.QtWidgets import QSizePolicy
+        from gui.components.corner_break_panel import CornerBreakPanel
+
+        self._btn_cb_tool = QPushButton("Corner Breaks")
+        self._btn_cb_tool.setCheckable(True)
+        self._btn_cb_tool.setToolTip(
+            "Corner-break tool: pick vertices on the graph, then apply a chamfer "
+            "or fillet. Click again to return to the segment builder.")
+        self._btn_cb_tool.setStyleSheet(
+            f"QPushButton {{ background: {COLORS['bg_surface']}; "
+            f"border: 1px solid {COLORS['border_normal']}; border-radius: 5px; }}"
+            f"QPushButton:checked {{ background: {COLORS['btn_primary']}; "
+            f"border-color: {COLORS['border_focused']}; }}")
+        section.add_widget(self._btn_cb_tool)
+
         self._segment_list = SegmentListWidget()
         # Make the segment list expand to fill available space
-        from PyQt5.QtWidgets import QSizePolicy
         self._segment_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         section.add_widget(self._segment_list)
-        # Make the content stretch to fill the section
-        section.content_layout().setStretch(0, 1)
+
+        self._cb_panel = CornerBreakPanel()
+        self._cb_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self._cb_panel.setVisible(False)
+        section.add_widget(self._cb_panel)
+
+        # Builder and tool panel take the height (only one is visible).
+        section.content_layout().setStretch(1, 1)
+        section.content_layout().setStretch(2, 1)
 
     def _build_right_panel(self) -> QWidget:
         """Build the right panel — the proven SimViewerWidget.
@@ -810,6 +904,23 @@ class ProgramTab(QWidget):
         self._segment_list.segments_changed.connect(self._on_segments_changed)
         self._segment_list.corner_breaks_changed.connect(lambda *_: self._on_segments_changed(self.get_segments()))
         self._segment_list.selection_changed.connect(self._on_segment_selection_changed)
+
+        # Corner-break tool (Esc anywhere on the Program tab leaves it)
+        self._btn_cb_tool.toggled.connect(self._on_cb_tool_toggled)
+        from PyQt5.QtWidgets import QShortcut
+        from PyQt5.QtGui import QKeySequence
+        self._cb_esc = QShortcut(QKeySequence(Qt.Key_Escape), self)
+        self._cb_esc.setContext(Qt.WidgetWithChildrenShortcut)
+        self._cb_esc.activated.connect(
+            lambda: self._btn_cb_tool.setChecked(False) if self._btn_cb_tool.isChecked() else None)
+        self._cb_panel.selection_changed.connect(self._on_cb_panel_selection)
+        self._cb_panel.apply_requested.connect(self._on_cb_apply)
+        self._cb_panel.remove_requested.connect(self._on_cb_remove)
+        self._segment_list.segments_changed.connect(lambda *_: self._refresh_cb_state())
+        self._segment_list.corner_breaks_changed.connect(lambda *_: self._refresh_cb_state())
+        self._graph_widget.scene().sigMouseClicked.connect(self._on_graph_clicked_cb)
+        # Vertex dots hide while a simulation plays and come back when it stops.
+        self._sim_viewer.playing_changed.connect(lambda _playing: self._sync_cb_overlay())
 
         # Generate button
         self._generate_btn.clicked.connect(self._on_generate_clicked)
@@ -1072,6 +1183,7 @@ class ProgramTab(QWidget):
 
             # Generate each block — collect G-code sections and the first plan_result
             all_gcode_sections = []
+            self._generate_notes = []
             first_plan_result = None
             prev_tool_number = None
             writer = GCodeWriter()
@@ -1138,13 +1250,24 @@ class ProgramTab(QWidget):
             self.set_state(ProgramState.DISPLAYING)
 
             block_count = len(active_blocks)
-            self._status_label.setText(
-                f"Program ready — {block_count} block{'s' if block_count > 1 else ''}, "
-                f"{len(sim_moves)} moves"
-            )
-            self._status_label.setStyleSheet(
-                f"color: {COLORS['text_secondary']}; font-size: {FONTS['small_size']}pt;"
-            )
+            ready = (f"Program ready — {block_count} block{'s' if block_count > 1 else ''}, "
+                     f"{len(sim_moves)} moves")
+            notes = getattr(self, "_generate_notes", [])
+            if notes:
+                # Not an error: the program runs. The part differs from the
+                # drawing (e.g. a corner radius set by the tool nose).
+                self._status_label.setText(
+                    f"⚠ {ready} — {len(notes)} note{'s' if len(notes) > 1 else ''} "
+                    f"(hover for details)")
+                self._status_label.setToolTip("\n\n".join(notes))
+                self._status_label.setStyleSheet(
+                    f"color: {COLORS['status_warning']}; font-size: {FONTS['small_size']}pt;")
+            else:
+                self._status_label.setText(ready)
+                self._status_label.setToolTip("")
+                self._status_label.setStyleSheet(
+                    f"color: {COLORS['text_secondary']}; font-size: {FONTS['small_size']}pt;"
+                )
 
         except Exception as e:
             import traceback as tb_module
@@ -1269,7 +1392,11 @@ class ProgramTab(QWidget):
             return None, None
 
         plan_result = pipeline_result.plan_result
-        gcode_text = GCodeWriter().write(plan_result, unit_mode=unit_state.mode.value)
+        block_writer = GCodeWriter()
+        gcode_text = block_writer.write(plan_result, unit_mode=unit_state.mode.value)
+        for note in block_writer.notes:
+            logger.warning("Generate note (%s): %s", block.display_label, note)
+            self._generate_notes.append(f"{block.display_label}: {note}")
         return gcode_text, plan_result
 
     def _generate_threading_block(self, block, writer, prev_tool_number):
@@ -1771,6 +1898,317 @@ class ProgramTab(QWidget):
     # Helpers
     # ------------------------------------------------------------------
 
+    def _od_corner_result(self, segments=None, corner_breaks=None):
+        """Engine corner-break result (geometry + per-vertex reports) for the
+        current profile, or None for ID / an incomplete profile."""
+        if self._get_machining_mode() != "od":
+            return None
+        if segments is None:
+            segments = self._segment_list.get_segments()
+        if corner_breaks is None:
+            corner_breaks = self._segment_list.get_corner_breaks()
+        if not segments:
+            return None
+        try:
+            from pipeline.model_builder import profile_from_fields
+            from geometry.corner_breaks_od import build_od_corner_coords
+            profile = profile_from_fields(segments, "od", corner_breaks)
+            return build_od_corner_coords(profile)
+        except Exception:
+            logger.debug("OD corner-break solve failed for preview", exc_info=True)
+            return None
+
+    def _od_corner_geometry(self, segments, corner_breaks) -> dict:
+        result = self._od_corner_result(segments, corner_breaks)
+        return result.geometry if result is not None else {}
+
+    # ------------------------------------------------------------------
+    # Corner-break tool (vertex model)
+    # ------------------------------------------------------------------
+
+    def _sharp_vertex_points(self):
+        """(points, prev, next) in graph coordinates (z, r) for every vertex
+        V1..V(n-1) = point indices 0..n-2. prev of V1 is the implied face
+        start on the centreline."""
+        segs = self._segment_list.get_segments()
+        pts = [(float(s.get("z", 0.0)), float(s.get("x", 0.0)) / 2.0) for s in segs]
+        if len(pts) < 2:
+            return [], [], []
+        verts = pts[:-1]
+        prev = [(pts[0][0], 0.0)] + pts[:-2]
+        nxt = pts[1:]
+        return verts, prev, nxt
+
+    def _refresh_cb_state(self):
+        """Recompute engine status per vertex: row badges always, and the
+        tool's vertex list when the tool is on."""
+        segs = self._segment_list.get_segments()
+        breaks = self._segment_list.get_corner_breaks()
+        result = self._od_corner_result(segs, breaks)
+        reports = {r.vertex - 1: r for r in (result.reports if result else [])}
+        self._flag_fillets_within_nose_radius(result, reports)
+        notes = {i: (r.status, r.message) for i, r in reports.items()}
+        self._segment_list.set_vertex_notes(notes)
+        if not self._btn_cb_tool.isChecked():
+            return
+        kinds = {}
+        if result is not None:
+            try:
+                from pipeline.model_builder import profile_from_fields
+                from geometry.corner_breaks_od import od_vertex_kinds
+                kinds = od_vertex_kinds(profile_from_fields(segs, "od", breaks))
+            except Exception:
+                kinds = {}
+        is_id = self._get_machining_mode() == "id"
+        rows = []
+        for i in range(max(0, len(segs) - 1)):
+            rep = reports.get(i)
+            badge = SegmentListWidget.break_badge(breaks[i] if i < len(breaks) else None)
+            if is_id and badge:
+                status, msg = "unvalidated", "ID corner breaks are not validated yet (legacy method)."
+            elif rep is not None:
+                status, msg = rep.status, rep.message
+            else:
+                status, msg = "ok", ""
+            rows.append({"index": i, "z": float(segs[i].get("z", 0.0)),
+                         "x_dia": float(segs[i].get("x", 0.0)),
+                         "corner": "" if is_id else kinds.get(i, ""),
+                         "badge": badge, "status": status, "message": msg})
+        self._cb_panel.set_vertices(rows)
+
+    def _finish_nose_radius(self) -> float:
+        """Nose radius of the block's finishing tool (0 if unknown)."""
+        if not self._tool_resolver:
+            return 0.0
+        try:
+            tool = self._tool_resolver(self._finish_tool_num.value())
+        except Exception:
+            tool = None
+        return float(getattr(tool, "nose_radius", 0.0) or 0.0)
+
+    def _flag_fillets_within_nose_radius(self, result, reports: dict) -> None:
+        """Mark concave fillets the finishing tool cannot follow.
+
+        The writer cuts a concave fillet with R <= the nose radius as a sharp
+        corner (the nose leaves its own radius there); say so on the vertex
+        before Generate. Reports are updated in place (status 'tool radius').
+        """
+        tnr = self._finish_nose_radius()
+        if result is None or tnr <= 0:
+            return
+        for i, rep in reports.items():
+            if rep.break_type != "fillet" or rep.corner != "concave" \
+                    or rep.status in ("skipped", "unvalidated"):
+                continue
+            g = result.geometry.get(i)
+            radius = g.radius if g is not None and g.radius > 0 else rep.requested
+            if radius > tnr + 0.0001:
+                continue
+            extra = (f"{rep.label}: concave R{radius:.4f} is not larger than the finishing "
+                     f"tool's nose radius ({tnr:.4f}). It will be cut as a sharp inside "
+                     f"corner: the tool leaves R{tnr:.4f} there, not R{radius:.4f}.")
+            rep.message = f"{rep.message}\n{extra}" if rep.message else extra
+            rep.status = "tool radius"
+
+    CB_TOOL_LABEL_OFF = "Corner Breaks"
+    CB_TOOL_LABEL_ON = "Done - Back to Segment Builder  (Esc)"
+
+    def _on_cb_tool_toggled(self, on: bool):
+        # The same button leaves the tool: say so while it is on.
+        self._btn_cb_tool.setText(self.CB_TOOL_LABEL_ON if on else self.CB_TOOL_LABEL_OFF)
+        self._segment_list.setVisible(not on)
+        self._cb_panel.setVisible(on)
+        if not on:
+            self._cb_selected = []
+        self._refresh_cb_state()
+        self._update_preview()
+        self._sync_cb_overlay()
+
+    def _cb_overlay_blocked(self) -> bool:
+        """True while a simulation is playing: no dots, no picking."""
+        viewer = getattr(self, "_sim_viewer", None)
+        return bool(viewer is not None and viewer.is_playing())
+
+    def _remove_cb_overlay(self):
+        for item in self._cb_overlay_items:
+            try:
+                self._graph_widget.removeItem(item)
+            except Exception:
+                pass                             # already gone with a plot clear
+        self._cb_overlay_items = []
+
+    def _sync_cb_overlay(self):
+        """Show the tool's ghost profile and vertex dots whenever the tool is
+        open and no simulation is playing, including over a generated
+        toolpath. In BUILDING/READY the preview redraw owns the overlay."""
+        if self._state in (ProgramState.BUILDING, ProgramState.READY):
+            return
+        self._remove_cb_overlay()
+        if not self._btn_cb_tool.isChecked() or self._cb_overlay_blocked():
+            return
+        import pyqtgraph as pg
+        self._draw_cb_overlay(pg)
+
+    def _on_cb_panel_selection(self, indices: list):
+        self._cb_selected = list(indices)
+        self._draw_cb_selection()
+
+    def _apply_vertex_breaks(self, new_breaks: list, touched: list):
+        """Store the breaks, then pop up a note for every vertex the engine
+        had to adjust: the ones just edited, and any other vertex whose
+        status changed because of them."""
+        segs = self._segment_list.get_segments()
+        before = self._od_corner_result(segs, self._segment_list.get_corner_breaks())
+        before_status = {r.vertex - 1: r.status for r in (before.reports if before else [])}
+        self._segment_list.set_vertex_breaks(new_breaks)
+        after = self._od_corner_result(segs, new_breaks)
+
+        def notes_for(result):
+            out = []
+            for rep in (result.reports if result else []):
+                i = rep.vertex - 1
+                if rep.status != "ok" and (i in touched or before_status.get(i) != rep.status):
+                    out.append(rep)
+            return out
+
+        notes = notes_for(after)
+        # NX-style is the default. If fillets were cut short (leaving a kink),
+        # offer to smooth them: roll each onto its earlier neighbour.
+        smoothable = [r for r in (after.smoothable if after else []) if r in notes]
+        if smoothable:
+            listing = "\n\n".join(r.message for r in notes)
+            answer = QMessageBox.question(
+                self, "Corner breaks trimmed",
+                f"{listing}\n\nSmooth the trimmed fillet"
+                f"{'s' if len(smoothable) > 1 else ''} "
+                f"({', '.join(r.label for r in smoothable)})?\n\n"
+                "Yes: the fillet keeps its radius and rolls onto the earlier break "
+                "(tangent, no kink; the earlier break is shortened or extended).\n"
+                "No: keep it cut short (NX style).",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if answer == QMessageBox.Yes:
+                breaks = self._segment_list.get_corner_breaks()
+                for r in smoothable:
+                    if breaks[r.vertex - 1]:
+                        breaks[r.vertex - 1]["trim"] = "smooth"
+                self._segment_list.set_vertex_breaks(breaks)
+                result = self._od_corner_result(segs, breaks)
+                QMessageBox.information(self, "Corner breaks smoothed",
+                                        "\n\n".join(r.message for r in notes_for(result)))
+            return
+        if notes:
+            QMessageBox.information(self, "Corner breaks adjusted",
+                                    "\n\n".join(r.message for r in notes))
+
+    def _on_cb_apply(self, kind: str, size: float):
+        idx = [i for i in self._cb_selected]
+        if not idx:
+            QMessageBox.information(self, "Corner breaks",
+                                    "Select one or more vertices first (click them on "
+                                    "the graph or in the list).")
+            return
+        if not size or size <= 0:
+            QMessageBox.warning(self, "Corner breaks", "Enter a size greater than zero.")
+            return
+        breaks = self._segment_list.get_corner_breaks()
+        for i in idx:
+            if i < len(breaks):
+                breaks[i] = ({"type": "chamfer", "size": size, "angle": 45.0, "radius": 0.0}
+                             if kind == "chamfer" else
+                             {"type": "fillet", "radius": size, "size": 0.0, "angle": 45.0})
+        self._apply_vertex_breaks(breaks, idx)
+
+    def _on_cb_remove(self):
+        breaks = self._segment_list.get_corner_breaks()
+        for i in self._cb_selected:
+            if i < len(breaks):
+                breaks[i] = None
+        self._apply_vertex_breaks(breaks, list(self._cb_selected))
+
+    def _draw_cb_overlay(self, pg):
+        """Tool on: faint sharp profile, every vertex as a small dot, selected
+        vertices as larger highlighted dots. Called from _update_preview."""
+        from PyQt5.QtGui import QColor
+        verts, prev, _nxt = self._sharp_vertex_points()
+        if not verts:
+            return
+        segs = self._segment_list.get_segments()
+        sharp = [(verts[0][0], 0.0)] + [(float(s.get("z", 0.0)), float(s.get("x", 0.0)) / 2.0)
+                                         for s in segs]
+        ghost = QColor(COLORS['text_secondary'])
+        ghost.setAlpha(150)
+        from pyqtgraph.Qt import QtCore as _QtCore
+        line = self._graph_widget.plot([p[0] for p in sharp], [p[1] for p in sharp],
+                                       pen=pg.mkPen(ghost, width=1, style=_QtCore.Qt.DashLine))
+        line.setZValue(4)
+        dots = pg.ScatterPlotItem([p[0] for p in verts], [p[1] for p in verts], size=9,
+                                  pen=pg.mkPen(COLORS['text_primary']),
+                                  brush=pg.mkBrush(COLORS['bg_surface']))
+        dots.setZValue(8)
+        self._graph_widget.addItem(dots)
+        sel = pg.ScatterPlotItem([], [], size=17, pen=pg.mkPen('#FFFFFF', width=2),
+                                 brush=pg.mkBrush(COLORS['status_info']))
+        sel.setZValue(9)
+        self._graph_widget.addItem(sel)
+        self._cb_overlay_items = [line, dots, sel]
+        self._draw_cb_selection()
+
+    def _draw_cb_selection(self):
+        if len(self._cb_overlay_items) < 3:
+            return
+        sel_item = self._cb_overlay_items[2]
+        verts, _p, _n = self._sharp_vertex_points()
+        chosen = [verts[i] for i in self._cb_selected if i < len(verts)]
+        try:
+            sel_item.setData([p[0] for p in chosen], [p[1] for p in chosen])
+        except RuntimeError:
+            self._cb_overlay_items = []          # item was cleared with the plot
+
+    def _on_graph_clicked_cb(self, ev):
+        """Tool on: pick a vertex (pixel tolerance + tie-breakers); Ctrl adds /
+        removes; a plain click on empty space clears the selection."""
+        if not self._btn_cb_tool.isChecked() or ev.button() != Qt.LeftButton or ev.double():
+            return
+        if self._cb_overlay_blocked():
+            return
+        from PyQt5.QtCore import QPointF
+        from gui.components.vertex_picking import pick_vertex
+        verts, prev, nxt = self._sharp_vertex_points()
+        if not verts:
+            return
+        vb = self._graph_widget.getViewBox()
+
+        def scr(p):
+            q = vb.mapViewToScene(QPointF(p[0], p[1]))
+            return (q.x(), q.y())
+
+        click = (ev.scenePos().x(), ev.scenePos().y())
+        picked = pick_vertex(click, [scr(p) for p in verts], [scr(p) for p in prev],
+                             [scr(p) for p in nxt], self._cb_selected)
+        if len(picked) > 1:
+            picked = self._choose_vertex(picked)
+        ctrl = bool(ev.modifiers() & Qt.ControlModifier)
+        sel = list(self._cb_selected)
+        if not picked:
+            if not ctrl:
+                sel = []
+        elif ctrl:
+            v = picked[0]
+            sel = [i for i in sel if i != v] if v in sel else sel + [v]
+        else:
+            sel = [picked[0]]
+        ev.accept()
+        self._cb_panel.set_selected(sorted(sel))
+
+    def _choose_vertex(self, candidates: list) -> list:
+        """Last-resort chooser when vertices are on top of each other."""
+        from PyQt5.QtGui import QCursor
+        from PyQt5.QtWidgets import QMenu
+        menu = QMenu(self)
+        actions = {menu.addAction(f"V{i + 1}"): i for i in candidates}
+        chosen = menu.exec_(QCursor.pos())
+        return [actions[chosen]] if chosen in actions else []
+
     def _get_machining_mode(self) -> str:
         """Return 'od' or 'id' based on block type selection."""
         if self._block_type_combo.currentIndex() == 1:
@@ -1810,6 +2248,12 @@ class ProgramTab(QWidget):
         from pyqtgraph.Qt import QtCore as _QtCore
 
         corner_breaks = self._segment_list.get_corner_breaks()
+
+        # OD corner breaks come from the engine's validated vertex solver, so
+        # the preview shows exactly what is machined (incl. V1 at the face and
+        # NX-style trims). Point index -> VertexGeometry. ID and arc-adjacent
+        # vertices are not in it and keep the legacy preview math below.
+        od_geom = self._od_corner_geometry(segments, corner_breaks)
 
         # Build per-segment polylines for drawing (avoids pyqtgraph bounding-box
         # rendering artifacts that occur with a single large PlotCurveItem containing
@@ -1867,7 +2311,45 @@ class ProgramTab(QWidget):
             trim_end_z = z
 
             # Apply corner break at the START of this segment (junction with previous)
-            if cb_before and cb_before.get("type", "none") != "none":
+            vg = od_geom.get(seg_idx - 1) if seg_idx > 0 else None
+            if vg is not None:
+                # Engine geometry: trim the arriving path to t_in, draw the
+                # break element, continue this segment from t_out.
+                (tin_r, tin_z), (tout_r, tout_z) = vg.t_in, vg.t_out
+                if seg_idx - 1 == 0:
+                    # V1 is on the (undrawn) face: the drawn outline starts
+                    # where the break starts, not at the sharp first point.
+                    current_x[:] = [tin_r]
+                    current_z[:] = [tin_z]
+                    if seg_point_ranges:
+                        seg_point_ranges[0] = (0, 1)
+                    _seg_start_idx = 0
+                elif current_z:
+                    current_x[-1] = tin_r
+                    current_z[-1] = tin_z
+                else:
+                    current_x.append(tin_r)
+                    current_z.append(tin_z)
+                if vg.kind == "fillet" and vg.center is not None:
+                    fc_x, fc_z = vg.center
+                    a_start = math.atan2(tin_z - fc_z, tin_r - fc_x)
+                    a_end = math.atan2(tout_z - fc_z, tout_r - fc_x)
+                    sweep = a_end - a_start
+                    if sweep > math.pi:
+                        sweep -= 2 * math.pi
+                    elif sweep < -math.pi:
+                        sweep += 2 * math.pi
+                    n_fillet = max(16, int(abs(sweep) * vg.radius * 200))
+                    for fi in range(1, n_fillet):
+                        a = a_start + sweep * fi / float(n_fillet)
+                        current_x.append(fc_x + vg.radius * math.cos(a))
+                        current_z.append(fc_z + vg.radius * math.sin(a))
+                current_x.append(tout_r)
+                current_z.append(tout_z)
+                all_x.append(tout_r)
+                all_z.append(tout_z)
+                trim_start_x, trim_start_z = tout_r, tout_z
+            elif cb_before and cb_before.get("type", "none") != "none":
                 cb_type = cb_before["type"]
                 # Compute direction vectors at the junction point (prev_x_r, prev_z)
                 # Arrival direction: from previous segment's start toward junction
@@ -2159,6 +2641,11 @@ class ProgramTab(QWidget):
                     highlight_pen = pg.mkPen(highlight_color, width=3)
                     item = self._graph_widget.plot(hi_z, hi_x, pen=highlight_pen)
                     item.setZValue(6)  # Above normal profile
+
+            # Corner-break tool overlay (sharp profile ghost + vertex dots)
+            self._cb_overlay_items = []
+            if self._btn_cb_tool.isChecked():
+                self._draw_cb_overlay(pg)
 
             # X=0 centerline (subtle, behind profile)
             z_min = min(all_z) if all_z else z_end

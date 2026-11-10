@@ -12,3 +12,39 @@ python_functions = ["test_*"]
 
 [tool.hypothesis]
 max_examples = 100
+
+# --- Developer tooling (not runtime deps) -----------------------------------
+# These tools are installed in the project .venv (see
+# .kiro/steering/dev-tooling.md). They are advisory: the authoritative
+# architecture gate remains `python -m validation.architecture_check`.
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+# Generated/vendored/snapshot trees are not first-party source.
+extend-exclude = ["backups", ".venv", "reference", "point_charts"]
+
+[tool.ruff.lint]
+# Conservative, high-signal rules that match the project's hard rules:
+#   F401/F811 unused & redefined  -> "no dead code / every import is used"
+#   I          import sorting     -> consistent ordering (direction is still
+#                                    enforced by validation/architecture_check.py)
+#   B          bugbear            -> likely bugs
+#   UP         pyupgrade          -> modern syntax for the py311+ baseline
+select = ["E", "F", "I", "B", "UP"]
+# Line-length (E501) is reported by the formatter; don't double-flag.
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests may import fixtures without using every symbol directly.
+"tests/**" = ["F401"]
+
+[tool.mypy]
+python_version = "3.11"
+# Start pragmatic: type-check first-party code, don't fail on the many
+# untyped third-party libs (build123d, OCP, PyQt5, pyqtgraph, ezdxf).
+ignore_missing_imports = true
+exclude = "(^|/)(backups|\\.venv|reference|point_charts)/"
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true

@@ -6,6 +6,13 @@ the distinction between the owner's verbatim request and later design advice.
 
 ## Proposed
 
+- [Corner-Break Tool, OD Engine, GUI Tuning - lathe integration](2026-11-10-corner-break-tool-and-gui.md)
+  - Status: INTEGRATED 2026-11-10, merged to main, owner-verified on the lathe
+    (tag `lathe-2026-11-10-working`). Outcome and the fixes found during the
+    air cut (arc G-code dialect, E-stop): `session-notes/2026-11-10-lathe-integration.md`.
+  - Still open from this handoff: ID corner breaks unvalidated; offset_contour
+    gouge on large concave fillets; V1 front-face chamfer; Kiro GUI tests on Linux.
+
 - [X Position-Loop Deadband Tuning](2026-11-08-x-deadband-tuning.md)
   - Status: Planned; owner-present bench session required. Nothing changed yet.
   - X `DEADBAND = .0005` r lets X park up to .0007 dia off command (observed).

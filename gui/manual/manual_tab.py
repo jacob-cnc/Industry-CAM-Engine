@@ -53,6 +53,12 @@ class ManualTab(QWidget):
 
     mdi_executed = pyqtSignal(str)
 
+    # Coord toggle sizing (px). TOP/BELOW centre the button between the tab
+    # row's bottom edge and the X DRO's top border; verified by measurement.
+    COORD_TOGGLE_HEIGHT = 50
+    COORD_TOGGLE_TOP = 6
+    COORD_TOGGLE_BELOW = 10
+
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._backend: HALBackend = get_backend()
@@ -149,22 +155,31 @@ class ManualTab(QWidget):
         """Large DRO — always visible at top of controls panel."""
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        layout.setContentsMargins(4, 4, 4, 8)
+        layout.setContentsMargins(4, self.COORD_TOGGLE_TOP, 4, 8)
         layout.setSpacing(4)
 
-        # Coordinate mode toggle
+        # Coordinate mode toggle: 50 px tall, centred between the tab row and
+        # the X DRO (COORD_TOGGLE_TOP / _BELOW). Text matches ribbon bar 2:
+        # app font, bold, primary (white) text. min-height/padding override
+        # the app-wide QPushButton rule (min-height 44 + 8 px padding), which
+        # otherwise forced this button to 62 px.
         self._coord_toggle = QPushButton("Work Coords (G54)")
         self._coord_toggle.setCheckable(True)
         self._coord_toggle.setChecked(False)
-        self._coord_toggle.setFixedHeight(28)
+        self._coord_toggle.setFixedHeight(self.COORD_TOGGLE_HEIGHT)
         self._coord_toggle.setStyleSheet(
             f"QPushButton {{ background: {COLORS['bg_surface']}; "
-            f"color: {COLORS['text_secondary']}; border: 1px solid {COLORS['border_normal']}; "
-            f"border-radius: 3px; font-size: 9pt; }}"
+            f"color: {COLORS['text_primary']}; font-weight: bold; "
+            f"border: 1px solid {COLORS['border_normal']}; border-radius: 3px; "
+            f"padding: 0px 16px; "
+            # QSS heights are the content box: 48 + 1 px border x 2 = 50 px.
+            f"min-height: {self.COORD_TOGGLE_HEIGHT - 2}px; "
+            f"max-height: {self.COORD_TOGGLE_HEIGHT - 2}px; }}"
             f"QPushButton:checked {{ background: {COLORS['btn_primary']}; "
             f"color: {COLORS['text_primary']}; }}"
         )
         layout.addWidget(self._coord_toggle)
+        layout.addSpacing(self.COORD_TOGGLE_BELOW)
 
         # X DRO
         x_row = QHBoxLayout()
