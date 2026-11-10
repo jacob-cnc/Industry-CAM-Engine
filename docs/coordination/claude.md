@@ -1,5 +1,20 @@
 # Claude status
 
+## 2026-11-10 23:17 UTC — owner-approved fixes on lathe/test-2026-11-10 (in progress)
+
+- Air-cut found: every G02/G03 the engine writes is wrong for LinuxCNC (pre-existing,
+  identical on main): I emitted as a DIAMETER offset (LinuxCNC G7 reads I as radius) and
+  G02/G03 swapped. Proven with rs274 on the lathe: as generated, the GCH ID fillet and all
+  NX OD candidates fail; with I/2 + swapped direction all run to PROGRAM_END.
+- Fix (claiming): new outputs/gcode_dialect.py is the single internal<->G-code arc map;
+  used by outputs/gcode_writer.py, outputs/gcode_parser.py, gui/components/sim_viewer.py
+  (parser only). Internal convention + preview drawing unchanged. Tests updated + rs274
+  round-trip test (skips without rs274).
+- Also claiming: software E-STOP button sent STATE_OFF (machine off) instead of
+  STATE_ESTOP, and the ribbon showed machine-off as green IDLE. Files: hal/live_backend.py,
+  hal/interface.py, hal/mock_backend.py, gui/main_window.py, gui/components/status_bar.py.
+- Reserved pre-integration state unchanged (tag lathe-pre-integration-2026-11-10 + snapshot).
+
 ## 2026-11-10 22:53 UTC — integration test of Kiro's work/2026-11-10 (owner-directed)
 
 - State: active — lathe test branch ready; owner runs no-motion GUI checks, air cut, scrap part.
