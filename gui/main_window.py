@@ -353,8 +353,13 @@ class MainWindow(QMainWindow):
         It does NOT replace the hardware E-Stop button but provides a
         convenient always-visible trigger from any tab.
         """
-        self._backend.machine_off()
-        logger.warning("Software E-Stop triggered from status bar")
+        # Was machine_off() (STATE_OFF) until 2026-11-10: the machine turned
+        # off but LinuxCNC never entered ESTOP, and the ribbon stayed IDLE.
+        ok = self._backend.estop()
+        logger.warning("Software E-Stop triggered from status bar (%s)",
+                       "ESTOP" if ok else "FAILED - machine off only")
+        if not ok:
+            self._status_bar.show_error("Software E-Stop failed - machine turned OFF only")
 
     def _poll_status_bar(self):
         """Update the status bar with live machine data (runs at 5 Hz)."""
@@ -374,6 +379,8 @@ class MainWindow(QMainWindow):
         from hal.interface import InterpState, TaskState, TaskMode
         if s.estop_active:
             state_str = "ESTOP"
+        elif not s.machine_on:
+            state_str = "OFF"      # E-stop reset but machine off: not ready
         elif s.interp_state == InterpState.READING:
             state_str = "RUN"
         elif s.interp_state == InterpState.PAUSED:

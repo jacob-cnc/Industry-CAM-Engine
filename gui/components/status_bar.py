@@ -30,6 +30,7 @@ _STATE_COLORS = {
     "RUN": COLORS["status_info"],
     "PAUSE": COLORS["status_warning"],
     "ESTOP": COLORS["status_error"],
+    "OFF": COLORS["text_disabled"],
 }
 
 # Task-mode indicator palette — (fill, border, text).
@@ -585,7 +586,7 @@ class StatusBar(QWidget):
         """Update machine state indicator.
 
         Args:
-            state_str: One of "IDLE", "RUN", "PAUSE", "ESTOP".
+            state_str: One of "IDLE", "RUN", "PAUSE", "ESTOP", "OFF".
         """
         state_str = state_str.upper()
         self._state = state_str

@@ -219,6 +219,14 @@ class HALBackend(ABC):
     # E-Stop & Power
     # ------------------------------------------------------------------
 
+    def estop(self) -> bool:
+        """Command E-STOP (LinuxCNC task state ESTOP). Returns True on success.
+
+        Backends override this. The fallback only turns the machine off, which
+        stops motion but is NOT an E-stop, so it reports failure."""
+        self.machine_off()
+        return False
+
     @abstractmethod
     def estop_reset(self) -> bool:
         """Reset E-stop. Returns True on success."""
