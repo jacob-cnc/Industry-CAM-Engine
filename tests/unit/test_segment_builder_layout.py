@@ -68,14 +68,31 @@ def test_insert_is_zero_length_and_keeps_everything_else(seg, number):
     assert _corner_types(seg) == expected
 
 
-def test_numbers_follow_segments_and_skip_corner_rows(seg):
-    seg.insert_segment_before(2)
+def test_numbers_and_vertex_badges(seg):
+    """Every row is a segment (vertex model); its number is followed by the
+    badge for the break at its vertex (row k ends at Vk)."""
+    seg.insert_segment_before(2)       # fillet V1, None V2 (new), chamfer V3
     t = seg._table
     labels = [t.verticalHeaderItem(r).text() for r in range(t.rowCount())]
-    assert [l for l in labels if l] == ["1", "2", "3", "4"]
-    for r, label in enumerate(labels):
-        assert (label == "") == seg._is_corner_break_row(r)
+    assert [l.split("\n")[0] for l in labels] == ["1", "2", "3", "4"]
+    assert labels[0].split("\n")[1] == "R.03"
+    assert "\n" not in labels[1]                     # new vertex: no break
+    assert labels[2].split("\n")[1] == "C.02"
+    assert "\n" not in labels[3]                     # last point: no vertex
     assert seg._insert_before.maximum() == 4
+
+
+def test_vertex_breaks_move_with_their_point(seg):
+    seg._table.setCurrentCell(0, COL_X)              # point 1 carries the fillet
+    seg._on_move_down()
+    assert _corner_types(seg) == ["chamfer", "fillet"]
+
+
+def test_trim_note_marks_badge(seg):
+    seg.set_vertex_notes({0: ("trimmed", "V1: fillet cut short")})
+    item = seg._table.verticalHeaderItem(0)
+    assert item.text().endswith("!")
+    assert "cut short" in item.toolTip()
 
 
 @pytest.mark.parametrize("col", [COL_X, 2])          # X and Z cells

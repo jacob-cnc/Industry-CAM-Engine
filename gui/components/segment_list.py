@@ -34,7 +34,7 @@ from PyQt5.QtGui import (
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QTableWidget, QTableWidgetItem, QComboBox, QHeaderView,
-    QAbstractItemView, QLabel, QFrame, QSpinBox, QStyledItemDelegate,
+    QAbstractItemView, QSpinBox, QStyledItemDelegate,
     QLineEdit,
 )
 
@@ -110,236 +110,29 @@ def _radius_symbol_icon(size: int = 18) -> QIcon:
     return QIcon(pm)
 
 
-# Corner break type options
-CB_TYPES = ["None", "Chamfer", "Arc"]
+def _swap_vertex_breaks(breaks: list, a: int, b: int) -> None:
+    """Swap the breaks of points a and b in place. The last point has no
+    vertex, so a break moved onto it is dropped and it brings none back."""
+    n = len(breaks)
+    ba = breaks[a] if a < n else None
+    bb = breaks[b] if b < n else None
+    if a < n:
+        breaks[a] = bb
+    if b < n:
+        breaks[b] = ba
 
-# Row heights
+
+# Row height (segment rows only; corner breaks live on vertices).
 SEGMENT_ROW_HEIGHT = 69   # 55 * 1.25
-CB_ROW_HEIGHT = 50        # 40 * 1.25
-
-
-class CornerBreakRow(QFrame):
-    """Sub-row widget for corner break between two adjacent segments.
-
-    Displays a dashed separator with:
-    - Type combo: None / Chamfer / Arc
-    - Size field: leg length (chamfer) or radius (arc) in inches
-    - Angle field: chamfer angle in degrees (only visible for chamfer)
-
-    Signals:
-        changed(): Emitted when any field is edited.
-    """
-
-    changed = pyqtSignal()
-
-    def __init__(self, index: int, parent: Optional[QWidget] = None):
-        super().__init__(parent)
-        self._index = index
-        self._updating = False
-        self._setup_ui()
-        self._connect_signals()
-
-    @property
-    def index(self) -> int:
-        """Junction index (between segment[index] and segment[index+1])."""
-        return self._index
-
-    @index.setter
-    def index(self, value: int):
-        self._index = value
-        self._update_label()
-
-    def _setup_ui(self):
-        """Build the corner break row layout."""
-        self.setFrameShape(QFrame.NoFrame)
-        self.setStyleSheet(
-            f"CornerBreakRow {{"
-            f"  background-color: {COLORS['bg_surface']};"
-            f"  border-top: 1px dashed {COLORS['border_normal']};"
-            f"  border-bottom: 1px dashed {COLORS['border_normal']};"
-            f"  padding: 2px 4px;"
-            f"}}"
-        )
-        self.setFixedHeight(CB_ROW_HEIGHT)
-
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(4, 2, 4, 2)
-        layout.setSpacing(4)
-
-        # Shared bubble style for labels
-        label_bubble_style = (
-            f"color: {COLORS['text_secondary']};"
-            f"background-color: {COLORS['bg_panel']};"
-            f"border: 1px solid {COLORS['border_normal']};"
-            f"border-radius: 2px;"
-            f"padding: 1px 4px;"
-            f"font-size: {FONTS['small_size']}pt;"
-        )
-
-        # Shared compact style for numeric fields
-        field_height = "max-height: 20px; min-height: 20px;"
-
-        # Junction label (e.g., "1→2")
-        self._label = QLabel()
-        self._label.setStyleSheet(label_bubble_style)
-        self._label.setFixedWidth(44)
-        self._label.setAlignment(Qt.AlignCenter)
-        self._update_label()
-        layout.addWidget(self._label)
-
-        # Type combo
-        self._type_combo = QComboBox()
-        self._type_combo.addItems(CB_TYPES)
-        self._type_combo.setCurrentText("None")
-        self._type_combo.setFixedWidth(100)
-        self._type_combo.setStyleSheet(
-            f"QComboBox {{"
-            f"  background-color: {COLORS['bg_panel']};"
-            f"  color: {COLORS['text_primary']};"
-            f"  border: 1px solid {COLORS['border_normal']};"
-            f"  border-radius: 2px;"
-            f"  padding: 1px 4px;"
-            f"  max-height: 22px; min-height: 22px;"
-            f"}}"
-        )
-        layout.addWidget(self._type_combo)
-
-        # Size label + field
-        self._size_label = QLabel("C:")
-        self._size_label.setStyleSheet(label_bubble_style)
-        self._size_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self._size_label)
-
-        from gui.components.numeric_field import NumericField, NumericFieldConfig
-        self._size_field = NumericField(NumericFieldConfig(
-            min_value=0.001, max_value=1.0, decimals=4, default_value=0.015,
-            suffix='"',
-        ))
-        self._size_field.setFixedWidth(117)
-        self._size_field.setStyleSheet(
-            self._size_field.styleSheet() + field_height
-        )
-        layout.addWidget(self._size_field)
-
-        # Angle label + field (chamfer only)
-        self._angle_label = QLabel("A:")
-        self._angle_label.setStyleSheet(label_bubble_style)
-        self._angle_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self._angle_label)
-
-        self._angle_field = NumericField(NumericFieldConfig(
-            min_value=1.0, max_value=89.0, decimals=1, default_value=45.0,
-            suffix="°", unit_aware=False,
-        ))
-        self._angle_field.setFixedWidth(91)
-        self._angle_field.setStyleSheet(
-            self._angle_field.styleSheet() + field_height
-        )
-        layout.addWidget(self._angle_field)
-
-        layout.addStretch()
-
-        # Start with fields hidden (type = None)
-        self._set_fields_visible(False)
-
-    def _connect_signals(self):
-        """Wire combo and field changes."""
-        self._type_combo.currentTextChanged.connect(self._on_type_changed)
-        self._size_field.value_changed.connect(self._on_value_changed)
-        self._angle_field.value_changed.connect(self._on_value_changed)
-
-    def _update_label(self):
-        """Update the junction label text."""
-        self._label.setText(f"{self._index + 1}→{self._index + 2}")
-
-    def _set_fields_visible(self, visible: bool):
-        """Show/hide size and angle fields based on type."""
-        cb_type = self._type_combo.currentText()
-        has_break = cb_type != "None"
-        is_chamfer = cb_type == "Chamfer"
-
-        self._size_label.setVisible(has_break)
-        self._size_field.setVisible(has_break)
-        self._angle_label.setVisible(is_chamfer)
-        self._angle_field.setVisible(is_chamfer)
-
-        # Update size label based on type
-        if is_chamfer:
-            self._size_label.setText("C:")
-        elif cb_type == "Arc":
-            self._size_label.setText("R:")
-
-    def _on_type_changed(self, text: str):
-        """Handle type combo change."""
-        self._set_fields_visible(text != "None")
-        if not self._updating:
-            self.changed.emit()
-
-    def _on_value_changed(self):
-        """Handle size/angle field change."""
-        if not self._updating:
-            self.changed.emit()
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
-    def get_data(self) -> Optional[dict]:
-        """Return corner break data as a dict, or None if type is None.
-
-        Returns:
-            None if type is "None", otherwise:
-            {"type": "chamfer"|"fillet", "size": float, "angle": float, "radius": float}
-        """
-        cb_type = self._type_combo.currentText()
-        if cb_type == "None":
-            return None
-
-        size = self._size_field.value()
-        if cb_type == "Chamfer":
-            return {
-                "type": "chamfer",
-                "size": size,
-                "angle": self._angle_field.value(),
-                "radius": 0.0,
-            }
-        else:  # Arc
-            return {
-                "type": "fillet",
-                "radius": size,
-                "size": 0.0,
-                "angle": 45.0,
-            }
-
-    def set_data(self, data: Optional[dict]):
-        """Load corner break data from a dict.
-
-        Args:
-            data: None for no break, or dict with "type", "size"/"radius", "angle".
-        """
-        self._updating = True
-        try:
-            if data is None or data.get("type", "none") == "none":
-                self._type_combo.setCurrentText("None")
-            elif data["type"] == "chamfer":
-                self._type_combo.setCurrentText("Chamfer")
-                self._size_field.set_value(data.get("size", 0.015))
-                self._angle_field.set_value(data.get("angle", 45.0))
-            elif data["type"] == "fillet":
-                self._type_combo.setCurrentText("Arc")
-                self._size_field.set_value(data.get("radius", 0.015))
-            self._set_fields_visible(True)
-        finally:
-            self._updating = False
 
 
 class SegmentListWidget(QWidget):
-    """Profile segment list editor with corner break sub-rows.
+    """Profile segment list editor (vertex model for corner breaks).
 
     Allows the user to build a profile segment by segment using a table
-    with Type, X, Z, and Radius columns. Between each pair of segments,
-    a CornerBreakRow sub-row allows specifying chamfers or arcs
-    (Mazak-style conversational programming).
+    with Type, X, Z, and Radius columns. Corner breaks belong to vertices
+    (row k ends at vertex Vk) and are edited with the Program tab's
+    corner-break tool; each row number shows a small badge for its vertex.
 
     Provides Add/Remove/Move buttons and inline validation for arc geometry.
 
@@ -361,18 +154,17 @@ class SegmentListWidget(QWidget):
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._updating = False  # Guard against recursive signal emission
-        self._corner_break_rows: List[CornerBreakRow] = []
+        # Vertex model: _vertex_breaks[k] is the break at V(k+1), the corner
+        # at the end of segment row k+1. Edited by the corner-break tool.
+        self._vertex_breaks: List[Optional[dict]] = []
+        self._vertex_notes: dict = {}
         self._setup_ui()
         self._connect_signals()
         # Subscribe to unit mode changes for display conversion
         unit_state.unit_changed.connect(self._on_unit_changed)
 
     def _setup_ui(self):
-        """Build the widget layout: table with interleaved corner breaks + button bar.
-
-        Corner break rows are inserted as table rows between segment rows.
-        They span all columns and contain a CornerBreakRow widget.
-        """
+        """Build the widget layout: segment table + button bar."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
@@ -575,6 +367,7 @@ class SegmentListWidget(QWidget):
         finally:
             self._table.blockSignals(False)
             self._updating = False
+        self._refresh_row_numbers()       # badges show sizes in the new unit
         self._update_columns()            # metric values can be wider
 
     # ------------------------------------------------------------------
@@ -598,13 +391,35 @@ class SegmentListWidget(QWidget):
         return segments
 
     def get_corner_breaks(self) -> List[Optional[dict]]:
-        """Return current corner break data.
+        """Return the corner break at each vertex.
 
-        Returns:
-            List of length (num_segments - 1). Each element is None (no break)
-            or a dict: {"type": "chamfer"|"fillet", "size": float, "angle": float, "radius": float}
+        Vertex model: element k is vertex V(k+1), the corner at the END of
+        segment row k+1 (V1 = face -> segment 1). Length = segments - 1 (the
+        last point has no vertex). Each element is None or
+        {"type": "chamfer"|"fillet", "size": float, "angle": float, "radius": float}.
         """
-        return [cb_row.get_data() for cb_row in self._corner_break_rows]
+        n = max(0, self._segment_count() - 1)
+        out = list(self._vertex_breaks[:n])
+        out += [None] * (n - len(out))
+        return [dict(b) if b else None for b in out]
+
+    def set_vertex_breaks(self, breaks: List[Optional[dict]]) -> None:
+        """Replace all vertex breaks (used by the corner-break tool)."""
+        self._vertex_breaks = [dict(b) if b else None for b in breaks]
+        self._refresh_row_numbers()
+        self._update_columns()
+        self._emit_corner_breaks_changed()
+
+    def set_vertex_notes(self, notes: dict) -> None:
+        """Per-vertex status for the row badges: {point_index: (status,
+        message)}. Non-'ok' statuses mark the badge with '!' and the full
+        message becomes the row number's tooltip."""
+        self._vertex_notes = dict(notes or {})
+        self._refresh_row_numbers()
+
+    def _segment_count(self) -> int:
+        return sum(1 for r in range(self._table.rowCount())
+                   if not self._is_corner_break_row(r))
 
     def set_segments(self, segments: List[dict],
                      corner_breaks: Optional[List[Optional[dict]]] = None):
@@ -619,23 +434,21 @@ class SegmentListWidget(QWidget):
                           If None, all corner breaks default to None.
         """
         self._updating = True
-        self._corner_break_rows.clear()
         self._table.setRowCount(0)
+        n_vertices = max(0, len(segments) - 1)
+        breaks = list(corner_breaks or [])[:n_vertices]
+        breaks += [None] * (n_vertices - len(breaks))
+        self._vertex_breaks = [
+            dict(b) if b and b.get("type", "none") != "none" else None for b in breaks]
 
         try:
-            for i, seg in enumerate(segments):
+            for seg in segments:
                 self._add_row(
                     seg_type=seg.get("type", "line"),
                     x=seg.get("x", 0.0),
                     z=seg.get("z", 0.0),
                     radius=seg.get("radius", 0.0),
                 )
-                # Insert corner break row after each segment except the last
-                if i < len(segments) - 1:
-                    cb_data = None
-                    if corner_breaks and i < len(corner_breaks):
-                        cb_data = corner_breaks[i]
-                    self._insert_corner_break_row(i, cb_data)
         finally:
             self._updating = False
 
@@ -646,7 +459,8 @@ class SegmentListWidget(QWidget):
 
     def clear(self):
         """Remove all segments and corner breaks."""
-        self._clear_corner_breaks()
+        self._vertex_breaks = []
+        self._vertex_notes = {}
         self._table.setRowCount(0)
         self._refresh_row_numbers()
         self._update_columns()
@@ -656,100 +470,11 @@ class SegmentListWidget(QWidget):
     # Corner break management
     # ------------------------------------------------------------------
 
-    def _rebuild_corner_breaks(self, data: Optional[List[Optional[dict]]] = None):
-        """Rebuild the table with interleaved corner break rows.
-
-        The table layout is:
-            Row 0: Segment 0
-            Row 1: Corner break 0→1 (if >= 2 segments)
-            Row 2: Segment 1
-            Row 3: Corner break 1→2 (if >= 3 segments)
-            ...
-
-        This method rebuilds the entire table from scratch using current
-        segment data and the provided (or preserved) corner break data.
-        """
-        # Collect current segment data
-        segments = []
-        for row in range(self._table.rowCount()):
-            if self._is_corner_break_row(row):
-                continue
-            seg = self._read_row(row)
-            if seg is not None:
-                segments.append(seg)
-
-        # Preserve existing corner break data if none provided
-        if data is None:
-            data = [cb.get_data() for cb in self._corner_break_rows]
-
-        # Clear everything
-        self._corner_break_rows.clear()
-        self._updating = True
-        self._table.setRowCount(0)
-
-        # Rebuild interleaved
-        for i, seg in enumerate(segments):
-            self._add_row(
-                seg_type=seg["type"],
-                x=seg["x"],
-                z=seg["z"],
-                radius=seg["radius"],
-            )
-            # Insert corner break row after each segment except the last
-            if i < len(segments) - 1:
-                cb_data = data[i] if i < len(data) else None
-                self._insert_corner_break_row(i, cb_data)
-
-        self._updating = False
-        self._refresh_row_numbers()
-        self._update_columns()
-
-    def _insert_corner_break_row(self, junction_index: int, data: Optional[dict] = None):
-        """Insert a corner break row at the current end of the table.
-
-        Args:
-            junction_index: Which junction this represents (between segment[i] and segment[i+1])
-            data: Optional corner break data to populate
-        """
-        row = self._table.rowCount()
-        self._table.insertRow(row)
-        self._table.setSpan(row, 0, 1, 4)  # Span all 4 columns
-        self._table.setRowHeight(row, CB_ROW_HEIGHT)
-
-        cb_row = CornerBreakRow(index=junction_index, parent=self._table)
-        if data is not None:
-            cb_row.set_data(data)
-        cb_row.changed.connect(self._on_corner_break_changed)
-        self._table.setCellWidget(row, 0, cb_row)
-
-        # Mark this row as non-selectable/non-editable
-        for col in range(4):
-            item = QTableWidgetItem()
-            item.setFlags(Qt.NoItemFlags)
-            if col > 0:  # col 0 has the widget
-                self._table.setItem(row, col, item)
-
-        self._corner_break_rows.append(cb_row)
-
     def _is_corner_break_row(self, row: int) -> bool:
-        """Check if a table row is a corner break row (vs a segment row)."""
-        widget = self._table.cellWidget(row, 0)
-        return isinstance(widget, CornerBreakRow)
-
-    def _clear_corner_breaks(self):
-        """Disconnect all corner break row signals."""
-        for cb_row in self._corner_break_rows:
-            try:
-                cb_row.changed.disconnect(self._on_corner_break_changed)
-            except (TypeError, RuntimeError):
-                pass
-        self._corner_break_rows.clear()
-
-    def _on_corner_break_changed(self):
-        """Handle corner break field edit."""
-        if self._updating:
-            return
-        self._emit_corner_breaks_changed()
+        """Always False: since the vertex model (breaks live on vertices and
+        are edited with the corner-break tool) every table row is a segment.
+        Kept so row/segment index helpers read the same as before."""
+        return False
 
     def _emit_corner_breaks_changed(self):
         """Emit corner_breaks_changed with current data."""
@@ -826,8 +551,7 @@ class SegmentListWidget(QWidget):
         combo = self._table.cellWidget(row, COL_TYPE)
         if combo is None:
             return None
-        # Skip if it's a CornerBreakRow widget in col 0
-        if isinstance(combo, CornerBreakRow):
+        if not isinstance(combo, QComboBox):
             return None
 
         seg_type = combo.currentText().lower()
@@ -917,17 +641,39 @@ class SegmentListWidget(QWidget):
     # Numbering and column widths
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def break_badge(b: Optional[dict]) -> str:
+        """Compact badge text for a vertex break: 'C.1' / 'R.03' / ''.
+        Sizes shown in the current display unit, trailing zeros dropped."""
+        if not b or b.get("type", "none") == "none":
+            return ""
+        kind = b["type"]
+        value = b.get("size", 0.0) if kind == "chamfer" else b.get("radius", 0.0)
+        txt = f"{unit_state.to_display(float(value)):.4f}".rstrip("0").rstrip(".")
+        if txt.startswith("0."):
+            txt = txt[1:]
+        return ("C" if kind == "chamfer" else "R") + txt
+
     def _refresh_row_numbers(self) -> None:
-        """Segment numbers in the vertical header; blank on corner rows.
+        """Segment numbers in the vertical header, each with a small badge for
+        the break at its vertex (row k ends at Vk), e.g. '3' over 'R.1'.
         Also keeps the Insert '#' box within 1..segment count."""
-        labels, n = [], 0
+        n = self._segment_count()
         for row in range(self._table.rowCount()):
-            if self._is_corner_break_row(row):
-                labels.append("")
-            else:
-                n += 1
-                labels.append(str(n))
-        self._table.setVerticalHeaderLabels(labels)
+            label = str(row + 1)
+            tip = ""
+            if row < n - 1 and row < len(self._vertex_breaks):
+                badge = self.break_badge(self._vertex_breaks[row])
+                status, message = self._vertex_notes.get(row, ("ok", ""))
+                if badge:
+                    if status != "ok":
+                        badge += "!"
+                    label += "\n" + badge
+                    tip = f"V{row + 1}: {badge}" + (f"\n{message}" if message else "")
+            item = self._table.verticalHeaderItem(row) or QTableWidgetItem()
+            item.setText(label)
+            item.setToolTip(tip)
+            self._table.setVerticalHeaderItem(row, item)
         self._insert_before.setRange(1, max(1, n))
 
     def _selected_row_is_arc(self) -> bool:
@@ -1038,10 +784,12 @@ class SegmentListWidget(QWidget):
         segments = self.get_segments()
         corner_breaks = self.get_corner_breaks()
 
-        # Swap segments
+        # Swap segments; each vertex break travels with its point.
         segments[seg_index], segments[seg_index - 1] = segments[seg_index - 1], segments[seg_index]
+        _swap_vertex_breaks(corner_breaks, seg_index, seg_index - 1)
 
         self.set_segments(segments, corner_breaks)
+        self._table.setCurrentCell(seg_index - 1, COL_X)
 
     def _on_move_down(self):
         """Move the selected segment down by one position."""
@@ -1056,10 +804,12 @@ class SegmentListWidget(QWidget):
 
         corner_breaks = self.get_corner_breaks()
 
-        # Swap segments
+        # Swap segments; each vertex break travels with its point.
         segments[seg_index], segments[seg_index + 1] = segments[seg_index + 1], segments[seg_index]
+        _swap_vertex_breaks(corner_breaks, seg_index, seg_index + 1)
 
         self.set_segments(segments, corner_breaks)
+        self._table.setCurrentCell(seg_index + 1, COL_X)
 
     def _table_row_to_segment_index(self, row: int) -> Optional[int]:
         """Convert a table row number to a logical segment index.
@@ -1329,7 +1079,7 @@ class SegmentListWidget(QWidget):
             return None
 
         combo = self._table.cellWidget(prev_row, COL_TYPE)
-        if combo is None or isinstance(combo, CornerBreakRow):
+        if combo is None or not isinstance(combo, QComboBox):
             return None
 
         seg_type = combo.currentText()
@@ -1419,7 +1169,7 @@ class SegmentListWidget(QWidget):
                 continue
 
             combo = self._table.cellWidget(row, COL_TYPE)
-            if combo is None or isinstance(combo, CornerBreakRow):
+            if combo is None or not isinstance(combo, QComboBox):
                 continue
 
             is_arc = combo.currentText() == "ARC"

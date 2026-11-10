@@ -61,9 +61,25 @@ class VertexReport:
 
 
 @dataclass
+class VertexGeometry:
+    """Exact break geometry at one solved (line-line) vertex, radius space.
+    Consumers that draw the profile (the Program-tab preview) use this so
+    they show exactly what the engine machines."""
+    vertex: int                         # 1-based V number (point index + 1)
+    t_in: Tuple[float, float]           # (r, z) where the incoming segment ends
+    t_out: Tuple[float, float]          # (r, z) where the outgoing segment starts
+    kind: str                           # "chamfer" (straight) | "fillet" (arc)
+    center: Optional[Tuple[float, float]] = None   # fillet centre (r, z)
+    radius: float = 0.0                            # fillet radius
+
+
+@dataclass
 class OdCornerResult:
     coords: List[dict]                        # zone_builder coordinate format
     reports: List[VertexReport] = field(default_factory=list)
+    # point index -> geometry, for every vertex solved by this module (not
+    # the legacy arc-adjacent fallback, not skipped vertices).
+    geometry: dict = field(default_factory=dict)
 
     @property
     def trims(self) -> List[VertexReport]:
@@ -170,6 +186,7 @@ def build_od_corner_coords(profile: ClosedProfile) -> OdCornerResult:
     break_end_dir = [None] * n
     # Per point: (trim_in point, element dict) or (legacy entries, None).
     plan = {}
+    geometry = {}
 
     for i in range(n - 1):                          # vertex V(i+1) at pts[i]
         cb = breaks[i] if i < len(breaks) else None
@@ -231,6 +248,7 @@ def build_od_corner_coords(profile: ClosedProfile) -> OdCornerResult:
                 rep.message = _chamfer_trim_msg(rep, size, leg_in, leg_out, i, consumed_from_start)
             plan[i] = (t_in, {"type": SegmentType.LINE, "x_radius": t_out[0],
                               "z": t_out[1], "radius": 0.0})
+            geometry[i] = VertexGeometry(i + 1, t_in, t_out, "chamfer")
             consumed_from_start[i + 1] = leg_out
             break_end_dir[i + 1] = _unit(_sub(t_out, t_in))
         else:
@@ -296,6 +314,7 @@ def build_od_corner_coords(profile: ClosedProfile) -> OdCornerResult:
             plan[i] = (t_in, {"type": SegmentType.ARC, "x_radius": t_out[0],
                               "z": t_out[1],
                               "radius": _signed_arc_radius(t_in, t_out, center, arc_r)})
+            geometry[i] = VertexGeometry(i + 1, t_in, t_out, "fillet", center, arc_r)
             consumed_from_start[i + 1] = _len(_sub(t_out, c))
             # Arc tangent at its end point, in the direction of travel.
             rad_end = _unit(_sub(t_out, center))
@@ -322,7 +341,22 @@ def build_od_corner_coords(profile: ClosedProfile) -> OdCornerResult:
                            "z": pts[i][1], "radius": seg.radius,
                            "quadrant": seg.quadrant,
                            "quadrant_sign": seg.quadrant_sign})
-    return OdCornerResult(coords, reports)
+    return OdCornerResult(coords, reports, geometry)
+
+
+def od_vertex_kinds(profile: ClosedProfile) -> dict:
+    """Convex / concave for EVERY vertex (point index -> str), whether or
+    not it has a break - for labelling vertices in the corner-break tool.
+    Uses segment chords (exact for lines; a label only for arc neighbours)."""
+    segs = profile.segments
+    pts = [(s.x / 2.0, s.z) for s in segs]
+    kinds = {}
+    for i in range(len(pts) - 1):
+        a = pts[i - 1] if i > 0 else (0.0, pts[0][1])
+        u_in, u_out = _unit(_sub(pts[i], a)), _unit(_sub(pts[i + 1], pts[i]))
+        kinds[i] = _od_corner_kind(u_in, u_out) if u_in != (0.0, 0.0) and \
+            u_out != (0.0, 0.0) else ""
+    return kinds
 
 
 def _cliff_fillet(anchor, corner, u_tan, radius, nominal_center, incoming_dir):
