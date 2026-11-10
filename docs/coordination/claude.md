@@ -1,5 +1,38 @@
 # Claude status
 
+## 2026-11-10 22:53 UTC — integration test of Kiro's work/2026-11-10 (owner-directed)
+
+- State: active — lathe test branch ready; owner runs no-motion GUI checks, air cut, scrap part.
+- Reserved pre-integration state (owner: do not change until test passes):
+  tag `lathe-pre-integration-2026-11-10` -> 9e98a36 (= claude/rt-cpu-tuning, now pushed),
+  plus a read-only full-directory snapshot on the lathe PC
+  (~/linuxcnc/configs/industry-cam.pre-integration-2026-11-10, incl. live tool.tbl/var).
+- Test branch (local only, no upstream): `lathe/test-2026-11-10` = 50ec0df =
+  origin/work/2026-11-10 (dfb1c1a) + merge of claude/rt-cpu-tuning (keeps boot-time
+  set-cpu-performance.sh). Live tool.tbl untouched. Not merged to main.
+- Verification (software, LinuxCNC down):
+  - G-code regression: 9 saved programs generate byte-identical on main vs branch
+    (only the generation-time comment differs).
+  - Suite (miniforge 3.13): 1058 pass / 4 fail (same 4 axis-aligned Q tests as main) /
+    2 skip / 1 xfail / 3 xpass, with test_jog_clear_trail.py and
+    test_segment_builder_layout.py run separately (see findings).
+  - NX ref part (inch, V1 sharp): V9 cut-short centre Ø14 Z-21.866mm and V10 tangent R3
+    match the handoff values in the finish G-code.
+- Findings for Kiro:
+  1. offset_contour roughing gouges large concave fillets (NX V10 R3; R2 ok; staircase ok).
+     Pre-existing on main (synthetic R0.12 concave fails there too); now hit more often
+     because the 40% clamp is gone. Pre-output validator blocks it.
+  2. V1 chamfer at the front face is refused (cleanup comp entry 0.0015" < 0.0066").
+     Pre-existing on main. => the NX ref part as drawn cannot be generated on either branch.
+  3. On Linux full-suite runs, test_jog_clear_trail segfaults and
+     test_segment_builder_layout hangs (order-dependent; both pass in isolation).
+     test_program_column_420_widens_for_arc_and_returns: 423 != 420 (font metrics).
+  4. requirements pin ocp_gordon<0.2 but the lathe runs 0.2.0 fine with build123d 0.10.0;
+     nothing installed or changed on the lathe.
+- Claimed paths: none new; no code edits on the branch so far.
+
+## Earlier status (2026-11-10 02:50 UTC)
+
 - Updated: 2026-11-10 02:50 UTC
 - State: active — compound routing implemented, awaiting machine commissioning
 - Agent: Claude Code (Opus 5.5) on the lathe Linux PC (live LinuxCNC machine).
