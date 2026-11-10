@@ -299,3 +299,5 @@ F. Machine-control classification: affects tool offsets -> software-verified onl
   axis-aligned quadrant-arc finish) / 1 skipped / 5 xfailed. State: idle.
 - 2026-11-09 05:00 UTC — main: Run tab completion waits for busy (fixes run-from highlight); Tools tab re-issues
   G43 when the edited tool is in the spindle. Full suite 521 pass / 4 known. No claims. State: idle.
+
+- 2026-11-10 02:41 UTC — Lathe PC OS/RT tuning (owner-applied, machine-local, no app code): kernel isolcpus=2,3 irqaffinity=0,1 + C-state limit, Bluetooth disabled/blacklisted, apt timers/cups/ModemManager/avahi disabled. Record: session-notes/2026-11-09-pc-os-rt-tuning.md, merged to main at 2d9b86c (docs only). No claims taken or changed. FYI for Codex: latency/test timing on the lathe PC may differ after this reboot.
