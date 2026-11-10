@@ -1,5 +1,17 @@
 # Claude status
 
+## 2026-11-10 23:52 UTC — hardware E-stop wired (lathe/test-2026-11-10, local)
+
+- Claimed + changed: industry-cam.hal (E-stop section, loadrt/addf), CLAUDE.md note,
+  gui/commissioning/pin_providers.py (mock labels).
+- NC button on TB3 P5 = gpio.004 (.in TRUE released, FALSE pressed/broken wire), verified
+  live by owner presses. 2470663 (plain and2) FAILED live: release cleared ESTOP by itself.
+  675afcb: LinuxCNC estop_latch (ok-in=user-enable-out, fault-in=gpio.004.in_not,
+  reset=user-request-enable, ok-out=emc-enable-in). Live: press -> ESTOP + machine off;
+  release -> stays ESTOP; Reset (released) -> clears; On works.
+- HAL rule for everyone: never add the button to the old estop-loop net (one driver per
+  net) and never use a plain and2 for it.
+
 ## 2026-11-10 23:43 UTC — concave fillet <= TNR handling (owner decision) on lathe/test-2026-11-10
 
 - Owner air-cut the regenerated GCH bore with the ID fillet on the arc-dialect fix:
