@@ -23,6 +23,12 @@ from hal.constants import (
     DEFAULT_JOG_VELOCITY, MAX_JOG_VELOCITY,
 )
 
+# Jog section "Clear Trail" button (px): height, and the extra space above
+# it that centres it between the Mode combo and the next section header.
+CLEAR_TRAIL_HEIGHT = 50
+CLEAR_TRAIL_SPACE_ABOVE = 14
+CLEAR_TRAIL_SPACE_BELOW = 10   # section headers no longer overhang 10 px
+
 
 # ======================================================================
 # Jog Controls Section
@@ -131,9 +137,19 @@ def build_jog_section() -> tuple:
     section.add_layout(inc_row)
 
     # --- Clear trail ---
+    # 50 px, like the Speed/Mode rows above. The QSS height beats the
+    # app-wide QPushButton rule (min-height 44 + 8 px padding), which made
+    # the old fixed 26 px button draw 60 px tall and spill out of the
+    # section. The spacer above centres it vertically between the Mode combo
+    # and the next section's header (measured: equal gaps above and below).
     btn_clear_trail = QPushButton("Clear Trail")
-    btn_clear_trail.setFixedHeight(26)
+    btn_clear_trail.setStyleSheet(
+        f"QPushButton {{ padding: 0px 16px; min-height: {CLEAR_TRAIL_HEIGHT}px;"
+        f" max-height: {CLEAR_TRAIL_HEIGHT}px; }}"
+    )
+    section.content_layout().addSpacing(CLEAR_TRAIL_SPACE_ABOVE)
     section.add_widget(btn_clear_trail)
+    section.content_layout().addSpacing(CLEAR_TRAIL_SPACE_BELOW)
 
     widgets = {
         "btn_x_plus": btn_x_plus,

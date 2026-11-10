@@ -27,12 +27,15 @@ Coordinates:
 import math
 from typing import List, Optional
 
-from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QColor, QFont, QPalette
+from PyQt5.QtCore import Qt, pyqtSignal, QEvent, QPointF, QSize
+from PyQt5.QtGui import (
+    QColor, QFont, QFontMetrics, QIcon, QPainter, QPalette, QPen, QPixmap,
+)
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QTableWidget, QTableWidgetItem, QComboBox, QHeaderView,
-    QAbstractItemView, QLabel, QFrame,
+    QAbstractItemView, QLabel, QFrame, QSpinBox, QStyledItemDelegate,
+    QLineEdit,
 )
 
 from gui.colors import COLORS, FONTS
@@ -46,7 +49,65 @@ COL_X = 1
 COL_Z = 2
 COL_RADIUS = 3
 
-COLUMN_HEADERS = ["Type", "X (Dia)", "Z", "Radius"]
+COLUMN_HEADERS = ["Type", "X (Dia)", "Z", "r"]   # radius header = drawn symbol + "r"
+
+# Segment-row text: large for readability; the 69 px rows already have room,
+# so rows do not grow with it.
+SEG_FONT_PX = 25
+# Widest readings each numeric column always reserves (7 characters covers
+# |value| < 10 in at 4 decimals and < 100 mm at 3), plus cell padding.
+SEG_VALUE_TEMPLATES = ("-8.8888", "88.8888", "-88.888")
+CELL_PAD = 6
+R_ICON_PX = 16   # radius-symbol size in the r column header
+# Room for the type combo's drop-down arrow, beside the widest type text.
+COMBO_ARROW_W = 24
+# Readable monospace families in order (JetBrains Mono is often not
+# installed; a bare style hint picks the thin Courier New on Windows).
+SEG_MONO_FAMILIES = [FONTS["mono_family"], "Consolas", "DejaVu Sans Mono"]
+
+
+class _SegmentCellDelegate(QStyledItemDelegate):
+    """Cell editor that keeps the cell's large font while typing.
+
+    The default editor is a plain QLineEdit, styled by the app-wide QLineEdit
+    rule (default font, 6 px padding, 36 px min-height), so the text shrank
+    the moment a cell was clicked. This one uses the cell's font, alignment
+    and padding, and fits inside the row.
+    """
+
+    def __init__(self, font: QFont, parent=None):
+        super().__init__(parent)
+        self._font = font
+
+    def createEditor(self, parent, option, index):  # noqa: N802 (Qt naming)
+        editor = super().createEditor(parent, option, index)
+        if isinstance(editor, QLineEdit):
+            families = ", ".join(f"'{f}'" for f in SEG_MONO_FAMILIES)
+            editor.setFont(self._font)
+            editor.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            editor.setStyleSheet(
+                f"QLineEdit {{ font-family: {families};"
+                f" font-size: {SEG_FONT_PX}px; padding: 0px {CELL_PAD // 2}px;"
+                f" min-height: 0px; border-radius: 0px; }}")
+        return editor
+
+
+def _radius_symbol_icon(size: int = 18) -> QIcon:
+    """Circle with a radius line from the 45-degree point to the centre."""
+    pm = QPixmap(size, size)
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing, True)
+    p.setPen(QPen(QColor(COLORS["text_primary"]), 1.4))
+    c = size / 2.0
+    r = size / 2.0 - 1.5
+    p.drawEllipse(QPointF(c, c), r, r)
+    k = r * math.cos(math.radians(45))
+    p.drawLine(QPointF(c, c), QPointF(c + k, c - k))
+    p.setBrush(QColor(COLORS["text_primary"]))
+    p.drawEllipse(QPointF(c, c), 1.3, 1.3)       # centre point
+    p.end()
+    return QIcon(pm)
 
 
 # Corner break type options
@@ -293,6 +354,9 @@ class SegmentListWidget(QWidget):
     segments_changed = pyqtSignal(list)
     corner_breaks_changed = pyqtSignal(list)
     selection_changed = pyqtSignal(int)  # Emits logical segment index (-1 if none)
+    # Total widget width the table needs to show every column without
+    # overflow (grows when an ARC row is selected and the r column opens).
+    required_width_changed = pyqtSignal(int)
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -318,42 +382,88 @@ class SegmentListWidget(QWidget):
         self._table.setHorizontalHeaderLabels(COLUMN_HEADERS)
         self._table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self._table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self._table.verticalHeader().setVisible(False)
+        # One line per cell: a compressed r column shows "0…", not two lines.
+        self._table.setWordWrap(False)
+        # No select-all corner button (it drew as a white square).
+        self._table.setCornerButtonEnabled(False)
+        self._table.setStyleSheet(
+            "QTableCornerButton::section { background: transparent; border: none; }")
 
-        # Column sizing
+        # Segment numbers down the left edge (subtle); corner-break rows
+        # get no number. Refreshed by _refresh_row_numbers().
+        vheader = self._table.verticalHeader()
+        vheader.setVisible(True)
+        vheader.setSectionResizeMode(QHeaderView.Fixed)
+        vheader.setDefaultAlignment(Qt.AlignCenter)
+        vheader.setStyleSheet(
+            f"QHeaderView::section {{ background: transparent; border: none;"
+            f" color: {COLORS['text_disabled']}; font-size: {FONTS['small_size']}pt;"
+            f" padding: 0px 2px; }}"
+        )
+
+        # Column sizing: fixed widths computed from the text they must show
+        # (_update_columns); spare width is shared by X and Z.
         header = self._table.horizontalHeader()
-        header.setSectionResizeMode(COL_TYPE, QHeaderView.Fixed)
-        header.resizeSection(COL_TYPE, 80)
-        header.setSectionResizeMode(COL_X, QHeaderView.Stretch)
-        header.setSectionResizeMode(COL_Z, QHeaderView.Stretch)
-        header.setSectionResizeMode(COL_RADIUS, QHeaderView.Stretch)
+        for col in (COL_TYPE, COL_X, COL_Z, COL_RADIUS):
+            header.setSectionResizeMode(col, QHeaderView.Fixed)
+        header.setMinimumSectionSize(10)
+        r_header = QTableWidgetItem(_radius_symbol_icon(R_ICON_PX), "r")
+        r_header.setToolTip("Radius (+R minor arc / -R major arc, Q / -Q quadrant)")
+        self._table.setHorizontalHeaderItem(COL_RADIUS, r_header)
+        self._table.setIconSize(QSize(R_ICON_PX, R_ICON_PX))
+        self._r_expanded = False
+        self._last_required_width = -1
 
-        # Mono font for numeric cells
-        self._mono_font = QFont(FONTS["mono_family"], FONTS["code_size"])
+        # Large mono font for numeric cells; same pixel size for the type combo.
+        self._mono_font = QFont(FONTS["mono_family"])
+        self._mono_font.setFamilies(SEG_MONO_FAMILIES)
         self._mono_font.setStyleHint(QFont.Monospace)
+        self._mono_font.setPixelSize(SEG_FONT_PX)
+        # Typing keeps the same large text (see _SegmentCellDelegate).
+        self._table.setItemDelegate(_SegmentCellDelegate(self._mono_font, self._table))
 
         layout.addWidget(self._table)
+        self._table.viewport().installEventFilter(self)
 
-        # Button bar
+        # Button bar. Same height and labels as before; horizontal padding
+        # trimmed from the app-wide 16 px to 6 px and the buttons share the
+        # row, so Add/Insert/#/Remove/Move Up/Move Down fit the 420 px column
+        # even with the panel's scrollbar showing (~384 px for the row).
+        btn_pad_ss = "QPushButton { padding-left: 6px; padding-right: 6px; }"
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(4)
 
         self._btn_add = QPushButton("Add")
+        self._btn_insert = QPushButton("Insert")
+        self._btn_insert.setToolTip("Insert a zero-length segment before segment #")
+        self._insert_before = QSpinBox()
+        self._insert_before.setPrefix("#")
+        self._insert_before.setRange(1, 1)
+        self._insert_before.setToolTip("Insert before this segment number")
+        # Match the buttons' 60 px (app QSpinBox rule: padding 6 + border 1).
+        self._insert_before.setStyleSheet("QSpinBox { min-height: 46px; }")
         self._btn_remove = QPushButton("Remove")
         self._btn_move_up = QPushButton("Move Up")
         self._btn_move_down = QPushButton("Move Down")
 
-        for btn in (self._btn_add, self._btn_remove, self._btn_move_up, self._btn_move_down):
+        # Order (owner's preference): Add, Remove, Insert [#], Move Up, Move Down.
+        for btn in (self._btn_add, self._btn_remove, self._btn_insert):
+            btn.setStyleSheet(btn_pad_ss)
             btn.setMinimumHeight(32)
-            btn_layout.addWidget(btn)
+            btn_layout.addWidget(btn, stretch=1)
+        btn_layout.addWidget(self._insert_before)
+        for btn in (self._btn_move_up, self._btn_move_down):
+            btn.setStyleSheet(btn_pad_ss)
+            btn.setMinimumHeight(32)
+            btn_layout.addWidget(btn, stretch=1)
 
-        btn_layout.addStretch()
         layout.addLayout(btn_layout)
 
     def _connect_signals(self):
         """Wire up button clicks and table edit signals."""
         self._btn_add.clicked.connect(self._on_add)
         self._btn_remove.clicked.connect(self._on_remove)
+        self._btn_insert.clicked.connect(self._on_insert)
         self._btn_move_up.clicked.connect(self._on_move_up)
         self._btn_move_down.clicked.connect(self._on_move_down)
         self._table.cellChanged.connect(self._on_cell_changed)
@@ -363,6 +473,7 @@ class SegmentListWidget(QWidget):
     def _on_selection_changed(self, current_row: int, _col: int,
                               _prev_row: int, _prev_col: int):
         """Emit logical segment index when the table selection changes."""
+        self._update_columns()            # r column opens for a selected ARC row
         if current_row < 0:
             self.selection_changed.emit(-1)
             return
@@ -464,6 +575,7 @@ class SegmentListWidget(QWidget):
         finally:
             self._table.blockSignals(False)
             self._updating = False
+        self._update_columns()            # metric values can be wider
 
     # ------------------------------------------------------------------
     # Public API
@@ -527,6 +639,8 @@ class SegmentListWidget(QWidget):
         finally:
             self._updating = False
 
+        self._refresh_row_numbers()
+        self._update_columns()
         self._validate_all()
         self._emit_changed()
 
@@ -534,6 +648,8 @@ class SegmentListWidget(QWidget):
         """Remove all segments and corner breaks."""
         self._clear_corner_breaks()
         self._table.setRowCount(0)
+        self._refresh_row_numbers()
+        self._update_columns()
         self._emit_changed()
 
     # ------------------------------------------------------------------
@@ -585,6 +701,8 @@ class SegmentListWidget(QWidget):
                 self._insert_corner_break_row(i, cb_data)
 
         self._updating = False
+        self._refresh_row_numbers()
+        self._update_columns()
 
     def _insert_corner_break_row(self, junction_index: int, data: Optional[dict] = None):
         """Insert a corner break row at the current end of the table.
@@ -662,6 +780,10 @@ class SegmentListWidget(QWidget):
             # Type column — combo box
             combo = QComboBox()
             combo.addItems(["LINE", "ARC"])
+            families = ", ".join(f"'{f}'" for f in SEG_MONO_FAMILIES)
+            combo.setStyleSheet(
+                f"QComboBox {{ font-family: {families};"
+                f" font-size: {SEG_FONT_PX}px; }}")
             combo.setCurrentText(seg_type.upper())
             combo.currentTextChanged.connect(self._on_type_changed)
             self._table.setCellWidget(row, COL_TYPE, combo)
@@ -749,6 +871,131 @@ class SegmentListWidget(QWidget):
         # New junction gets None corner break
         corner_breaks.append(None)
         self.set_segments(segments, corner_breaks)
+
+    def insert_segment_before(self, number: int) -> None:
+        """Insert a zero-length LINE segment so it becomes segment `number`
+        (1-based); the old `number` and everything after shift down by one.
+
+        Zero length: it takes the previous segment's endpoint (inserting
+        before #1 takes #1's point). Corner breaks stay as they are: the
+        junction right after the previous segment keeps its break, and the
+        new junction (new segment -> old `number`) starts as None. Not a
+        replace: no existing segment is modified.
+        """
+        segments = self.get_segments()
+        corner_breaks = self.get_corner_breaks()
+        if not segments:
+            self._on_add()
+            return
+        k = max(0, min(number - 1, len(segments) - 1))   # 0-based insert index
+        src = segments[k - 1] if k > 0 else segments[0]
+        segments.insert(k, {"type": "line", "x": src["x"], "z": src["z"],
+                            "radius": 0.0})
+        # Junction j sits between segment j and j+1. Old junction k-1 is now
+        # (k-1 -> new): kept. New junction k is (new -> old k): None.
+        corner_breaks = list(corner_breaks[:k]) + [None] + list(corner_breaks[k:])
+        self.set_segments(segments, corner_breaks)
+        new_row = self._segment_index_to_row(k)
+        if new_row is not None:
+            self._table.setCurrentCell(new_row, COL_X)
+
+    def _on_insert(self):
+        """Insert button: insert before the number in the '#' box."""
+        self.insert_segment_before(self._insert_before.value())
+
+    def _segment_index_to_row(self, seg_index: int) -> Optional[int]:
+        """Table row of logical segment `seg_index` (0-based), or None."""
+        n = -1
+        for row in range(self._table.rowCount()):
+            if not self._is_corner_break_row(row):
+                n += 1
+                if n == seg_index:
+                    return row
+        return None
+
+    # ------------------------------------------------------------------
+    # Numbering and column widths
+    # ------------------------------------------------------------------
+
+    def _refresh_row_numbers(self) -> None:
+        """Segment numbers in the vertical header; blank on corner rows.
+        Also keeps the Insert '#' box within 1..segment count."""
+        labels, n = [], 0
+        for row in range(self._table.rowCount()):
+            if self._is_corner_break_row(row):
+                labels.append("")
+            else:
+                n += 1
+                labels.append(str(n))
+        self._table.setVerticalHeaderLabels(labels)
+        self._insert_before.setRange(1, max(1, n))
+
+    def _selected_row_is_arc(self) -> bool:
+        row = self._table.currentRow()
+        if row < 0 or self._is_corner_break_row(row):
+            return False
+        combo = self._table.cellWidget(row, COL_TYPE)
+        return isinstance(combo, QComboBox) and combo.currentText() == "ARC"
+
+    def _column_needs(self) -> dict:
+        """Minimum width per column: the widest of the reserved templates,
+        every value currently in the column, and the header."""
+        fm = QFontMetrics(self._mono_font)
+        hfm = QFontMetrics(self._table.horizontalHeader().font())
+        base = max(fm.horizontalAdvance(s) for s in SEG_VALUE_TEMPLATES)
+
+        def widest(col):
+            w = base
+            for row in range(self._table.rowCount()):
+                if self._is_corner_break_row(row):
+                    continue
+                item = self._table.item(row, col)
+                if item is not None:
+                    w = max(w, fm.horizontalAdvance(item.text()))
+            return w + CELL_PAD
+
+        type_w = max(fm.horizontalAdvance(t) for t in ("LINE", "ARC")) \
+            + COMBO_ARROW_W + CELL_PAD
+        x_w = max(widest(COL_X), hfm.horizontalAdvance("X (Dia)") + CELL_PAD)
+        z_w = max(widest(COL_Z), hfm.horizontalAdvance("Z") + CELL_PAD)
+        # Compressed r column: room for the header symbol + "r" (the header
+        # adds its own ~6 px margin each side of icon and text).
+        r_header_w = R_ICON_PX + 6 + hfm.horizontalAdvance("r") + CELL_PAD + 12
+        r_w = widest(COL_RADIUS) if self._r_expanded else r_header_w
+        return {COL_TYPE: type_w, COL_X: x_w, COL_Z: z_w,
+                COL_RADIUS: max(r_w, r_header_w)}
+
+    def required_width(self) -> int:
+        """Widget width that shows every column without overflow."""
+        needs = self._column_needs()
+        t = self._table
+        return (t.verticalHeader().sizeHint().width() + sum(needs.values())
+                + 2 * t.frameWidth()
+                + t.verticalScrollBar().sizeHint().width())   # always reserved
+
+    def _update_columns(self) -> None:
+        """Set column widths (r opens only for a selected ARC row), share
+        spare width between X and Z, and report a changed requirement."""
+        self._r_expanded = self._selected_row_is_arc()
+        needs = self._column_needs()
+        avail = self._table.viewport().width()
+        extra = max(0, avail - sum(needs.values()))
+        widths = dict(needs)
+        widths[COL_X] += extra // 2
+        widths[COL_Z] += extra - extra // 2
+        header = self._table.horizontalHeader()
+        for col, w in widths.items():
+            if header.sectionSize(col) != w:
+                header.resizeSection(col, w)
+        req = self.required_width()
+        if req != self._last_required_width:
+            self._last_required_width = req
+            self.required_width_changed.emit(req)
+
+    def eventFilter(self, obj, event):  # noqa: N802 (Qt naming)
+        if obj is self._table.viewport() and event.type() == QEvent.Resize:
+            self._update_columns()
+        return super().eventFilter(obj, event)
 
     def _on_remove(self):
         """Remove the currently selected segment row."""
@@ -862,6 +1109,7 @@ class SegmentListWidget(QWidget):
             return
         if self._is_corner_break_row(row):
             return
+        self._update_columns()            # a longer value may need more width
         self._validate_all()
         self._emit_changed()
 
@@ -996,7 +1244,12 @@ class SegmentListWidget(QWidget):
         for row in range(self._table.rowCount()):
             if self._table.cellWidget(row, COL_TYPE) is sender:
                 self._update_arc_fields_enabled(row)
+                # Choosing a type selects that row (a click on the combo does
+                # not), so an ARC row opens the r column for editing.
+                if self._table.currentRow() != row:
+                    self._table.setCurrentCell(row, COL_X)
                 break
+        self._update_columns()
         self._validate_all()
         self._emit_changed()
 

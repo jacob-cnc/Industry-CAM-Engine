@@ -15,10 +15,11 @@ Signal wiring connects tabs for data flow:
 Works in offline mode (no LinuxCNC dependency).
 """
 
+import os
 import sys
 import logging
 
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QEvent, QPoint
 from PyQt5.QtGui import QPalette, QColor
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout,
@@ -128,6 +129,43 @@ class MainWindow(QMainWindow):
 
         # Default to Manual tab
         self._tab_widget.setCurrentWidget(self._manual_tab)
+
+        # Errors (LinuxCNC error channel, E-STOP, ...) show in the empty right
+        # side of the tab row, so a long message never widens the ribbon or
+        # pushes the window past the 1920 px screen. StatusBar keeps the
+        # show_error()/clear_error() API; only the label's home moves.
+        self._error_label = self._status_bar.error_label
+        self._error_label.setParent(self._tab_widget)
+        self._tab_widget.installEventFilter(self)
+        self._tab_widget.tabBar().installEventFilter(self)
+
+    # Gap between the last tab and the error label, and to the right edge.
+    _ERROR_GAP_LEFT = 16
+    _ERROR_GAP_RIGHT = 8
+
+    def eventFilter(self, obj, event):
+        """Keep the error label placed in the tab row as things resize."""
+        tabs = getattr(self, "_tab_widget", None)
+        if tabs is not None and obj in (tabs, tabs.tabBar()) and \
+                event.type() in (QEvent.Resize, QEvent.Show, QEvent.LayoutRequest):
+            self._place_error_label()
+        return super().eventFilter(obj, event)
+
+    def _place_error_label(self):
+        """Fill the tab row from the last tab's right edge to the window edge,
+        vertically centred, 40 px tall (or less if the tab row is shorter)."""
+        tabs = self._tab_widget
+        bar = tabs.tabBar()
+        if bar.count() == 0:
+            return
+        last = bar.tabRect(bar.count() - 1)
+        left = bar.mapTo(tabs, last.topRight()).x() + 1 + self._ERROR_GAP_LEFT
+        top = bar.mapTo(tabs, bar.rect().topLeft()).y()
+        width = tabs.width() - left - self._ERROR_GAP_RIGHT
+        height = min(40, max(0, bar.height() - 8))
+        self._error_label.setGeometry(
+            left, top + (bar.height() - height) // 2, max(0, width), height)
+        self._error_label.raise_()
 
     def _make_placeholder(self, text: str) -> QWidget:
         """Create a placeholder tab widget with a centered label.
@@ -480,6 +518,57 @@ def _apply_dark_palette(app: QApplication):
 
 
 # --------------------------------------------------------------------------
+# Live-screen emulation (offline preview on a dev PC)
+# --------------------------------------------------------------------------
+
+# The lathe's display: 15.6" FHD panel, Linux/X11 at 96 DPI, window maximized.
+LIVE_SCREEN_SIZE = (1920, 1080)
+
+
+def _enable_live_dpi_emulation():
+    """Draw the GUI 1:1 at 96 DPI on Windows, exactly like the lathe.
+
+    Without this, Qt 5 on a 125-150 % Windows display draws point-sized text
+    at 120-144 DPI while px-sized widgets (fixed buttons, ribbon chips) stay
+    the same, so text crowds the layout in a way the lathe never shows.
+    Pinning the font DPI to 96 (no Windows display scaling) gives the same
+    layout AND the same pixel count as the lathe: the window is 1920 real
+    pixels wide, so its physical size depends only on the monitor's pixel
+    density (about the lathe's on a 32" 4K). Set QT_FONT_DPI yourself to
+    override. Must run before QApplication is created. Windows-only: the
+    lathe (Linux, 96 DPI) is left exactly as it is.
+    """
+    if sys.platform != "win32":
+        return
+    os.environ.setdefault("QT_FONT_DPI", "96")
+
+
+def _show_at_live_size(window: QMainWindow):
+    """Show maximized on a 1920x1080 screen; on a larger one, as a 1920x1080
+    window so the offline preview matches what the lathe shows."""
+    screen = window.screen() or QApplication.primaryScreen()
+    avail = screen.availableGeometry()
+    target_w, target_h = LIVE_SCREEN_SIZE
+    if avail.width() <= target_w or avail.height() <= target_h:
+        window.showMaximized()
+        return
+    # Open ON the target screen. Moving a shown window onto a monitor with a
+    # different Windows scale makes Windows rescale it (e.g. 1918 -> 2301 px
+    # going from a 125 % to a 150 % monitor), undoing the size set below.
+    window.move(avail.topLeft() + QPoint(20, 20))
+    window.show()
+    # Size the outer frame (title bar included) to 1920x1080, then centre it.
+    frame_extra_w = window.frameGeometry().width() - window.width()
+    frame_extra_h = window.frameGeometry().height() - window.height()
+    window.resize(target_w - frame_extra_w, target_h - frame_extra_h)
+    frame = window.frameGeometry()
+    frame.moveCenter(avail.center())
+    window.move(frame.topLeft())
+    logger.info("Window sized to the lathe's %dx%d screen (this screen: %dx%d)",
+                target_w, target_h, avail.width(), avail.height())
+
+
+# --------------------------------------------------------------------------
 # Application Entry Point
 # --------------------------------------------------------------------------
 
@@ -490,6 +579,7 @@ def main():
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
 
+    _enable_live_dpi_emulation()
     app = QApplication(sys.argv)
     app.setApplicationName("Industry CAM Engine")
 
@@ -508,7 +598,12 @@ def main():
             window, "Offline preview mode",
             f"{_reason}.\n\nThe GUI is running OFFLINE with simulated data - no "
             "machine control. Check the Mesa card power/cable and relaunch."))
-    window.showMaximized()
+    _show_at_live_size(window)
+
+    # Layout debugging aid (ID tags, outlines, inspector, ruler, snapshots).
+    from gui.debug_overlay import debug_ui_enabled, install_debug_overlay
+    if debug_ui_enabled():
+        window._debug_overlay = install_debug_overlay(window)
 
     sys.exit(app.exec_())
 

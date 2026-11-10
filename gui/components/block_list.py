@@ -18,6 +18,13 @@ from PyQt5.QtGui import QColor, QFont
 from gui.colors import COLORS, FONTS
 from models.program import ProgramBlock
 
+# Control button sizing (px). Bubble radius matches the ribbon readouts.
+BTN_W = 52          # Dup / Up / Dn / Vis / Del width, and "+ Add" minimum
+BTN_H = 36          # their height, including the 1 px border
+BTN_ROW_PAD = 6     # space above and below them in the button row
+ADD_BTN_H = 30      # "+ Add" height (borderless)
+BUBBLE_RADIUS = 5
+
 
 # Block type display info — using ASCII-safe labels and distinct colors
 BLOCK_TYPE_INFO = {
@@ -70,8 +77,12 @@ class BlockListWidget(QWidget):
         layout.setSpacing(0)
 
         # Header row: Add button only (title provided by parent CollapsibleSection)
+        # Heights are set in QSS (min/max-height): the app-wide QPushButton
+        # rule (min-height 44 + 8 px padding) otherwise beats setFixedHeight,
+        # which made "+ Add" draw 48 px tall in this 34 px row and overlap
+        # the list below it.
         header = QWidget()
-        header.setFixedHeight(34)
+        header.setFixedHeight(ADD_BTN_H + 8)
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(0, 4, 0, 4)
         header_layout.setSpacing(4)
@@ -79,15 +90,15 @@ class BlockListWidget(QWidget):
         header_layout.addStretch()
 
         self._add_btn = QPushButton("+ Add")
-        self._add_btn.setFixedHeight(28)
-        self._add_btn.setMinimumWidth(54)
+        self._add_btn.setMinimumWidth(BTN_W)
         self._add_btn.setToolTip("Add operation block")
         self._add_btn.setStyleSheet(
             f"QPushButton {{"
             f"  background-color: {COLORS['btn_generate']};"
             f"  color: {COLORS['text_primary']};"
-            f"  border: none; border-radius: 3px;"
-            f"  padding: 2px 8px;"
+            f"  border: none; border-radius: {BUBBLE_RADIUS}px;"
+            f"  padding: 0px 10px;"
+            f"  min-height: {ADD_BTN_H}px; max-height: {ADD_BTN_H}px;"
             f"  font-size: {FONTS['small_size']}pt; font-weight: bold;"
             f"}}"
             f"QPushButton:hover {{ background-color: {COLORS['status_ok']}; }}"
@@ -128,11 +139,17 @@ class BlockListWidget(QWidget):
         layout.addWidget(self._list)
 
         # Control buttons row
+        # Row style scoped to the row itself (#blockBtnRow): unscoped, the
+        # border-top leaked onto every button and drew a stray top edge.
         btn_row = QWidget()
-        btn_row.setFixedHeight(44)
-        btn_row.setStyleSheet(f"background-color: {COLORS['bg_surface']}; border-top: 1px solid {COLORS['border_normal']};")
+        btn_row.setObjectName("blockBtnRow")
+        btn_row.setAttribute(Qt.WA_StyledBackground, True)
+        btn_row.setFixedHeight(BTN_H + 2 * BTN_ROW_PAD)
+        btn_row.setStyleSheet(
+            f"QWidget#blockBtnRow {{ background-color: {COLORS['bg_surface']};"
+            f" border-top: 1px solid {COLORS['border_normal']}; }}")
         btn_layout = QHBoxLayout(btn_row)
-        btn_layout.setContentsMargins(6, 8, 6, 8)
+        btn_layout.setContentsMargins(6, BTN_ROW_PAD, 6, BTN_ROW_PAD)
         btn_layout.setSpacing(4)
 
         self._dup_btn = self._make_btn("Dup", "Duplicate selected block")
@@ -153,40 +170,43 @@ class BlockListWidget(QWidget):
         self._vis_btn.clicked.connect(self._on_toggle_visibility)
         btn_layout.addWidget(self._vis_btn)
 
-        self._del_btn = self._make_btn("Del", "Delete selected block")
-        self._del_btn.setStyleSheet(
-            f"QPushButton {{"
-            f"  background-color: {COLORS['btn_danger']};"
-            f"  color: {COLORS['text_primary']};"
-            f"  border: none; border-radius: 3px;"
-            f"  padding: 2px 8px;"
-            f"  font-size: {FONTS['small_size']}pt;"
-            f"}}"
-            f"QPushButton:hover {{ background-color: #A03040; }}"
-        )
+        # Same size and bubble shape as the others; red fill marks it.
+        self._del_btn = self._make_btn(
+            "Del", "Delete selected block",
+            fill=COLORS['btn_danger'], text_color=COLORS['text_primary'],
+            hover="#A03040")
         self._del_btn.clicked.connect(self._on_delete)
         btn_layout.addWidget(self._del_btn)
 
         layout.addWidget(btn_row)
 
-    def _make_btn(self, text: str, tooltip: str) -> QPushButton:
+    def _make_btn(self, text: str, tooltip: str, fill: str = None,
+                  text_color: str = None, hover: str = None) -> QPushButton:
+        """Block-list control button: the ribbon's bubble look (panel fill,
+        1 px border, 5 px radius) at one fixed size, BTN_W x BTN_H.
+
+        QSS heights are the content box: BTN_H - 2 px border. Setting them in
+        QSS (not setFixedHeight) is what beats the app-wide QPushButton rule
+        that made these draw 48-50 px tall and get cut off.
+        """
         btn = QPushButton(text)
-        btn.setFixedHeight(28)
-        btn.setMinimumWidth(38)
+        btn.setFixedWidth(BTN_W)
         btn.setToolTip(tooltip)
+        inner = BTN_H - 2
         btn.setStyleSheet(
             f"QPushButton {{"
-            f"  background-color: transparent;"
-            f"  color: {COLORS['text_secondary']};"
+            f"  background-color: {fill or COLORS['bg_panel']};"
+            f"  color: {text_color or COLORS['text_primary']};"
             f"  border: 1px solid {COLORS['border_normal']};"
-            f"  border-radius: 3px;"
-            f"  padding: 2px 8px;"
-            f"  font-size: {FONTS['small_size']}pt;"
+            f"  border-radius: {BUBBLE_RADIUS}px;"
+            f"  padding: 0px;"
+            f"  min-height: {inner}px; max-height: {inner}px;"
+            f"  font-size: {FONTS['small_size']}pt; font-weight: bold;"
             f"}}"
             f"QPushButton:hover {{"
-            f"  background-color: {COLORS['btn_primary']};"
+            f"  background-color: {hover or COLORS['btn_primary']};"
             f"  color: {COLORS['text_primary']};"
-            f"  border-color: {COLORS['btn_primary']};"
+            f"  border-color: {hover or COLORS['btn_primary']};"
             f"}}"
         )
         return btn

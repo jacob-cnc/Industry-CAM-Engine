@@ -352,13 +352,52 @@ class ProgramTab(QWidget):
         self._right_panel = self._build_right_panel()
         self._splitter.addWidget(self._right_panel)
 
-        # Splitter proportions: left panel starts ~320px, right pane takes the rest.
-        # Previous values (600px initial, 400px minimum) caused the window to exceed
-        # 1920x1080 under LinuxCNC's launch path.
-        self._splitter.setSizes([320, 1200])
+        # Programming column opens at 420 px every launch (nothing cut off at
+        # that width); the user can drag it narrower (220 px min) or wider.
+        # It also widens on its own when the segment table needs more room
+        # (r column open for a selected ARC row) and returns afterwards; see
+        # _fit_program_column.
+        self._user_column_width = self.PROGRAM_COLUMN_WIDTH
+        self._splitter.setSizes([self.PROGRAM_COLUMN_WIDTH, 1200])
         self._splitter.setStretchFactor(0, 0)
         self._splitter.setStretchFactor(1, 1)
         self._left_panel.setMinimumWidth(220)
+        self._splitter.splitterMoved.connect(self._on_splitter_moved)
+        self._segment_list.required_width_changed.connect(
+            lambda _w: self._fit_program_column())
+        # Widening changes the chrome (scrollbars, margins) around the table:
+        # re-check after every resize so the final fit has no overflow.
+        self._segment_list.installEventFilter(self)
+        for section in (self._section_parameters, self._section_profile):
+            section.toggled.connect(lambda _e: self._fit_program_column())
+
+    PROGRAM_COLUMN_WIDTH = 420   # px, default programming-column width
+
+    def eventFilter(self, obj, event):  # noqa: N802 (Qt naming)
+        from PyQt5.QtCore import QEvent
+        if obj is getattr(self, "_segment_list", None) and \
+                event.type() in (QEvent.Resize, QEvent.Show):
+            self._fit_program_column()
+        return super().eventFilter(obj, event)
+
+    def _on_splitter_moved(self, pos: int, index: int):
+        """A user drag sets the column width to return to."""
+        self._user_column_width = self._splitter.sizes()[0]
+
+    def _fit_program_column(self):
+        """Column = the user's width, widened just enough that the segment
+        table never overflows (e.g. +r column for a selected ARC row)."""
+        sizes = self._splitter.sizes()
+        if len(sizes) != 2 or sum(sizes) <= 0:
+            return
+        target = self._user_column_width
+        seg = self._segment_list
+        if seg.isVisible() and seg.width() > 0:
+            chrome = self._left_panel.width() - seg.width()  # margins, scrollbar
+            target = max(target, seg.required_width() + chrome)
+        if target != sizes[0]:
+            total = sum(sizes)
+            self._splitter.setSizes([target, max(0, total - target)])
 
     def _build_left_panel(self) -> QWidget:
         """Build the left panel with collapsible accordion sections.
@@ -386,11 +425,26 @@ class ProgramTab(QWidget):
 
         # Block list (multi-operation management) — inside a collapsible section
         from gui.components.collapsible_section import CollapsibleSection as CS
-        self._section_blocks = CS("Blocks", expanded=True)
+        # First view shows the whole workflow: Parameters and Profile Segments
+        # open, the setup sections inside Parameters collapsed.
+        self._section_blocks = CS("Blocks", expanded=False)
         self._block_list = BlockListWidget()
         self._section_blocks.add_widget(self._block_list)
         self._section_blocks.setMinimumHeight(240)
-        panel_layout.addWidget(self._section_blocks)
+
+        # Parameters: one collapsible parent for everything defined before
+        # the profile (Blocks, Stock, Roughing, Finishing, and the Threading/
+        # Grooving/Parting panels). Collapse it once set, and Profile
+        # Segments below gets nearly the whole column height. Order follows a
+        # lathe program's decisions: toolpath type -> parameters -> profile.
+        self._section_parameters = CS("Parameters", expanded=True)
+        params_layout = self._section_parameters.content_layout()
+        params_layout.setContentsMargins(8, 2, 0, 2)   # slight indent: nested
+        # Exactly as tall as its contents: spare height goes to Profile
+        # Segments (or below it), never into gaps between these sections.
+        from PyQt5.QtWidgets import QSizePolicy
+        self._section_parameters.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        params_layout.addWidget(self._section_blocks)
 
         # Scrollable area for the accordion sections
         scroll = QScrollArea()
@@ -408,34 +462,29 @@ class ProgramTab(QWidget):
         self._section_type = CollapsibleSection("Toolpath Type", expanded=True)
         self._build_block_type_content(self._section_type)
         self._section_type.setVisible(False)
-        sections_layout.addWidget(self._section_type)
+        params_layout.addWidget(self._section_type)
 
         # --- Stock section ---
-        self._section_stock = CollapsibleSection("Stock", expanded=True)
+        self._section_stock = CollapsibleSection("Stock", expanded=False)
         self._build_stock_content(self._section_stock)
-        sections_layout.addWidget(self._section_stock)
+        params_layout.addWidget(self._section_stock)
 
         # --- Roughing section ---
         self._section_roughing = CollapsibleSection("Roughing", expanded=False)
         self._build_roughing_content(self._section_roughing)
-        sections_layout.addWidget(self._section_roughing)
+        params_layout.addWidget(self._section_roughing)
 
         # --- Finishing section ---
         self._section_finishing = CollapsibleSection("Finishing", expanded=False)
         self._build_finishing_content(self._section_finishing)
-        sections_layout.addWidget(self._section_finishing)
-
-        # --- Profile Segments section ---
-        self._section_profile = CollapsibleSection("Profile Segments", expanded=True)
-        self._build_profile_content(self._section_profile)
-        sections_layout.addWidget(self._section_profile, stretch=1)
+        params_layout.addWidget(self._section_finishing)
 
         # --- Threading Parameters section (hidden by default) ---
         from gui.components.threading_panel import ThreadingPanel
         self._section_threading = CollapsibleSection("Threading Parameters", expanded=True)
         self._threading_panel = ThreadingPanel()
         self._section_threading.add_widget(self._threading_panel)
-        sections_layout.addWidget(self._section_threading)
+        params_layout.addWidget(self._section_threading)
         self._section_threading.setVisible(False)
 
         # --- Grooving Parameters section (hidden by default) ---
@@ -443,15 +492,27 @@ class ProgramTab(QWidget):
         self._section_grooving = CollapsibleSection("Grooving Parameters", expanded=True)
         self._grooving_panel = GroovingPanel()
         self._section_grooving.add_widget(self._grooving_panel)
-        sections_layout.addWidget(self._section_grooving)
+        params_layout.addWidget(self._section_grooving)
         self._section_grooving.setVisible(False)
 
         # --- Parting Parameters section (hidden by default) ---
         self._section_parting = CollapsibleSection("Parting Parameters", expanded=True)
         self._parting_panel = GroovingPanel(is_parting=True)
         self._section_parting.add_widget(self._parting_panel)
-        sections_layout.addWidget(self._section_parting)
+        params_layout.addWidget(self._section_parting)
         self._section_parting.setVisible(False)
+
+        sections_layout.addWidget(self._section_parameters)
+
+        # --- Profile Segments section (below Parameters; takes the height) ---
+        self._section_profile = CollapsibleSection("Profile Segments", expanded=True)
+        self._build_profile_content(self._section_profile)
+        sections_layout.addWidget(self._section_profile, stretch=1)
+
+        # Leftover height collects here, below the last section, so collapsed
+        # headers stay packed at the top instead of being spread apart. An
+        # expanded Profile Segments (stretch=1) still takes the height first.
+        sections_layout.addStretch()
 
         scroll.setWidget(container)
         panel_layout.addWidget(scroll, stretch=1)
@@ -607,7 +668,7 @@ class ProgramTab(QWidget):
 
         self._rough_fin_allowance = NumericField(NumericFieldConfig(
             min_value=0.0, max_value=0.1, decimals=4,
-            default_value=0.005, suffix="dia",
+            default_value=0.002, suffix="dia",
         ))
         form.addRow("Fin Allow:", self._rough_fin_allowance)
 
@@ -658,7 +719,7 @@ class ProgramTab(QWidget):
 
         self._finish_doc = NumericField(NumericFieldConfig(
             min_value=0.0, max_value=20.0, decimals=6,
-            default_value=0.005, suffix="dia",
+            default_value=0.002, suffix="dia",   # = allowance 0.002 / 1 pass
         ))
         self._finish_doc.setReadOnly(True)
         self._finish_doc.setToolTip("Finish allowance divided by cutting passes; spring pass is excluded.")
