@@ -1,5 +1,18 @@
 # Claude status
 
+## 2026-11-10 23:43 UTC — concave fillet <= TNR handling (owner decision) on lathe/test-2026-11-10
+
+- Owner air-cut the regenerated GCH bore with the ID fillet on the arc-dialect fix:
+  performed as expected.
+- c3da369: under comp, a concave arc with R <= TNR (+.0001) between two lines is cut as the
+  sharp inside corner (tool leaves R=TNR); writer.notes + '; NOTE:' comment; amber notes
+  status after Generate; corner-break tool marks the vertex 'tool radius'. Between arcs:
+  generation fails with a clear message. Files: outputs/gcode_writer.py, gui/program_tab.py,
+  gui/components/corner_break_panel.py, tests/integration/test_arc_gcode_linuxcnc.py.
+- Corner Break Test now runs to PROGRAM_END in rs274; all other regression programs
+  byte-identical. Suite 1074 pass / same 4 quadrant-arc fails.
+- Branch is local only (not pushed). Merge to main = owner decision.
+
 ## 2026-11-10 23:25 UTC — arc dialect + software E-STOP fixed on lathe/test-2026-11-10 (local, not pushed)
 
 - Commits: 5e7d561 (outputs/gcode_dialect.py; writer + both parsers), 8b09211 (tests,
