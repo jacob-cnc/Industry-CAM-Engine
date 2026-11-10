@@ -6,6 +6,13 @@ the distinction between the owner's verbatim request and later design advice.
 
 ## Proposed
 
+- [Corner-Break Tool, OD Engine, GUI Tuning - lathe integration](2026-11-10-corner-break-tool-and-gui.md)
+  - Status: Software done on `work/2026-11-10` (not on main); lathe test pending.
+  - Motion-affecting: OD corner-break G-code, offset fallback, stock-size refusal.
+  - Path overlap: `gui/manual/manual_tab.py`, `gui/manual/sections.py` (layout only).
+  - First action: Claude checks out `origin/work/2026-11-10` on a lathe branch,
+    preserves tool.tbl/var/ini, runs the suite, then the no-motion GUI checks.
+
 - [X Position-Loop Deadband Tuning](2026-11-08-x-deadband-tuning.md)
   - Status: Planned; owner-present bench session required. Nothing changed yet.
   - X `DEADBAND = .0005` r lets X park up to .0007 dia off command (observed).
