@@ -216,3 +216,119 @@ def test_trim_prompt_yes_smooths(monkeypatch):
         assert hdr(8).text().endswith("R.1~") and hdr(7).text().endswith("C.1~")
     finally:
         _close(w)
+
+
+# ----------------------------------------------------------------------
+# Vertex dots stay live over a generated toolpath (not while playing)
+# ----------------------------------------------------------------------
+
+def _fail_instead_of_error_dialog(monkeypatch):
+    """The generation error dialog is modal and hangs an offscreen run."""
+    from gui.components import error_dialog
+
+    def _raise(self, exc, tb_str, stage=None):
+        raise AssertionError(f"generate failed at {stage}: {exc}\n{tb_str}")
+
+    monkeypatch.setattr(error_dialog.GenerationErrorDialog, "show_exception", _raise)
+
+
+def _generated_window(monkeypatch):
+    """Small two-step part with stock big enough to plan, then Generate."""
+    from gui.program_tab import ProgramState
+    _fail_instead_of_error_dialog(monkeypatch)
+    w, pt, popups = _program_window(monkeypatch)
+    pts = [(0.5, 0.0), (0.5, -0.5), (1.0, -0.5), (1.0, -1.0), (1.2, -1.0), (1.2, -1.5)]
+    pt._segment_list.set_segments(
+        [{"type": "line", "x": d, "z": z, "radius": 0.0} for d, z in pts], None)
+    pt._stock_diameter.set_value(1.25)
+    pt._stock_back_z.set_value(-1.5)
+    pt._rough_tool_num.setValue(4)                     # T4 CNMG (T1 is a boring bar)
+    pt._finish_tool_num.setValue(4)
+    _app.processEvents()
+    pt._generate_btn.click()
+    _app.processEvents()
+    assert pt.state == ProgramState.DISPLAYING, popups
+    return w, pt, len(pts)
+
+
+def _overlay_on_graph(pt) -> bool:
+    items = pt._graph_widget.getPlotItem().items
+    return len(pt._cb_overlay_items) == 3 and all(i in items for i in pt._cb_overlay_items)
+
+
+def test_dots_appear_when_tool_opened_after_generate(monkeypatch):
+    w, pt, n = _generated_window(monkeypatch)
+    try:
+        pt._btn_cb_tool.click()
+        _app.processEvents()
+        assert _overlay_on_graph(pt)
+        dots = pt._cb_overlay_items[1]
+        assert len(dots.data) == n - 1                       # every vertex, no edit needed
+        pt._cb_panel.set_selected([1])                       # selection highlight works too
+        _app.processEvents()
+        assert len(pt._cb_overlay_items[2].data) == 1
+        pt._btn_cb_tool.click()                              # closing the tool removes them
+        _app.processEvents()
+        assert pt._cb_overlay_items == []
+    finally:
+        _close(w)
+
+
+def test_dots_survive_regenerate_with_tool_open(monkeypatch):
+    """Tool open in BUILDING, then Generate: the new plot keeps the dots."""
+    _fail_instead_of_error_dialog(monkeypatch)
+    w, pt, _ = _program_window(monkeypatch)
+    try:
+        pts = [(0.5, 0.0), (0.5, -0.5), (1.0, -0.5), (1.0, -1.0), (1.2, -1.0), (1.2, -1.5)]
+        pt._segment_list.set_segments(
+            [{"type": "line", "x": d, "z": z, "radius": 0.0} for d, z in pts], None)
+        pt._stock_diameter.set_value(1.25)
+        pt._stock_back_z.set_value(-1.5)
+        pt._rough_tool_num.setValue(4)                 # T4 CNMG (T1 is a boring bar)
+        pt._finish_tool_num.setValue(4)
+        pt._btn_cb_tool.click()
+        _app.processEvents()
+        pt._generate_btn.click()
+        _app.processEvents()
+        assert _overlay_on_graph(pt)
+    finally:
+        _close(w)
+
+
+def test_dots_hidden_and_clicks_ignored_while_playing(monkeypatch):
+    w, pt, _ = _generated_window(monkeypatch)
+    try:
+        pt._btn_cb_tool.click()
+        _app.processEvents()
+        sv = pt._sim_viewer
+        sv._toggle_play()                                    # play
+        assert sv.is_playing()
+        assert pt._cb_overlay_items == []
+
+        class _Ev:                                           # a click right on V1
+            def __init__(self, pos):
+                self._pos = pos
+            def button(self):
+                return Qt.LeftButton
+            def double(self):
+                return False
+            def modifiers(self):
+                return Qt.NoModifier
+            def scenePos(self):
+                return self._pos
+            def accept(self):
+                pass
+
+        from PyQt5.QtCore import QPointF, Qt
+        verts, _p, _n = pt._sharp_vertex_points()
+        on_v1 = pt._graph_widget.getViewBox().mapViewToScene(QPointF(*verts[0]))
+        pt._on_graph_clicked_cb(_Ev(on_v1))
+        assert pt._cb_selected == []                         # ignored while playing
+
+        sv._toggle_play()                                    # pause -> dots back
+        assert not sv.is_playing() and _overlay_on_graph(pt)
+        pt._on_graph_clicked_cb(_Ev(on_v1))
+        _app.processEvents()
+        assert pt._cb_selected == [0]
+    finally:
+        _close(w)

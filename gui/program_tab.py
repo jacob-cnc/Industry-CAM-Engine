@@ -258,6 +258,9 @@ class ProgramTab(QWidget):
         self._state = new_state
         self._update_ui_for_state()
         self.state_changed.emit(new_state.name)
+        # A freshly loaded toolpath replaces the plot; put the tool's dots back.
+        if getattr(self, "_btn_cb_tool", None) is not None:
+            self._sync_cb_overlay()
 
     def get_stock_values(self) -> dict:
         """Return current stock field values as a dict."""
@@ -915,6 +918,8 @@ class ProgramTab(QWidget):
         self._segment_list.segments_changed.connect(lambda *_: self._refresh_cb_state())
         self._segment_list.corner_breaks_changed.connect(lambda *_: self._refresh_cb_state())
         self._graph_widget.scene().sigMouseClicked.connect(self._on_graph_clicked_cb)
+        # Vertex dots hide while a simulation plays and come back when it stops.
+        self._sim_viewer.playing_changed.connect(lambda _playing: self._sync_cb_overlay())
 
         # Generate button
         self._generate_btn.clicked.connect(self._on_generate_clicked)
@@ -1965,6 +1970,32 @@ class ProgramTab(QWidget):
             self._cb_selected = []
         self._refresh_cb_state()
         self._update_preview()
+        self._sync_cb_overlay()
+
+    def _cb_overlay_blocked(self) -> bool:
+        """True while a simulation is playing: no dots, no picking."""
+        viewer = getattr(self, "_sim_viewer", None)
+        return bool(viewer is not None and viewer.is_playing())
+
+    def _remove_cb_overlay(self):
+        for item in self._cb_overlay_items:
+            try:
+                self._graph_widget.removeItem(item)
+            except Exception:
+                pass                             # already gone with a plot clear
+        self._cb_overlay_items = []
+
+    def _sync_cb_overlay(self):
+        """Show the tool's ghost profile and vertex dots whenever the tool is
+        open and no simulation is playing, including over a generated
+        toolpath. In BUILDING/READY the preview redraw owns the overlay."""
+        if self._state in (ProgramState.BUILDING, ProgramState.READY):
+            return
+        self._remove_cb_overlay()
+        if not self._btn_cb_tool.isChecked() or self._cb_overlay_blocked():
+            return
+        import pyqtgraph as pg
+        self._draw_cb_overlay(pg)
 
     def _on_cb_panel_selection(self, indices: list):
         self._cb_selected = list(indices)
@@ -2085,6 +2116,8 @@ class ProgramTab(QWidget):
         """Tool on: pick a vertex (pixel tolerance + tie-breakers); Ctrl adds /
         removes; a plain click on empty space clears the selection."""
         if not self._btn_cb_tool.isChecked() or ev.button() != Qt.LeftButton or ev.double():
+            return
+        if self._cb_overlay_blocked():
             return
         from PyQt5.QtCore import QPointF
         from gui.components.vertex_picking import pick_vertex

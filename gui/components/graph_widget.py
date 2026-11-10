@@ -67,6 +67,10 @@ class MachiningGraphWidget(pg.PlotWidget):
 
     coordinate_changed = QtCore.pyqtSignal(float, float)
 
+    # Draw order for toolpath lines (profile overlay is 5, tool dot 20).
+    RAPID_Z = 1
+    CUT_Z = 2
+
     def __init__(self, parent=None):
         # Create custom axes
         x_axis = DiameterAxisItem(orientation='left')
@@ -220,6 +224,10 @@ class MachiningGraphWidget(pg.PlotWidget):
             style = QtCore.Qt.DashLine if segment.move_type.value == 'rapid' else QtCore.Qt.SolidLine
             pen = pg.mkPen(color, width=1, style=style)
             item = self.plot(segment.z_coords, segment.x_coords, pen=pen)
+            # Rapid returns run along the previous pass's cut line; without a
+            # fixed order the later-drawn one wins and rows flip between red,
+            # green and mixed. Cutting moves always sit above rapids.
+            item.setZValue(self.RAPID_Z if segment.move_type.value == 'rapid' else self.CUT_Z)
             item.setVisible(False)  # Hidden until playback reveals it
             self._toolpath_items.append(item)
             if segment.move_type.value == 'rapid':
