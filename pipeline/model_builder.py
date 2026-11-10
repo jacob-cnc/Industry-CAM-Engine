@@ -109,6 +109,7 @@ def build_from_fields(
         raise ValueError("Stock back face must be finite.")
     if stock_back_z is not None and stock_back_z > operation_z_end + TOLERANCE:
         raise ValueError("Stock back face must be at or behind the operation Z End.")
+    _check_stock_size(profile, stock_dia, pilot_hole_dia, fin_allowance)
 
     stock = StockDef(
         diameter=stock_dia,
@@ -168,6 +169,56 @@ def _safe_z_start(z_start: float, fin_allowance: float) -> float:
         return fin_allowance_radius + 0.050
 
     return z_start
+
+
+def _check_stock_size(profile: ClosedProfile, stock_dia: float, pilot_hole_dia: float,
+                      fin_allowance: float) -> None:
+    """The stock must leave room for the finish allowance around the profile.
+
+    OD: stock diameter > largest finished diameter + finish allowance (dia).
+    ID: pilot hole (if any) < smallest finished bore - finish allowance.
+    Otherwise the cleanup/finish contour, which runs one finish allowance
+    outside the profile, falls outside the stock where the profile meets it,
+    gets clipped into separate pieces, and generation fails with a kernel-
+    level error ("Cleanup clipping did not produce one connected contour").
+    Checked on the profile END POINTS (segment end diameters).
+    """
+    from models.constants import TOLERANCE
+    pts = [(m.x, m.z) for m in profile.segments]
+    if len(pts) < 2:
+        return
+    od = profile.mode == MachiningMode.OD
+    if not od and pilot_hole_dia <= 0:
+        return
+    limit = stock_dia if od else pilot_hole_dia
+    name = "stock diameter" if od else "pilot hole"
+    fix = ("Increase Stock > Diameter" if od else "Reduce the pilot hole diameter")
+
+    def outside(d):          # beyond the stock surface (no material there)
+        return d > limit + TOLERANCE if od else d < limit - TOLERANCE
+
+    def no_room(d):          # closer to the stock surface than the allowance
+        return d >= limit - fin_allowance - TOLERANCE if od \
+            else d <= limit + fin_allowance + TOLERANCE
+
+    for d, z in pts:
+        if outside(d):
+            raise ValueError(
+                f"The profile goes outside the stock: Ø{d:.4f} at Z {z:.4f} is beyond "
+                f"the {name} Ø{limit:.4f}. {fix}, or check that point.")
+    # A stretch running along the stock surface with more profile after it.
+    # (Ending on the stock surface, e.g. a step out to the bar, is fine.)
+    for k in range(1, len(pts) - 1):
+        (d0, z0), (d1, z1) = pts[k - 1], pts[k]
+        if no_room(d0) and no_room(d1):
+            need = (f"larger than Ø{max(d0, d1) + fin_allowance:.4f}" if od
+                    else f"smaller than Ø{min(d0, d1) - fin_allowance:.4f}")
+            raise ValueError(
+                f"The {name} is too {'small' if od else 'large'}. The profile runs along "
+                f"Ø{d1:.4f} from Z {z0:.4f} to Z {z1:.4f}, within the finish allowance "
+                f"({fin_allowance:.4f} on the diameter) of the {name} Ø{limit:.4f}, and "
+                f"continues after it, so the finish/cleanup pass cannot follow it. "
+                f"{fix}: it must be {need}.")
 
 
 def profile_from_fields(segments: List[dict], mode: str, corner_breaks=None) -> ClosedProfile:
