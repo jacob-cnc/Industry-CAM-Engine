@@ -170,3 +170,12 @@ Lathe (Claude): steps 1-6 above on `lathe/test-2026-11-10`, report suite + visua
 results in `claude.md`, then owner-present air-cut of an OD part with corner breaks.
 Dev PC (Kiro): on owner request, verify the colour fix on a fresh render (F9
 snapshot, sample rows near x≈560) and ask the owner about retract clearance.
+
+## Outcome (lathe, 2026-11-10)
+
+Integrated and merged to `main`; owner calls it the best working version (tag
+`lathe-2026-11-10-working`). The air cut exposed a pre-existing arc G-code bug
+(LinuxCNC reads `I` as a radius in G7 and the engine's G02/G03 was mirrored),
+fixed in `outputs/gcode_dialect.py`. Kiro's open question "G7 `I` as diameter
+delta in the simulator" is answered: it was wrong. Full record:
+`session-notes/2026-11-10-lathe-integration.md`.
