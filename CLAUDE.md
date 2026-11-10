@@ -77,7 +77,7 @@ Triggered = `.in` HIGH = `.in_not` LOW (sourcing type)
 
 **HAL note:** when home/limit switches are eventually wired, use `.in` (not `.in_not`) for homing — the HAL currently has `.in_not` which would be wrong.
 
-**E-stop HAL (wired 2026-11-10):** `emc-enable-in = and2.estop-chain(iocontrol.0.user-enable-out, hm2_7i96s.0.gpio.004.in)`. NC button on TB3 P5: `.in` TRUE = released, FALSE = pressed or broken wire. A HAL net has one driver, so the button cannot be added to the old `user-enable-out => emc-enable-in` net (both are OUT pins) — that earlier advice was wrong. Do NOT drive emc-enable-in HIGH permanently (setp or a bypass): iov2 then never clears aux.estop and task_state stays 1 forever.
+**E-stop HAL (wired 2026-11-10):** documented `estop_latch` pattern: ok-in <= `iocontrol.0.user-enable-out`, fault-in <= `hm2_7i96s.0.gpio.004.in_not`, reset <= `iocontrol.0.user-request-enable`, ok-out => `iocontrol.0.emc-enable-in`. NC button on TB3 P5: `.in` TRUE = released, FALSE = pressed or broken wire. Latches until Reset. Do NOT use a plain and2 (tried 2026-11-10: release cleared ESTOP by itself, because iocontrol keeps user-enable-out TRUE through an external E-stop) and do NOT add the button to the old estop-loop net (a net has one driver). Do NOT drive emc-enable-in HIGH permanently (setp or a bypass): task_state then stays 1 forever.
 
 ---
 

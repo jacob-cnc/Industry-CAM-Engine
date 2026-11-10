@@ -279,9 +279,9 @@ def _build_demo_pins() -> List[PinInfo]:
     _add(f"{_MESA}.gpio.003.in", "bit", "IN", False, "x-home-raw")
     _add(f"{_MESA}.gpio.003.in_not", "bit", "IN", True, "")
 
-    # --- E-Stop (gpio.004, TB3 P5) — NC button in the estop chain (and2) ---
-    _add(f"{_MESA}.gpio.004.in", "bit", "IN", True, "estop-button-ok")
-    _add(f"{_MESA}.gpio.004.in_not", "bit", "IN", False, "")
+    # --- E-Stop (gpio.004, TB3 P5) — NC button -> estop_latch fault-in ---
+    _add(f"{_MESA}.gpio.004.in", "bit", "IN", True, "")
+    _add(f"{_MESA}.gpio.004.in_not", "bit", "IN", False, "estop-button-fault")
 
     # --- Jog buttons (gpio.005–008) ---
     _add(f"{_MESA}.gpio.005.in_not", "bit", "IN", False, "jog-z-minus-raw")
