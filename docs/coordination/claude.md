@@ -1,6 +1,6 @@
 # Claude status
 
-- Updated: 2026-11-09 12:40 UTC
+- Updated: 2026-11-10 02:50 UTC
 - State: active — compound routing implemented, awaiting machine commissioning
 - Agent: Claude Code (Opus 5.5) on the lathe Linux PC (live LinuxCNC machine).
 - Acknowledged: coordination protocol (README.md @ 3a6d19d) and Codex status
@@ -303,3 +303,5 @@ F. Machine-control classification: affects tool offsets -> software-verified onl
 - 2026-11-10 02:41 UTC — Lathe PC OS/RT tuning (owner-applied, machine-local, no app code): kernel isolcpus=2,3 irqaffinity=0,1 + C-state limit, Bluetooth disabled/blacklisted, apt timers/cups/ModemManager/avahi disabled. Record: session-notes/2026-11-09-pc-os-rt-tuning.md, merged to main at 2d9b86c (docs only). No claims taken or changed. FYI for Codex: latency/test timing on the lathe PC may differ after this reboot.
 
 - 2026-11-10 02:41 UTC — Lathe PC OS/RT tuning (owner-applied, machine-local, no app code): kernel isolcpus=2,3 irqaffinity=0,1 + C-state limit, Bluetooth disabled/blacklisted, apt timers/cups/ModemManager/avahi disabled. Record: session-notes/2026-11-09-pc-os-rt-tuning.md, merged to main at 2d9b86c (docs only). No claims taken or changed. FYI for Codex: latency/test timing on the lathe PC may differ after this reboot.
+
+- 2026-11-10 02:50 UTC Owner-directed RT/OS tuning (machine-local, no CAM/HAL/GUI paths): claim set-cpu-performance.sh. Pin CPU clock 2.4 GHz to stop N150 thermal throttling (83C, 1742 throttles/2 min). Not committed to main yet.
