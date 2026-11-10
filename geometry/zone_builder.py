@@ -188,6 +188,20 @@ def _profile_to_radius_coords(profile: ClosedProfile) -> List[dict]:
     if not segments:
         return []
 
+    # OD: dedicated vertex solver, validated against an NX reference part
+    # (geometry/corner_breaks_od.py). ID keeps the legacy code below until an
+    # ID reference part validates its different build parameters.
+    if profile.mode == MachiningMode.OD:
+        from geometry.corner_breaks_od import build_od_corner_coords
+        result = build_od_corner_coords(profile)
+        if result.reports:
+            import logging
+            log = logging.getLogger(__name__)
+            for rep in result.reports:
+                if rep.status != "ok":
+                    log.info("Corner break %s", rep.message)
+        return result.coords
+
     # Pre-compute segment endpoints in radius for direction calculations
     seg_endpoints = []
     for seg in segments:

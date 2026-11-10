@@ -30,11 +30,16 @@ class CornerBreakType(Enum):
 
 @dataclass(frozen=True)
 class CornerBreak:
-    """Corner break definition between two adjacent segments.
+    """Corner break at a profile vertex (between two adjacent segments).
 
-    Applied during zone construction by Build123d fillet/chamfer operations.
-    P1.5 feature — data model present from day one, geometry computation
-    added after pipeline verification.
+    corner_breaks[k-1] is vertex Vk; V1 is the corner between the implied
+    front face and segment 1. Equal-leg chamfers and fillets only (angle is
+    not used by the geometry). Sizes are true geometric lengths (radius
+    space), not diameter values.
+
+    Geometry: OD -> geometry/corner_breaks_od.py (validated against an NX
+    reference part); ID -> legacy code in geometry/zone_builder.py until an
+    ID reference part validates it.
     """
     break_type: CornerBreakType
     radius: float = 0.0       # Fillet radius (inches). Used when type=FILLET.
