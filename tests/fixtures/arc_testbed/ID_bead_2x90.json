@@ -1,0 +1,70 @@
+{
+ "version": 1,
+ "block_type": "ID Profile",
+ "stock": {
+  "diameter": 1.8,
+  "x_start": 0.9,
+  "z_start": 0.1,
+  "z_end": -1.0,
+  "x_park": 0.5,
+  "z_park": 1.0,
+  "pilot_hole_dia": 0.9,
+  "mode": "id"
+ },
+ "roughing": {
+  "tool_number": 1,
+  "doc_dia": 0.04,
+  "feed": 0.006,
+  "strategy": "staircase",
+  "fin_allowance": 0.01,
+  "peck_enabled": false,
+  "peck_length": null,
+  "spindle_rpm": 1000.0
+ },
+ "finishing": {
+  "tool_number": 1,
+  "passes": 1,
+  "doc_dia": 0.002,
+  "feed": 0.003,
+  "spindle_rpm": 1000.0,
+  "spring_pass": false
+ },
+ "segments": [
+  {
+   "type": "line",
+   "x": 1.2,
+   "z": 0,
+   "radius": 0.0
+  },
+  {
+   "type": "line",
+   "x": 1.2,
+   "z": -0.3,
+   "radius": 0.0
+  },
+  {
+   "type": "arc",
+   "x": 1.0,
+   "z": -0.4,
+   "radius": -0.1
+  },
+  {
+   "type": "arc",
+   "x": 1.2,
+   "z": -0.5,
+   "radius": -0.1
+  },
+  {
+   "type": "line",
+   "x": 1.2,
+   "z": -1.0,
+   "radius": 0.0
+  }
+ ],
+ "corner_breaks": [
+  null,
+  null,
+  null,
+  null
+ ]
+}

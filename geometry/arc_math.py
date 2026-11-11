@@ -87,7 +87,9 @@ def arc_from_kernel(start: Point, mid: Point, end: Point, centre: Point,
 def split_at_quadrants(arc: Arc, min_len: float = 1e-5) -> List[Arc]:
     """Split at the quadrant boundaries of the centre that lie strictly
     inside the sweep. Pieces shorter than min_len (chord) are merged into the
-    previous piece. A piece never exceeds 90 deg."""
+    previous piece, so a piece is at most 90 deg plus such a sliver (an arc
+    ending a hair past a quadrant line, within kernel tolerance) - always far
+    below 180 deg, which is what the short-sweep rule needs."""
     a0 = angle_of(arc.start, arc.centre)
     sgn = 1.0 if arc.sweep > 0 else -1.0
     total = abs(arc.sweep)
