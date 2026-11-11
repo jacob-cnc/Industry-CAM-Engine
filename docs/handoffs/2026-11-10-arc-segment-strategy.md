@@ -198,9 +198,36 @@ start would run through the bead. The post-planning check **blocks** that progra
 so it is caught rather than cut (there is a test for this). A bead followed by a step
 up, as on real parts, generates fine. Rapid routing around bumps remains Phase 2.
 
-**Still to do in Phase 1:**
-- Store the arc identity explicitly (centre + direction) and migrate the signed-R
-  field.
-- The picker graphic, for the candidates of end point + radius.
-- Tangent-to-previous entry.
-- ID-side checks for reach and clearance.
+**Phase 1, part 2 (2026-11-11): entry without the sign convention**
+- **Decision: the stored identity stays end point + signed R. There is no
+  file-format change.**
+  - Principle C proposed storing {cx, cz, ccw}. Since arcs past their own X extreme
+    are now split, every entered R arc is at most 180°.
+  - For those, the signed R (+R = clockwise in (r, z), with the centre to the right
+    of travel) already identifies the arc uniquely, and the engine carries the
+    explicit sweep internally from Phase 0.
+  - Changing the file format would have cost a migration and a matching change on
+    the Codex CAM side, for no difference in the geometry.
+  - What actually needed fixing was the operator having to know the sign.
+- **Picker graphic:** `gui/components/arc_picker.py`. It sits under the segment
+  table and shows whenever a radius-arc row is selected.
+  - Both arcs for the end point and |R| are drawn the way the operator sees the
+    part: Z+ right, larger Ø down, green start, red end, and a grey stub for the
+    incoming direction. The selected arc is solid; the other is dashed.
+  - Clicking an arc sets the sign of R.
+  - The caption gives R and says convex (outside corner) or concave (inside corner)
+    for OD or ID. It adds "smooth with previous" when the selected arc is tangent
+    to the previous segment.
+- **Tangent entry:** typing `T` in the radius cell replaces it with the signed R of
+  the arc that leaves smoothly from the previous segment. That works after a line,
+  an R arc or a Q arc (`arc_entry.end_direction`).
+  - If no tangent arc exists, the `T` stays and the cell is flagged with the
+    reason: the point is straight ahead (that's a line), or the arc would turn more
+    than 180°.
+- **Core:** `arc_entry.arc_candidates`, `end_direction` and `tangent_arc`. The
+  tangent maths was checked on 995 random cases.
+- **Tests:** `tests/unit/test_arc_picker_ui.py`.
+
+**Still to do in Phase 1:** ID-side checks for reach and clearance.
+**Phase 2:** rapid routing around bumps (the end-behind-a-bead case), and reach
+checks for the back flank of a bead or a groove wall.

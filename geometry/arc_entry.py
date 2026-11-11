@@ -263,3 +263,92 @@ def normalize_profile(profile):
     if len(new_breaks) != len(moves) - 1:               # profile built without breaks
         new_breaks = (list(new_breaks) + [None] * len(moves))[:max(0, len(moves) - 1)]
     return replace(profile, segments=moves, corner_breaks=new_breaks)
+
+
+# ----------------------------------------------------------------------
+# Entry helpers for the Program tab (arc strategy Phase 1, Principle C)
+# ----------------------------------------------------------------------
+#
+# The stored identity of an entered radius arc stays "end point + signed R"
+# (+R = clockwise in (r, z) = centre to the right of travel; ProfileMove). Since
+# arcs past their own X extreme are split, every entered R arc is <= 180 deg,
+# and for those the signed R IS a complete identity - no file-format change.
+# What the operator must never need is the sign convention: the picker shows
+# both candidates and the click sets the sign; "T" computes the tangent one.
+
+def arc_candidates(p0, p1, radius_abs: float, n: int = 24):
+    """The (up to) two arcs of radius |R| from p0 to p1, (r, z) in.
+    Returns [{"radius": +R or -R, "centre", "sweep", "points"}], empty when
+    |R| is shorter than half the chord."""
+    d = math.hypot(p1[0] - p0[0], p1[1] - p0[1])
+    R = abs(radius_abs)
+    if d < 1e-12 or R < d / 2.0 - 1e-9:
+        return []
+    out = []
+    for r in (R, -R):
+        c = radius_arc_centre(p0, p1, r)
+        if c is None:
+            continue
+        sw = radius_arc_sweep(p0, p1, c, r)
+        a0 = math.atan2(p0[1] - c[1], p0[0] - c[0])
+        pts = [(c[0] + R * math.cos(a0 + sw * k / n), c[1] + R * math.sin(a0 + sw * k / n))
+               for k in range(n + 1)]
+        pts[0], pts[-1] = p0, p1
+        out.append({"radius": r, "centre": c, "sweep": sw, "points": pts})
+    return out
+
+
+def end_direction(p0, p1, radius, is_arc: bool) -> Optional[Tuple[float, float]]:
+    """Unit direction of travel at the END of a segment p0 -> p1, (r, z) in.
+    radius: the row's radius field (number, "Q" or "-Q"); ignored for lines."""
+    dr, dz = p1[0] - p0[0], p1[1] - p0[1]
+    if math.hypot(dr, dz) < 1e-12:
+        return None
+    q = _is_q(radius) if is_arc else 0
+    if q:
+        # +Q arrives along Z, -Q arrives radially (quadrant_centre)
+        if abs(dr) < SAME_TOL:            # same-X: two quadrants, ends radially (its -Q half)
+            return None                   # direction depends on OD/ID: not offered
+        return (0.0, math.copysign(1.0, dz)) if q > 0 else (math.copysign(1.0, dr), 0.0)
+    try:
+        r = float(radius) if is_arc else 0.0
+    except (TypeError, ValueError):
+        r = 0.0
+    if not is_arc or abs(r) < 1e-12:
+        L = math.hypot(dr, dz)
+        return (dr / L, dz / L)
+    c = radius_arc_centre(p0, p1, r)
+    if c is None:
+        return None
+    rv = (p1[0] - c[0], p1[1] - c[1])
+    t = (rv[1], -rv[0]) if r > 0 else (-rv[1], rv[0])     # CW / CCW tangent
+    L = math.hypot(*t)
+    return (t[0] / L, t[1] / L) if L > 1e-12 else None
+
+
+def tangent_arc(p0, p1, d_in) -> Tuple[Optional[float], str]:
+    """Signed radius of the arc from p0 to p1 that leaves p0 along d_in
+    (tangent to the previous segment), or (None, why). (r, z) in."""
+    if d_in is None:
+        return None, "No previous segment direction to be tangent to."
+    L = math.hypot(*d_in)
+    if L < 1e-12:
+        return None, "No previous segment direction to be tangent to."
+    u = (d_in[0] / L, d_in[1] / L)
+    n = (-u[1], u[0])                                    # left normal
+    v = (p1[0] - p0[0], p1[1] - p0[1])
+    vv = v[0] ** 2 + v[1] ** 2
+    nv = n[0] * v[0] + n[1] * v[1]
+    if vv < 1e-12:
+        return None, "The arc has zero length."
+    if abs(nv) < 1e-9:
+        return None, "The end point is straight ahead of the previous segment: that is a line, not an arc."
+    t = vv / (2.0 * nv)
+    c = (p0[0] + t * n[0], p0[1] + t * n[1])
+    R = abs(t)
+    cross = (p0[0] - c[0]) * u[1] - (p0[1] - c[1]) * u[0]
+    signed = R if cross < 0 else -R                     # clockwise -> +R
+    if u[0] * v[0] + u[1] * v[1] < -1e-12:
+        return None, ("A smooth (tangent) arc to that point would turn more than 180 deg. "
+                      "Add a point part way, or enter a radius.")
+    return signed, ""

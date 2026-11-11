@@ -793,6 +793,7 @@ class ProgramTab(QWidget):
         self._segment_list.segments_changed.connect(self._on_segments_changed)
         self._segment_list.corner_breaks_changed.connect(lambda *_: self._on_segments_changed(self.get_segments()))
         self._segment_list.selection_changed.connect(self._on_segment_selection_changed)
+        self._segment_list.set_mode_provider(lambda: self._get_machining_mode() != "id")
 
         # Corner-break tool (Esc anywhere on the Program tab leaves it)
         self._btn_cb_tool.toggled.connect(self._on_cb_tool_toggled)

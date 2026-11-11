@@ -13,7 +13,9 @@ the distinction between the owner's verbatim request and later design advice.
     extreme split instead of refused (geometry/arc_entry.py). Section 7 of the doc.
   - Known limit until Phase 2: a part ending behind a bead is blocked (closing
     rapid would cross it), never cut.
-  - Next: explicit arc identity + migration, picker graphic, tangent entry.
+  - Phase 1 part 2 done: arc picker (click the arc; sets the sign of R), "T" =
+    tangent radius. Stored identity stays end point + signed R (§7). Next: ID
+    reach/clearance checks, then Phase 2 (rapid routing around beads).
 
 - [Corner-Break Tool, OD Engine, GUI Tuning - lathe integration](2026-11-10-corner-break-tool-and-gui.md)
   - Status: INTEGRATED 2026-11-10, merged to main, owner-verified on the lathe

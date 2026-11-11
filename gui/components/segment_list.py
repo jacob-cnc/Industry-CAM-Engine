@@ -200,7 +200,9 @@ class SegmentListWidget(QWidget):
             header.setSectionResizeMode(col, QHeaderView.Fixed)
         header.setMinimumSectionSize(10)
         r_header = QTableWidgetItem(_radius_symbol_icon(R_ICON_PX), "r")
-        r_header.setToolTip("Radius (signed: +R / -R picks the side), or Q / -Q for a true quarter circle "
+        r_header.setToolTip("Radius: enter the size, then click the arc you want in the picker below "
+                            "(it sets the sign). T = smooth (tangent) with the previous segment. "
+                            "Q / -Q = a true quarter circle "
                             "(equal X-radius and Z change). An arc that starts and ends at the same X, or "
                             "bulges past its end diameters, is split into two arcs when you leave the row.")
         self._table.setHorizontalHeaderItem(COL_RADIUS, r_header)
@@ -218,6 +220,13 @@ class SegmentListWidget(QWidget):
 
         layout.addWidget(self._table)
         self._table.viewport().installEventFilter(self)
+
+        # Arc picker: shown for a selected radius-arc row; click the arc you mean
+        # (sets the sign of R). gui/components/arc_picker.py
+        from gui.components.arc_picker import ArcPicker
+        self._arc_picker = ArcPicker()
+        self._arc_picker.hide()
+        layout.addWidget(self._arc_picker)
 
         # Button bar. Same height and labels as before; horizontal padding
         # trimmed from the app-wide 16 px to 6 px and the buttons share the
@@ -263,11 +272,13 @@ class SegmentListWidget(QWidget):
         self._table.cellChanged.connect(self._on_cell_changed)
         self._table.cellDoubleClicked.connect(self._on_cell_double_clicked)
         self._table.currentCellChanged.connect(self._on_selection_changed)
+        self._arc_picker.picked.connect(self._on_arc_picked)
 
     def _on_selection_changed(self, current_row: int, _col: int,
                               _prev_row: int, _prev_col: int):
         """Emit logical segment index when the table selection changes."""
         self._update_columns()            # r column opens for a selected ARC row
+        self._refresh_arc_picker(current_row)
         if current_row < 0:
             self.selection_changed.emit(-1)
             return
@@ -632,6 +643,12 @@ class SegmentListWidget(QWidget):
         """Insert button: insert before the number in the '#' box."""
         self.insert_segment_before(self._insert_before.value())
 
+    def set_mode_provider(self, mode_od) -> None:
+        """Callable returning True for OD (material inside), False for ID; the
+        arc picker uses it to say convex / concave."""
+        self._arc_picker.mode_od = mode_od
+        self._arc_picker.update()
+
     def select_segment(self, seg_index: int) -> None:
         """Make logical segment `seg_index` (0-based) the current row."""
         row = self._segment_index_to_row(seg_index)
@@ -872,9 +889,76 @@ class SegmentListWidget(QWidget):
             return
         if self._is_corner_break_row(row):
             return
+        if col == COL_RADIUS and self._resolve_tangent(row):
+            return                        # the cell now holds the number; that edit re-enters
         self._update_columns()            # a longer value may need more width
         self._validate_all()
         self._emit_changed()
+        if row == self._table.currentRow():
+            self._refresh_arc_picker(row)
+
+    # ------------------------------------------------------------------
+    # Arc entry: tangent ("T") and the picker (geometry/arc_entry.py)
+    # ------------------------------------------------------------------
+
+    def _row_points_r(self, row: int):
+        """(start, end) of a segment row in radius space, or None."""
+        try:
+            x1 = self._parse_display_value(self._table.item(row, COL_X).text())
+            z1 = self._parse_display_value(self._table.item(row, COL_Z).text())
+        except (ValueError, AttributeError):
+            return None
+        x0, z0 = self._get_prev_segment_endpoint(row)
+        return (x0 / 2.0, z0), (x1 / 2.0, z1)
+
+    def _tangent_for_row(self, row: int):
+        """(signed R, why) for a tangent arc on this row."""
+        from geometry.arc_entry import tangent_arc
+        pts = self._row_points_r(row)
+        if pts is None:
+            return None, "X and Z must be valid numbers"
+        return tangent_arc(pts[0], pts[1], self._get_prev_segment_direction(row))
+
+    def _resolve_tangent(self, row: int) -> bool:
+        """"T" in the radius cell: replace it with the signed radius of the arc
+        that is tangent to (smooth with) the previous segment. Returns True when
+        the cell was rewritten. If no tangent arc exists the "T" stays and the
+        cell is flagged with the reason."""
+        item = self._table.item(row, COL_RADIUS)
+        if item is None or item.text().strip().upper() != "T":
+            return False
+        r, _why = self._tangent_for_row(row)
+        if r is None:
+            return False
+        item.setText(self._format_value(r))
+        return True
+
+    def _refresh_arc_picker(self, row: int) -> None:
+        """Show the two candidate arcs for a selected radius-arc row."""
+        picker = getattr(self, "_arc_picker", None)
+        if picker is None:
+            return
+        show = False
+        if row is not None and row >= 0 and not self._is_corner_break_row(row):
+            seg = self._read_row(row)
+            if seg and seg["type"] == "arc" and not isinstance(seg["radius"], str) \
+                    and abs(seg["radius"]) > 1e-9:
+                pts = self._row_points_r(row)
+                if pts is not None:
+                    show = picker.set_arc(pts[0], pts[1], seg["radius"],
+                                          self._get_prev_segment_direction(row))
+        picker.setVisible(show)
+
+    def _on_arc_picked(self, sign: int) -> None:
+        row = self._table.currentRow()
+        if row < 0 or self._is_corner_break_row(row):
+            return
+        item = self._table.item(row, COL_RADIUS)
+        try:
+            r = abs(self._parse_display_value(item.text()))
+        except (ValueError, AttributeError):
+            return
+        item.setText(self._format_value(sign * r))   # cellChanged -> validate + emit
 
     def _on_cell_double_clicked(self, row: int, col: int):
         """Double-click on a cell: populate with suggested value if available.
@@ -1060,17 +1144,10 @@ class SegmentListWidget(QWidget):
         return (0.0, 0.0)
 
     def _get_prev_segment_direction(self, row: int) -> Optional[tuple]:
-        """Get the direction vector of the previous segment at its endpoint.
-
-        For LINE segments: direction is from its start to its end.
-        For ARC segments: direction is the tangent at the endpoint (perpendicular
-        to the radius vector from center to endpoint, matching CW/CCW).
-
-        Returns (dir_x_r, dir_z) in radius units, or None if direction
-        cannot be determined (first segment or invalid data).
-        The direction vector is unnormalized.
-        """
-        # Find the previous segment row
+        """Direction of travel at the END of the previous segment, (dir_x_r,
+        dir_z) in radius units (unit length), or None (first segment, invalid
+        data, or a same-X quadrant). Lines, signed-R arcs and Q / -Q arcs:
+        geometry/arc_entry.end_direction."""
         prev_row = None
         for r in range(row - 1, -1, -1):
             if not self._is_corner_break_row(r):
@@ -1078,74 +1155,12 @@ class SegmentListWidget(QWidget):
                 break
         if prev_row is None:
             return None
-
-        # Get the previous segment's start point (the one before it)
-        prev_start_x, prev_start_z = self._get_prev_segment_endpoint(prev_row)
-
-        # Get the previous segment's endpoint
-        try:
-            prev_end_x = self._parse_display_value(
-                self._table.item(prev_row, COL_X).text())
-            prev_end_z = self._parse_display_value(
-                self._table.item(prev_row, COL_Z).text())
-        except (ValueError, AttributeError):
+        seg = self._read_row(prev_row)
+        pts = self._row_points_r(prev_row)
+        if seg is None or pts is None:
             return None
-
-        combo = self._table.cellWidget(prev_row, COL_TYPE)
-        if combo is None or not isinstance(combo, QComboBox):
-            return None
-
-        seg_type = combo.currentText()
-
-        if seg_type == "LINE":
-            # Direction is simply end - start (in radius for X)
-            dir_x = (prev_end_x - prev_start_x) / 2.0  # Convert diameter to radius
-            dir_z = prev_end_z - prev_start_z
-            if abs(dir_x) < 1e-10 and abs(dir_z) < 1e-10:
-                return None
-            return (dir_x, dir_z)
-        elif seg_type == "ARC":
-            # For an arc, the tangent at the endpoint is perpendicular to the
-            # radius vector (from center to endpoint), rotated by CW/CCW direction.
-            # We need the arc's center to compute this.
-            try:
-                radius_val = self._parse_display_value(
-                    self._table.item(prev_row, COL_RADIUS).text())
-            except (ValueError, AttributeError):
-                return None
-
-            if abs(radius_val) < 1e-9:
-                return None
-
-            from geometry.arc_helpers import _select_center
-            is_cw = radius_val > 0
-            abs_r = abs(radius_val)
-            x1_r = prev_start_x / 2.0
-            x2_r = prev_end_x / 2.0
-            center = _select_center(x1_r, prev_start_z, x2_r, prev_end_z, abs_r, is_cw)
-            if center is None:
-                return None
-
-            cx, cz = center
-            # Radius vector from center to endpoint
-            rv_x = x2_r - cx
-            rv_z = prev_end_z - cz
-
-            # Tangent is perpendicular to radius vector.
-            # CW: tangent = (rv_z, -rv_x) — rotated -90°
-            # CCW: tangent = (-rv_z, rv_x) — rotated +90°
-            if is_cw:
-                dir_x = rv_z
-                dir_z = -rv_x
-            else:
-                dir_x = -rv_z
-                dir_z = rv_x
-
-            if abs(dir_x) < 1e-10 and abs(dir_z) < 1e-10:
-                return None
-            return (dir_x, dir_z)
-
-        return None
+        from geometry.arc_entry import end_direction
+        return end_direction(pts[0], pts[1], seg["radius"], seg["type"] == "arc")
 
     # ------------------------------------------------------------------
     # Validation
@@ -1271,7 +1286,7 @@ class SegmentListWidget(QWidget):
                     if tangent_r is not None and tangent_r >= min_r - 1e-9:
                         tangent_r_disp = unit_state.to_display(tangent_r)
                         lines.append(
-                            f"  Tangent (smooth blend): {tangent_r_disp:.{decimals}f}"
+                            f"  Tangent (smooth blend): {tangent_r_disp:.{decimals}f}  (or type T)"
                         )
 
                 # Quadrant arc suggestion: only when it is a true quarter circle
@@ -1391,6 +1406,10 @@ class SegmentListWidget(QWidget):
             return (False, "Radius must be a number, Q, or -Q")
 
         r_text = r_item.text().strip().upper()
+
+        if r_text == "T":                 # tangent: resolved on entry when it exists
+            r, why = self._tangent_for_row(row)
+            return (False, why or "Tangent arc: re-enter T") if r is None else (True, "")
 
         # "Q" / "-Q": a true circular quarter, equal X-radius and Z legs
         # (geometry/arc_entry.py). Same-X is fine: it is cut as two quadrants.
