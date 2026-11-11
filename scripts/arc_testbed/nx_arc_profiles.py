@@ -92,4 +92,4 @@ if __name__ == "__main__":
     for s in segs:
         extra = f"  R{s['_R']:.3f} sweep {s['_sweep']:+.1f}  centre Ø{s['_centre_dia_z'][0]:.3f} Z{s['_centre_dia_z'][1]:.3f}  engine R{s['radius']:+.3f}" if s["type"] == "arc" else ""
         print(f"{s['type']:4s} Ø{s['x']:8.4f} Z{s['z']:8.4f}{extra}")
-    json.dump(segs, open(ff"{mode}_segments_mm.json", "w"), indent=1)
+    json.dump(segs, open(f"{mode}_segments_mm.json", "w"), indent=1)
