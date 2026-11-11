@@ -502,6 +502,14 @@ class GCodeWriter:
         while k < len(moves) and moves[k].move_type in (MoveType.FEED, MoveType.RAPID):
             mv = moves[k]
             radial = abs(mv.z - pz) < 1e-9 and abs(mv.x - px) > 1e-9
+            # ID lead across the mouth from the approach height (Z0+.001) down
+            # to the contour start is air too, though not exactly radial. Kept,
+            # comp treated it as a wall and stopped the nose short of a mouth
+            # chamfer (up to .005 left proud; G-code section check 2026-11-11).
+            near_radial = (abs(mv.z - pz) <= 0.002 and abs(mv.x - px) / 2.0 > 5.0 * abs(mv.z - pz)
+                           and abs(mv.x - px) > 1e-9)
+            if is_id and near_radial and not radial:
+                radial = True
             tiny_axial = abs(mv.x - px) < 1e-9 and 0 < abs(mv.z - pz) < max(2.0 * r, 0.005)
             nxt_radial = (k + 1 < len(moves) and abs(moves[k + 1].z - mv.z) < 1e-9)
             if is_id and radial:                      # ID face lead: air
@@ -534,13 +542,34 @@ class GCodeWriter:
             entry_x = px - outward * 2.0 * r       # one nose radius before (diameter)
         else:
             entry_x = px
+        # Contour starting with a SLOPED line toward the chuck (a bore-mouth
+        # chamfer, an OD chamfer at the face): enter collinear with it, from the
+        # air behind its start. A vertical entry made a corner there that comp
+        # treats as inside, stopping the nose short of the top of the chamfer.
+        entry_z = pz
+        collinear = (comp_code != "G40" and not od_face_entry and first is not None
+                     and first.move_type == MoveType.FEED
+                     and abs(first.x - px) > 1e-9 and first.z < pz - 1e-9)
+        if collinear:
+            ur, uz = (first.x - px) / 2.0, first.z - pz
+            L = (ur * ur + uz * uz) ** 0.5
+            t = min_len / (abs(uz) / L)                 # back along it until min_len above the start
+            entry_x = px - 2.0 * (ur / L) * t
+            entry_z = pz - (uz / L) * t
+            if not is_id and entry_x < 0.0:             # never past the centreline
+                collinear, entry_x, entry_z = False, px, pz
 
         # Safe approach: rise, traverse at clearance (comp off).
         if self._z < z_clear - 1e-9:
             out.append(self._rapid(self._x, z_clear, "Contour approach: rise to clearance Z (comp off)"))
         if abs(self._x - entry_x) > 1e-9 or abs(self._z - z_clear) > 1e-9:
             out.append(self._rapid(entry_x, z_clear, "Contour approach: above entry point (comp off)"))
-        if comp_code != "G40":
+        if collinear:
+            if abs(self._z - entry_z) > 1e-9:
+                out.append(self._rapid(entry_x, entry_z, "Contour approach: down to entry, in line with the first cut (comp off)"))
+            out.append(self._line(comp_code, f"Cutter comp on (TNR={tool.nose_radius:.4f})"))
+            out.append(self._feed_line(px, pz, feed, "Comp entry move (in air, in line with the first cut)"))
+        elif comp_code != "G40":
             out.append(self._line(comp_code, f"Cutter comp on (TNR={tool.nose_radius:.4f})"))
             out.append(self._feed_line(entry_x, pz, feed, "Comp entry move (in air)"))
         else:
@@ -550,7 +579,7 @@ class GCodeWriter:
 
         prev = (self._x, self._z)
         # Comp-on polyline for the concave-corner check (None = arc end).
-        path = [(entry_x, z_clear), (entry_x, pz)]
+        path = [(entry_x, entry_z), (px, pz)] if collinear else [(entry_x, z_clear), (entry_x, pz)]
         if od_face_entry:
             path.append((px, pz))
 

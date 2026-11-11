@@ -141,37 +141,45 @@ def test_testbed_parts_run_in_linuxcnc_and_check_clean(name, tool, mode):
     assert s.gouge.is_empty
 
 
+@pytest.mark.parametrize("strategy", ["staircase", "offset_contour"])
 @pytest.mark.parametrize("name", ["OD_crest120_2x60", "OD_groove_2x90"])
-def test_roughing_beside_a_falling_flank_gouge_is_found(name):
-    """A real defect the check found (2026-11-11): roughing runs uncompensated,
-    so LinuxCNC drives the imaginary tip and the nose sits behind/above it (Q2).
-    A roughing plunge beside a contour falling toward the chuck - reachable with a
-    VNMG - puts the nose into the flank: .0125 deep on the 60 deg crest against a
-    .005 allowance. The post-planning check looks at the tip path and misses it;
-    the graph must show it. Planner fix pending."""
-    res = _plan_with(name, VNMG)
-    s = _sections(res)
-    assert not s.gouge.is_empty and any("cuts into the finished part" in n for n in s.notes)
-
-
-def test_id_mouth_chamfer_left_proud_is_found():
-    """A real defect the check found (2026-11-11): an ID contour that starts with
-    a bore-mouth chamfer. The finish pass enters along Z0 across the mouth and
-    turns back down the chamfer; LinuxCNC's comp treats the in-air entry line as a
-    surface, so the nose never reaches the top of the chamfer (up to .005 left).
-    The graph must show it. Writer fix pending (strategy doc / zone plan)."""
+def test_roughing_beside_a_falling_flank_does_not_gouge(name, strategy):
+    """Defect found by this check (2026-11-11), now fixed: roughing runs
+    uncompensated, so LinuxCNC drives the imaginary tip and the nose sits behind
+    and above it (Q2). Beside a contour falling toward the chuck - reachable with
+    a VNMG - the nose went .0125 into a 60 deg flank against a .005 allowance.
+    Staircase passes are now trimmed against a nose-aware keep zone and contour
+    passes offset for the nose centre; nothing is left for cleanup to miss."""
     import test_arc_phase0 as P
-    old = P.BAR
+    orig = json.load
+
+    def with_strategy(fh, *a, **k):
+        d = orig(fh, *a, **k)
+        if isinstance(d, dict) and "roughing" in d:
+            d["roughing"]["strategy"] = strategy
+        return d
+    json.load = with_strategy
     try:
-        P.BAR = BAR
-        res = P._plan("ID_NX_arcs_no_undercut")
+        res = _plan_with(name, VNMG)
     finally:
-        P.BAR = old
+        json.load = orig
+    assert res.plan_result.roughing_params.strategy.value == strategy
     s = _sections(res)
-    assert not s.not_removed.is_empty
-    r0, z0, r1, z1 = s.not_removed.bounds
-    assert 0.59 < r0 < r1 < 0.63 and -0.04 < z0 < z1 < 0.0
-    assert any("should remove" in n for n in s.notes)
+    assert s.ok, s.notes
+
+
+def test_id_mouth_chamfer_is_finished_to_the_top():
+    """Defect found by this check (2026-11-11), now fixed: an ID contour starting
+    with a bore-mouth chamfer. The finish entered along Z0 across the mouth and
+    turned back down the chamfer; comp treated the in-air lead as a wall and the
+    nose never reached the top of the chamfer (up to .005 left). The lead is now
+    dropped as air and the pass enters in line with the chamfer."""
+    res = _plan_with("ID_NX_arcs_no_undercut", BAR)
+    s = _sections(res)
+    assert s.ok, s.notes
+    code = GCodeWriter().write(res.plan_result)
+    fin = code[code.index("=== FINISH PASS"):]
+    assert "in line with the first cut" in fin
 
 
 # ----------------------------------------------------------------------
@@ -207,3 +215,70 @@ def test_program_cutting_into_the_part_shows_a_gouge():
     assert fin2 != fin
     s = _sections(res, code[:i] + fin2)
     assert not s.gouge.is_empty and any("cuts into the finished part" in n for n in s.notes)
+
+
+def test_tool_without_nose_or_angles_is_not_guessed():
+    """A sharp tool with no edge angles (e.g. the QCTP master tool, T99 D0 I0 J0)
+    sweeps no area we can model: say so instead of painting it all as an error."""
+    from outputs.cut_regions import CutRegionsUnavailable
+    bare = replace(CNMG, nose_radius=0.0, front_angle=0.0, back_angle=0.0)
+    res = _run(STEPPED, bare)
+    with pytest.raises(CutRegionsUnavailable, match="no nose radius or edge angles"):
+        _sections(res)
+
+
+_REF = os.path.join(os.path.dirname(__file__), "..", "..", "reference", "CAD Reference", "Engine Output")
+
+
+def _reference_blocks():
+    import glob
+    out = []
+    for f in sorted(glob.glob(os.path.join(_REF, "**", "*.json"), recursive=True)):
+        d = json.load(open(f))
+        for b in d.get("blocks", [d]):
+            pdata = b.get("params_data", b)
+            bt = b.get("block_type", "")
+            if ("rofile" in bt or "profile" in bt) and "stock" in pdata:
+                out.append(pytest.param(f, b, id=os.path.basename(f)))
+    return out
+
+
+@pytest.mark.parametrize("path,block", _reference_blocks())
+def test_owner_reference_programs_check_clean(path, block):
+    """Every saved reference program, with the repo's tool table: generates,
+    runs in LinuxCNC's interpreter, sections partition the stock, no gouge and
+    nothing left that should go (or, for a tool with no nose radius or angles,
+    an honest 'can't tell')."""
+    from outputs.cut_regions import CutRegionsUnavailable
+    from pipeline.model_builder import build_from_fields
+    from pipeline.pipeline import execute
+    from pipeline.tool_card_data import tool_card_to_tool_def
+    from pipeline.tool_table_io import load_tool_table
+    repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    tools = {c.tool_number: tool_card_to_tool_def(c) for c in load_tool_table(os.path.join(repo, "tool.tbl"))}
+    pdata = block.get("params_data", block)
+    bt = block.get("block_type", "")
+    mode = "id" if ("ID" in bt or "id_" in bt) else "od"
+    st, ro, fi = pdata["stock"], pdata["roughing"], pdata.get("finishing", {})
+    tool = tools.get(ro.get("tool_number") or block.get("tool_number") or (1 if mode == "id" else 4), tools[4])
+    if mode == "od" and tool.tool_type.value == "boring":
+        tool = tools[4]
+    p, s, r, f = build_from_fields(
+        segments=pdata["segments"], stock_dia=st["diameter"], x_start=st.get("x_start", 0),
+        z_start=st.get("z_start", 0.05), z_end=st["z_end"], stock_back_z=None, mode=mode,
+        pilot_hole_dia=st.get("pilot_hole_dia", 0), doc_dia=ro.get("doc_dia", 0.05),
+        feed=ro.get("feed", 0.008), strategy=ro.get("strategy", "staircase"),
+        fin_allowance=ro.get("fin_allowance", 0.01), peck_enabled=False, peck_length=None,
+        spindle_rpm=ro.get("spindle_rpm", 1000), finish_passes=fi.get("passes", 1),
+        finish_doc_dia=fi.get("doc_dia", .002), finish_feed=fi.get("feed", .003),
+        finish_spring_pass=False, tool_def=tool, x_park=st.get("x_park", 3.0),
+        z_park=st.get("z_park", 1.0), corner_breaks=pdata.get("corner_breaks", []))
+    res = execute(p, s, tool, r, f)
+    assert res.plan_result is not None, [v.message for v in res.validations if v.severity.value == "error"]
+    try:
+        sec = _sections(res)
+    except CutRegionsUnavailable as exc:
+        assert "no nose radius or edge angles" in str(exc)
+        return
+    _partition_ok(sec)
+    assert sec.ok, sec.notes

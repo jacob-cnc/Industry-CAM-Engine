@@ -182,3 +182,12 @@ def test_bead_at_the_end_of_the_part_is_blocked_not_gouged():
     res = _execute(_rows((1.0,), (1.0, -0.4), (1.0, -1.4, "Q"), (1.0, -2.0)), VNMG)
     assert res.plan_result is None
     assert any("GOUGE" in v.message for v in res.validations)
+
+
+def test_arc_dipping_within_tolerance_is_not_split():
+    """GUI Conv Test: X1.0 Z-.5 -> X1.25 Z-1.0 R-1 dips .00012 below its start
+    diameter. The old refusal allowed TOLERANCE; splitting there left a
+    sub-degree sliver that later blocked the program."""
+    segs, _, notes = split_rows(_rows((0.5,), (0.5, -0.5), (1.0, -0.5), (1.25, -1.0, -1.0)),
+                                [None] * 3, "od")
+    assert notes == [] and len(segs) == 4

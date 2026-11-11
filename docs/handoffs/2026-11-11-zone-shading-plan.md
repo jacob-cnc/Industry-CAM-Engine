@@ -190,8 +190,8 @@ sessions. The defaults are in the table above.
   finished edge at about .0001"/px, OD and ID, and the legend toggles.
 - The full suite passes three times in a row.
 
-**Real defects the check found in existing code** (shown red on the graph; fixes
-pending, owner to prioritise):
+**Real defects the check found in existing code** (1 and 2 FIXED, see §7; 3 to
+discuss):
 1. **Roughing beside a falling flank cuts into the part.** Roughing is
    uncompensated, so LinuxCNC drives the imaginary tip and the nose sits above and
    behind it (Q2). A plunge next to a contour falling toward the chuck puts the
@@ -216,3 +216,53 @@ pending, owner to prioritise):
   short.
 - More GUI tests leaked top-level tabs (RunTab, DebugTab); they now close and
   delete them.
+
+## 7. Defects 1 and 2 fixed (2026-11-11, owner: "fix 1 and 2, then we talk about 3")
+
+**1. Roughing beside a falling flank: fixed for both roughing strategies.**
+- **Staircase** (`planners/staircase_planner.py`): every pass interval is trimmed
+  against a nose-aware forbidden region, translate(keep ⊕ disk(TNR), −nose offset),
+  where keep = finished part ∪ finish allowance (`ValidationPolygons`). On
+  diameters and faces that region equals the zone, so ordinary turning is
+  unchanged. On the NX part with a CNMG, only the one pass beside the bridged flank
+  moved (its start went from Z-.8479 to Z-.8646).
+- **Offset-contour** (`planners/contour_roughing_planner.py`): the part is offset
+  by (offset + TNR) for the nose centre, and the result is shifted back to the tip.
+  The path is the same on diameters and faces, with full nose clearance on falls.
+- `models.tool.Q_TIP_DIRECTION` and `nose_centre_offset` are now the single
+  definition, shared with cut_regions.
+
+**2. ID bore-mouth chamfer: fixed in the writer** (`_emit_contour_pass`).
+- The ID lead from the approach height (Z0+.001) to the contour start is now
+  recognised as air even though it isn't exactly radial (it was 0.001" off), and is
+  dropped.
+- A contour that starts with a sloped line toward the chuck is entered **in line
+  with that line**, from the air behind its start: comp-off down to the entry
+  point, then G41/G42, then the entry move along the first cut. Compensation sees
+  no corner, so the nose cuts the chamfer from its very top.
+- The existing straight-down entry for bores and walls and the OD face entry are
+  unchanged.
+- Side effect, intended: with X start at the pilot hole, the counterbore finish now
+  enters straight down the wall instead of running the lead under comp
+  (`test_id_bore_pipeline` updated).
+
+**Also adjusted:**
+- `arc_entry.EXTREME_TOL` went from .0001 to .0005 (the engine's TOLERANCE, which is
+  what the old X-bounds refusal allowed). A .00012 dip on GUI Conv Test was being
+  split into a sub-degree sliver piece that later blocked the program.
+- A tool with no nose radius and no edge angles (the T99 QCTP master tool) sweeps no
+  area that can be modelled. The graph now says it can't tell, instead of painting
+  everything as "not removed".
+
+**Verified:**
+- Every saved reference program generates, runs in rs274, and checks clean with
+  the repo `tool.tbl` (Test Run Program gets the honest "can't tell" for T99).
+  This is now a test.
+- The crest and groove with a VNMG check clean under both strategies, and so does
+  the NX ID part. The full suite passes twice: 1203 tests, plus the new ones.
+
+**Still open:**
+- Defect 3 (the face left at the face allowance): to discuss with the owner.
+- An OD profile that starts with a chamfer *at the face* is refused by the writer's
+  existing comp guard on the cleanup pass (a .003 sliver before a concave corner).
+  This happened before these changes; it fails safe.

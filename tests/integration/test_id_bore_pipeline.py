@@ -48,9 +48,13 @@ def test_counterbore_finish_stays_on_requested_wall(strategy, x_start):
     assert "X4.0000" not in finish_section
     assert "Z-0.5680" in finish_section
     emitted_finish = [m for m in parse(_without_comp_entries(finish_section)) if m.move_type == MoveType.FEED]
-    assert len(emitted_finish) == 2
-    assert [m.x for m in emitted_finish] == pytest.approx([3.117, 3.117])
-    assert [m.z for m in emitted_finish] == pytest.approx([0.0, -0.568])
+    # Every finish cut is on the requested wall. (Since 2026-11-11 the lead from
+    # the pilot at Z0+.001 to the wall is recognised as air and dropped, so the
+    # pass enters straight down the wall line; before, that lead ran under comp.)
+    assert 1 <= len(emitted_finish) <= 2
+    assert [m.x for m in emitted_finish] == pytest.approx([3.117] * len(emitted_finish))
+    assert emitted_finish[-1].z == pytest.approx(-0.568)
+    assert "X3.1170 Z0.0000" in finish_section                     # the wall from Z0
 
 
 def test_stepped_id_finish_follows_ground_truth_profile():

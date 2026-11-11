@@ -8,8 +8,9 @@ the distinction between the owner's verbatim request and later design advice.
 
 - [Zone Shading on the Graph: Plan + Status](2026-11-11-zone-shading-plan.md)
   - Status: S0-S2 BUILT 2026-11-11 (sections from G-code via rs274, legend,
-    pixel-probe tests). Found 3 real defects (roughing gouge beside falling
-    flanks; ID mouth chamfer left proud; face left at allowance) - §6.
+    pixel-probe tests). Found 3 real defects; 1 (roughing gouge beside falling
+    flanks) and 2 (ID mouth chamfer left proud) FIXED same day (§7); 3 (face
+    left at the face allowance) to discuss with the owner.
   - Original: Owner wants the discrete sections shaded
     (finished part, roughing, cleanup/finish, face stock, uncut) and the graph
     100% trustworthy as a validation tool.

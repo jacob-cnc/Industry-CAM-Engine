@@ -45,9 +45,11 @@ from typing import List, Optional, Sequence, Tuple
 QUADRANT_LEG_TOL = 0.0002
 # Below this an X or Z delta counts as zero (same X / same Z), radius inches.
 SAME_TOL = 1e-5
-# An arc must pass its X extreme by more than this to be split, radius inches
-# (well above the 4-decimal rounding of a split point shown in the segment list).
-EXTREME_TOL = 1e-4
+# An arc must pass its X extreme by more than this to be split, radius inches:
+# the engine's TOLERANCE, the same margin the old "exceeds X bounds" refusal
+# allowed, so no arc that used to generate is split now. (A split over a .0001
+# dip left a sub-degree sliver piece that later blocked GUI Conv Test.)
+EXTREME_TOL = 5e-4
 
 
 def _is_q(radius) -> int:

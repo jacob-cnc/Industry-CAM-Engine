@@ -43,6 +43,21 @@ class ToolType(Enum):
     GROOVING = "grooving"
 
 
+# LinuxCNC orientation Q -> direction from the nose centre to the imaginary tip,
+# (radius, Z). Fig 2.16 of the 2.9 manual (front-tool lathe). The programmed
+# point of an uncompensated move is that tip; the nose centre is
+# tip - nose_radius * direction (rs274 reports the tip under G41/G42 too).
+Q_TIP_DIRECTION = {1: (-1, 1), 2: (-1, -1), 3: (1, -1), 4: (1, 1), 5: (0, 1), 6: (-1, 0),
+                   7: (0, -1), 8: (1, 0), 9: (0, 0)}
+
+
+def nose_centre_offset(tool) -> tuple:
+    """Nose centre minus imaginary tip, (radius, Z), for this tool."""
+    q = int(getattr(tool.orientation, "value", tool.orientation) or 0)
+    dr, dz = Q_TIP_DIRECTION.get(q, (0, 0))
+    return (-dr * tool.nose_radius, -dz * tool.nose_radius)
+
+
 @dataclass(frozen=True)
 class ToolDef:
     """Complete tool geometry definition — single source of truth.

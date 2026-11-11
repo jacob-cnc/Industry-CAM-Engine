@@ -46,8 +46,19 @@ class ContourRoughingPlanner:
             return []
         passes_inside_out = []
         offset = fin_r + doc_r
+        # Roughing is uncompensated: LinuxCNC drives the imaginary tip and the
+        # nose sits nose_centre_offset away. So offset the part by (offset + R)
+        # for the NOSE CENTRE and shift that path back to the tip. On diameters
+        # and faces this is the same path as before; beside a contour falling
+        # toward the chuck it keeps the nose its full clearance instead of
+        # overhanging the flank (found by the G-code section check 2026-11-11).
+        from models.tool import nose_centre_offset
+        R = max(getattr(tool, "nose_radius", 0.0) or 0.0, 0.0)
+        off = nose_centre_offset(tool) if R > 0 else (0.0, 0.0)
         for idx in range(100):
-            ocp_face = self._do_offset(face, offset)
+            ocp_face = self._do_offset(face, offset + R)
+            if ocp_face is not None and R > 0:
+                ocp_face = self._translate(ocp_face, -off[0], -off[1])
             if ocp_face is None:
                 break
             edges = self._clip_and_extract(ocp_face, fin_r, stock_r, z_begin, stock.z_end)
@@ -132,6 +143,16 @@ class ContourRoughingPlanner:
             return sk.sketch
         except Exception:
             return None
+
+    @staticmethod
+    def _translate(ocp_face, dr, dz):
+        """The face moved by (dr, dz) in the sketch plane (X = radius, Y = Z)."""
+        from OCP.gp import gp_Trsf, gp_Vec
+        from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
+        from OCP.TopoDS import TopoDS
+        tr = gp_Trsf()
+        tr.SetTranslation(gp_Vec(dr, dz, 0.0))
+        return TopoDS.Face_s(BRepBuilderAPI_Transform(ocp_face, tr, True).Shape())
 
     def _do_offset(self, face, dist):
         """Offset face outward by dist. Returns OCP face or None."""

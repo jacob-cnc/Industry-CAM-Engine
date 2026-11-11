@@ -59,9 +59,6 @@ SECTION_OF_HEADER = (         # "; === <header> ===" -> section; first match win
     ("FACE", "face"), ("ROUGH", "rough"),                          # header says "roughing boundary"
 )
 
-# LinuxCNC orientation Q -> direction from nose centre to the imaginary tip (r, z)
-_Q_DIR = {1: (-1, 1), 2: (-1, -1), 3: (1, -1), 4: (1, 1), 5: (0, 1), 6: (-1, 0),
-          7: (0, -1), 8: (1, 0), 9: (0, 0)}
 
 
 class CutRegionsUnavailable(RuntimeError):
@@ -177,10 +174,9 @@ def parse_canon(canon: str) -> List[CanonMove]:
 # ----------------------------------------------------------------------
 
 def nose_offset(tool) -> Tuple[float, float]:
-    """Nose centre minus imaginary tip, (r, z)."""
-    q = int(getattr(tool.orientation, "value", tool.orientation) or 0)
-    dr, dz = _Q_DIR.get(q, (0, 0))
-    return (-dr * tool.nose_radius, -dz * tool.nose_radius)
+    """Nose centre minus imaginary tip, (r, z) (models.tool.nose_centre_offset)."""
+    from models.tool import nose_centre_offset
+    return nose_centre_offset(tool)
 
 
 def _wedge(tool, mode_id: bool) -> Optional[Polygon]:
@@ -331,6 +327,11 @@ def compute_sections(gcode: str, plan_result, uncut_outlines=()) -> CutSections:
     ft = getattr(pr, "finish_tool", None)
     if ft is not None:
         tools[ft.tool_number] = ft
+    for t in tools.values():
+        if t.nose_radius < 1e-4 and _wedge(t, mode_id) is None:
+            raise CutRegionsUnavailable(
+                f"T{t.tool_number} has no nose radius or edge angles in the tool table, so the "
+                f"graph can't tell what it removes")
     moves = parse_canon(run_rs274(gcode, tools.values()))
     nose, wedge = swept_regions(moves, tools, mode_id)
 
