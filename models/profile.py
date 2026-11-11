@@ -60,7 +60,13 @@ class ProfileMove:
     Coordinates:
         x: End X position in DIAMETER (inches)
         z: End Z position in INCHES
-        radius: Arc radius in RADIUS (inches), signed: +CW (G02), -CCW (G03). 0 for lines.
+        radius: Arc radius in RADIUS (inches), signed. The sign picks the SIDE OF THE
+                CHORD for Build123d RadiusArc (sketch X = radius, Y = Z): +R puts the
+                centre to the RIGHT of travel, which is a clockwise (internal ARC_CW)
+                minor arc in (r, z) - written to LinuxCNC as G03 (outputs/gcode_dialect.py).
+                Always the minor arc (< 180 deg). Not "+R minor / -R major" and not
+                "+R = G02" (both stale, 2026-11-10). Phase 1 of the arc strategy replaces
+                this sign with an explicit centre + direction. 0 for lines.
         quadrant: If True, this is a tangent-bounded quadrant arc (quarter ellipse).
                   The radius field is ignored and the arc is computed from endpoints.
     """
