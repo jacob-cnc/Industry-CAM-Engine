@@ -504,6 +504,7 @@ def _compute_per_move_states(
                             radius=arc_radius,
                             cos_limit=SHAPELY_COS_LIMIT,
                             max_depth=MAX_DENSIFICATION_DEPTH,
+                            is_cw=(move.move_type == MoveType.ARC_CW),
                         )
                         # Skip the first point (already in centerline cache)
                         arc_centerline_cache.extend(arc_points[1:])
@@ -899,6 +900,7 @@ def _compute_arc_swept_band(
                         radius=arc_radius,
                         cos_limit=SHAPELY_COS_LIMIT,
                         max_depth=MAX_DENSIFICATION_DEPTH,
+                        is_cw=(move.move_type == MoveType.ARC_CW),
                     )
                     # Skip the first point (already in centerline_points)
                     centerline_points.extend(arc_points[1:])

@@ -152,12 +152,7 @@ class FinishPlanner:
             # selects the stock closure instead of the boring wall.
             from geometry.zone_query import EdgeData
             if profile.mode == MachiningMode.ID:
-                all_edges = [
-                    EdgeData(edge.edge_type, start=edge.end, end=edge.start,
-                             center=edge.center, radius=edge.radius,
-                             direction=edge.direction, ocp_edge=edge.ocp_edge)
-                    for edge in reversed(all_edges)
-                ]
+                all_edges = [edge.reversed() for edge in reversed(all_edges)]
 
             profile_coords = _profile_to_radius_coords(profile)
             if not profile_coords:
@@ -222,19 +217,10 @@ class FinishPlanner:
                 return None
 
             # Reverse the edges and flip each one to get cutting direction.
-            # Mark them as flipped so arc direction can be inverted.
-            profile_edges = []
-            for edge in reversed(reversed_edges):
-                flipped = EdgeData(
-                    edge_type=edge.edge_type,
-                    start=edge.end,
-                    end=edge.start,
-                    center=edge.center,
-                    radius=edge.radius,
-                    direction="flipped",  # Signal that arc direction must be inverted
-                    ocp_edge=edge.ocp_edge,  # Preserve raw edge for CURVE decomposition
-                )
-                profile_edges.append(flipped)
+            # EdgeData.reversed() swaps the ends AND flips the arc direction
+            # (was a "flipped" marker nobody read, harmless while direction was
+            # re-guessed from the end points; Phase 0 trusts direction).
+            profile_edges = [edge.reversed() for edge in reversed(reversed_edges)]
 
             return profile_edges if profile_edges else None
         except Exception:
@@ -340,27 +326,10 @@ class FinishPlanner:
                 center_i = center_x_dia - prev_x_dia
                 center_k = center_z - prev_z
 
-                # Determine G02/G03 from the actual sweep direction.
-                # The center is extracted from OCCT (guaranteed correct).
-                # Compute sweep from start to end around center:
-                #   Negative sweep (CW in math) = G02 (CW in G18)
-                #   Positive sweep (CCW in math) = G03 (CCW in G18)
-                import math as _math
-                sx_r = prev_x_dia / 2.0
-                ex_r = end_x_dia / 2.0
-                cx_r = center_x_dia / 2.0
-                angle_start = _math.atan2(prev_z - center_z, sx_r - cx_r)
-                angle_end = _math.atan2(end_z - center_z, ex_r - cx_r)
-
-                # Compute sweep, taking the shorter path (minor arc for fillets)
-                sweep = angle_end - angle_start
-                if sweep > _math.pi:
-                    sweep -= 2 * _math.pi
-                elif sweep < -_math.pi:
-                    sweep += 2 * _math.pi
-
-                # Negative sweep = CW = G02, Positive sweep = CCW = G03
-                is_cw = sweep < 0
+                # Direction comes from the kernel (EdgeData.direction, a
+                # canonical <= 90 deg piece; geometry/arc_math.py) - never
+                # re-guessed from start/end/centre.
+                is_cw = edge.direction == "cw"
                 move_type = MoveType.ARC_CW if is_cw else MoveType.ARC_CCW
                 signed_r = edge.radius if is_cw else -edge.radius
 

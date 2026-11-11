@@ -93,6 +93,9 @@ class ValidationPolygons:
                     radius=edge.radius,
                     cos_limit=SHAPELY_COS_LIMIT,
                     max_depth=MAX_DENSIFICATION_DEPTH,
+                    # Kernel direction (geometry/arc_math.py): the "shorter"
+                    # guess drew 180 deg arcs on the wrong side (2026-11-10).
+                    is_cw=(edge.direction == "cw") if edge.direction in ("cw", "ccw") else None,
                 )
                 # Skip the first point (it's the start, already in coords)
                 coords.extend(arc_points[1:])

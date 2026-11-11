@@ -108,8 +108,8 @@ class CleanupPlanner:
             raise RuntimeError(f"{mode.name} cleanup produced no contour for the requested profile.")
         if any(edge.edge_type not in ("LINE", "ARC") for edge in edges):
             raise RuntimeError(f"{mode.name} cleanup currently supports line and circular-arc contours only.")
-        offset_edges = [(edge.start, edge.end, edge.edge_type, edge.center, edge.radius)
-                        for edge in edges]
+        offset_edges = [(edge.start, edge.end, edge.edge_type, edge.center, edge.radius,
+                         edge.direction) for edge in edges]
 
         if not offset_edges:
             return []
@@ -618,7 +618,8 @@ class CleanupPlanner:
         moves = []
 
         for i, edge in enumerate(offset_edges):
-            start, end, edge_type, center, radius = edge
+            start, end, edge_type, center, radius = edge[:5]
+            direction = edge[5] if len(edge) > 5 else None
 
             if edge_type == "LINE":
                 moves.append(ToolMove(
@@ -631,27 +632,16 @@ class CleanupPlanner:
                 ))
 
             elif edge_type == "ARC":
-                # Determine CW vs CCW from the sweep direction.
-                # The center is correct (from RadiusArc with proper signed radius).
-                # Compute sweep from start to end, normalize to [-π, π].
-                import math as _math
+                # Direction from the kernel (EdgeData.direction on a canonical
+                # <= 90 deg piece, geometry/arc_math.py). Was: shortest sweep,
+                # which reversed the 186 deg offset of a concave 180 deg arc.
+                if direction in ("cw", "ccw"):
+                    sweep = -1.0 if direction == "cw" else 1.0
+                else:                                   # legacy 5-tuple callers
+                    from geometry.arc_math import short_sweep
+                    sweep = short_sweep((start[0] / 2.0, start[1]), (end[0] / 2.0, end[1]),
+                                        (center[0] / 2.0, center[1]))
 
-                sx_r = start[0] / 2.0
-                sz = start[1]
-                ex_r = end[0] / 2.0
-                ez = end[1]
-                cx_r = center[0] / 2.0
-                cz = center[1]
-
-                angle_start = _math.atan2(sz - cz, sx_r - cx_r)
-                angle_end = _math.atan2(ez - cz, ex_r - cx_r)
-                sweep = angle_end - angle_start
-                if sweep > _math.pi:
-                    sweep -= 2 * _math.pi
-                elif sweep < -_math.pi:
-                    sweep += 2 * _math.pi
-
-                # Negative sweep = CW = G02, Positive sweep = CCW = G03
                 if sweep < 0:
                     move_type = MoveType.ARC_CW
                     radius_signed = radius
@@ -770,19 +760,8 @@ class CleanupPlanner:
         # Cutting direction is from Z_start downward (CW around profile-side boundary).
         # Reverse the edge list and flip each edge's start/end.
         if mode == MachiningMode.ID:
-            reversed_edges = []
-            for edge in reversed(turning_edges):
-                # Create a new EdgeData with swapped start/end
-                from geometry.zone_query import EdgeData
-                reversed_edges.append(EdgeData(
-                    edge_type=edge.edge_type,
-                    start=edge.end,
-                    end=edge.start,
-                    center=edge.center,
-                    radius=edge.radius,
-                    direction=edge.direction,
-                ))
-            turning_edges = reversed_edges
+            # reversed() also flips the arc direction (geometry/arc_math.py).
+            turning_edges = [edge.reversed() for edge in reversed(turning_edges)]
 
         moves = self._build_moves_from_edge_data(turning_edges, params)
         if not moves:

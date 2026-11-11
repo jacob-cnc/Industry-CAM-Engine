@@ -237,6 +237,7 @@ def _densify_arc_move(
         radius=radius,
         cos_limit=SHAPELY_COS_LIMIT,
         max_depth=MAX_DENSIFICATION_DEPTH,
+        is_cw=(move.move_type == MoveType.ARC_CW),   # never the "shorter" guess
     )
 
     # Convert consecutive point pairs into LineString segments

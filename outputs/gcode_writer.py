@@ -17,6 +17,14 @@ from models.program import ThreadingParams, GroovingParams
 from models.constants import TOLERANCE, CENTER_ARC_RADIUS_TOLERANCE_INCH
 
 
+def _piece_sweep(p, q, centre_dia):
+    """Short sweep (radians) between two points on a canonical <= 90 deg arc
+    piece; points and centre are (X dia, Z)."""
+    from geometry.arc_math import short_sweep
+    return short_sweep((p[0] / 2.0, p[1]), (q[0] / 2.0, q[1]),
+                       (centre_dia[0] / 2.0, centre_dia[1]))
+
+
 class GCodeWriter:
     """G-code writer with full coordinate output and descriptive comments.
 
@@ -535,7 +543,7 @@ class GCodeWriter:
                     abs(pt[0] - path[-1][0]) > 1e-9 or abs(pt[1] - path[-1][1]) > 1e-9:
                 path.append(pt)       # zero-length moves are suppressed in output
 
-        contour = moves[k:]
+        contour = self._merge_arc_pieces(moves[k:], (px, pz))
         if comp_code != "G40":
             contour = self._sharpen_small_concave_arcs(
                 contour, (px, pz), r, comp_code, label, out)
@@ -552,6 +560,42 @@ class GCodeWriter:
                 _track((self._x, self._z))
         if comp_code != "G40":
             self._check_concave_corners(path, r, comp_code, label)
+        return out
+
+    @staticmethod
+    def _merge_arc_pieces(moves, start, tol: float = 1e-6) -> list:
+        """Re-join consecutive arc moves on the same circle, same direction,
+        feed and pass (the kernel splits arcs into <= 90 deg pieces, see
+        geometry/arc_math.py). Output-only: planners and validators keep the
+        pieces. Keeps the G-code of an unsplit arc unchanged and lets the
+        concave-arc rule see the whole arc. Points are (X dia, Z)."""
+        from dataclasses import replace
+        arcs = (MoveType.ARC_CW, MoveType.ARC_CCW)
+        out = []                 # merged moves
+        run_start = None         # start point of out[-1]
+        run_sweep = 0.0          # |sweep| accumulated in out[-1] (radians)
+        pos = start
+        for m in moves:
+            end = (m.x, m.z)
+            if m.move_type in arcs:
+                centre = (pos[0] + m.center_i, pos[1] + m.center_k)
+                piece = abs(_piece_sweep(pos, end, centre))
+                last = out[-1] if out else None
+                if (last is not None and last.move_type == m.move_type
+                        and abs(last.feed - m.feed) < 1e-12 and last.pass_type == m.pass_type):
+                    last_centre = (run_start[0] + last.center_i, run_start[1] + last.center_k)
+                    if (abs(last_centre[0] - centre[0]) < tol and abs(last_centre[1] - centre[1]) < tol
+                            and run_sweep + piece < 2.0 * math.pi - 1e-6):
+                        out[-1] = replace(last, x=m.x, z=m.z)
+                        run_sweep += piece
+                        pos = end
+                        continue
+                run_sweep = piece
+            else:
+                run_sweep = 0.0
+            out.append(m)
+            run_start = pos
+            pos = end
         return out
 
     # A concave arc this close to the nose radius (or smaller) has no usable

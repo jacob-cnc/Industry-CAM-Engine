@@ -34,7 +34,14 @@ class ContourRoughingPlanner:
         fin_r = params.fin_allowance / 2.0
         stock_r = stock.diameter / 2.0
         z_begin = fin_r
-        face = self._build_face(segments)
+        # The zone builder's finished part (correct arc sides, corner breaks
+        # applied). Until 2026-11-10 this planner built its own face from the
+        # raw segments: no corner breaks and RadiusArc(-radius), i.e. every
+        # arc bulged the wrong way (the "offset_contour gouges concave
+        # fillets" symptom). _build_face is kept only as a fallback.
+        face = getattr(zone_set, "finished_part", None) if zone_set is not None else None
+        if face is None:
+            face = self._build_face(segments)
         if face is None:
             return []
         passes_inside_out = []
@@ -210,10 +217,19 @@ class ContourRoughingPlanner:
                 if ct == GeomAbs_Line:
                     raw.append(((sd, sz), (ed, ez), "LINE", None, 0.0))
                 elif ct == GeomAbs_Circle:
+                    # Canonical <= 90 deg pieces with the kernel's true sweep
+                    # (geometry/arc_math.py), so _to_moves' short-sweep label
+                    # is always right, even after _order flips an edge.
+                    from geometry.arc_math import arc_from_kernel, split_at_quadrants
                     ci = cur.Circle()
                     loc = ci.Location()
-                    raw.append(((sd, sz), (ed, ez), "ARC",
-                               (loc.X() * 2, loc.Y()), ci.Radius()))
+                    pm = cur.Value(0.5 * (cur.FirstParameter() + cur.LastParameter()))
+                    arc = arc_from_kernel((ps.X(), ps.Y()), (pm.X(), pm.Y()), (pe.X(), pe.Y()),
+                                          (loc.X(), loc.Y()), ci.Radius())
+                    for piece in split_at_quadrants(arc):
+                        raw.append(((piece.start[0] * 2, piece.start[1]),
+                                    (piece.end[0] * 2, piece.end[1]), "ARC",
+                                    (loc.X() * 2, loc.Y()), ci.Radius()))
                 exp.Next()
         except Exception:
             return []
@@ -296,12 +312,14 @@ class ContourRoughingPlanner:
                 moves.append(ToolMove(MoveType.FEED, en[0], en[1],
                              feed=params.feed, pass_type=PassType.ROUGH))
             elif tp == "ARC":
-                dxc = ctr[0] - s[0]
-                dzc = ctr[1] - s[1]
-                dxe = en[0] - s[0]
-                dze = en[1] - s[1]
-                cross = dxc * dze - dzc * dxe
-                mt = MoveType.ARC_CW if cross < 0 else MoveType.ARC_CCW
+                # Short sweep is exact on a canonical <= 90 deg piece. The old
+                # test, (c - s) x (e - s) < 0 -> ARC_CW, was the negation of
+                # the rule every other planner uses: since the 2026-11-10
+                # G-code dialect fix LinuxCNC ran these arcs the long way
+                # round (e.g. -359 deg instead of +1 deg).
+                from geometry.arc_math import short_sweep
+                sw = short_sweep((s[0] / 2.0, s[1]), (en[0] / 2.0, en[1]), (ctr[0] / 2.0, ctr[1]))
+                mt = MoveType.ARC_CW if sw < 0 else MoveType.ARC_CCW
                 moves.append(ToolMove(mt, en[0], en[1], feed=params.feed,
                              radius=rad if mt == MoveType.ARC_CW else -rad,
                              center_i=ctr[0] - s[0], center_k=ctr[1] - s[1],

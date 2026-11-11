@@ -41,14 +41,24 @@ class EdgeData:
     def __init__(self, edge_type: str, start: Tuple[float, float],
                  end: Tuple[float, float], center: Optional[Tuple[float, float]] = None,
                  radius: float = 0.0, direction: str = "cw",
-                 ocp_edge=None):
+                 ocp_edge=None, sweep: float = 0.0):
         self.edge_type = edge_type  # "LINE", "ARC", or "CURVE"
         self.start = start          # (x_dia, z)
         self.end = end              # (x_dia, z)
         self.center = center        # (x_dia, z) for arcs
         self.radius = radius        # Arc radius (positive)
+        # ARC: "cw" = negative sweep in (r, z) = MoveType.ARC_CW (see
+        # geometry/arc_math.py). Geometric since Phase 0 (was always "cw").
         self.direction = direction  # "cw" or "ccw"
+        self.sweep = sweep          # signed sweep, radians (ARC only)
         self.ocp_edge = ocp_edge    # Raw OCP edge for non-circular curve decomposition
+
+    def reversed(self) -> "EdgeData":
+        """Same edge travelled the other way (direction and sweep flip)."""
+        flip = {"cw": "ccw", "ccw": "cw"}.get(self.direction, self.direction)
+        return EdgeData(self.edge_type, start=self.end, end=self.start, center=self.center,
+                        radius=self.radius, direction=flip, ocp_edge=self.ocp_edge,
+                        sweep=-self.sweep)
 
 
 class ZoneQueryAPI:
@@ -282,14 +292,25 @@ class ZoneQueryAPI:
                 center_z = center.Y()
                 radius = circle.Radius()
 
-                raw_edges.append(EdgeData(
-                    edge_type="ARC",
-                    start=(start_x_dia, start_z),
-                    end=(end_x_dia, end_z),
-                    center=(center_x_dia, center_z),
-                    radius=radius,
-                    direction="cw",
-                ))
+                # True sweep from the kernel: start -> mid-parameter point ->
+                # end (the mid point does not depend on edge orientation).
+                # Then canonical quadrant pieces (<= 90 deg, monotonic), so
+                # no consumer ever has to guess a sweep (arc_math docstring).
+                from geometry.arc_math import arc_from_kernel, split_at_quadrants
+                p_mid = curve.Value(0.5 * (curve.FirstParameter() + curve.LastParameter()))
+                arc = arc_from_kernel((p_start.X(), p_start.Y()), (p_mid.X(), p_mid.Y()),
+                                      (p_end.X(), p_end.Y()), (center.X(), center.Y()),
+                                      radius)
+                for piece in split_at_quadrants(arc):
+                    raw_edges.append(EdgeData(
+                        edge_type="ARC",
+                        start=(piece.start[0] * 2.0, piece.start[1]),
+                        end=(piece.end[0] * 2.0, piece.end[1]),
+                        center=(center_x_dia, center_z),
+                        radius=radius,
+                        direction="cw" if piece.is_cw else "ccw",
+                        sweep=piece.sweep,
+                    ))
             else:
                 # Non-circular curve (ellipse, BSpline, Bezier, etc.)
                 # Store the raw OCP edge for parametric decomposition by finish planner
