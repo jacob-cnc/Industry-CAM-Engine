@@ -51,6 +51,42 @@ class EdgeData:
         self.ocp_edge = ocp_edge    # Raw OCP edge for non-circular curve decomposition
 
 
+def _quadrant_split_arc(s, m, e, c, radius, min_len=1e-5):
+    """Split a circular arc (radius coords, sketch X = r, Y = z) given by
+    start, a point on it and end into EdgeData pieces that each stay inside
+    one quadrant of the centre (<= 90 deg). Returns diameter-coordinate
+    EdgeData with a geometric direction ("ccw" = positive sweep in (r, z))."""
+    import math
+    def ang(p):
+        return math.atan2(p[1] - c[1], p[0] - c[0])
+    def wrap(a):
+        return (a + math.pi) % (2 * math.pi) - math.pi
+    a0, am, a1 = ang(s), ang(m), ang(e)
+    sweep = wrap(am - a0) + wrap(a1 - am)
+    sgn = 1.0 if sweep > 0 else -1.0
+    # quadrant boundaries strictly inside the sweep
+    cuts = []
+    k = math.floor(a0 / (math.pi / 2)) if sgn > 0 else math.ceil(a0 / (math.pi / 2))
+    while True:
+        k += sgn
+        b = k * math.pi / 2
+        if sgn * (b - a0) >= abs(sweep) - 1e-12:
+            break
+        if sgn * (b - a0) > 1e-12:
+            cuts.append(b)
+    pts = [s] + [(c[0] + radius * math.cos(b), c[1] + radius * math.sin(b)) for b in cuts] + [e]
+    out = []
+    for p, q in zip(pts, pts[1:]):
+        if out and math.dist(p, q) < min_len:      # merge slivers into the previous piece
+            prev = out[-1]
+            prev.end = (q[0] * 2.0, q[1])
+            continue
+        out.append(EdgeData(edge_type="ARC", start=(p[0] * 2.0, p[1]), end=(q[0] * 2.0, q[1]),
+                            center=(c[0] * 2.0, c[1]), radius=radius,
+                            direction="ccw" if sgn > 0 else "cw"))
+    return out
+
+
 class ZoneQueryAPI:
     """Direct geometric query interface wrapping OCCT operations against Build123d Faces.
 
@@ -282,14 +318,15 @@ class ZoneQueryAPI:
                 center_z = center.Y()
                 radius = circle.Radius()
 
-                raw_edges.append(EdgeData(
-                    edge_type="ARC",
-                    start=(start_x_dia, start_z),
-                    end=(end_x_dia, end_z),
-                    center=(center_x_dia, center_z),
-                    radius=radius,
-                    direction="cw",
-                ))
+                # PROTOTYPE (arc strategy): true sweep from start -> mid -> end
+                # (the mid-parameter point is the same whichever way the edge
+                # is oriented), then split at quadrant boundaries so no piece
+                # exceeds 90 deg and every downstream "shortest sweep" guess is
+                # right. direction is now geometric, not hard-coded.
+                p_mid = curve.Value(0.5 * (curve.FirstParameter() + curve.LastParameter()))
+                raw_edges.extend(_quadrant_split_arc(
+                    (p_start.X(), p_start.Y()), (p_mid.X(), p_mid.Y()),
+                    (p_end.X(), p_end.Y()), (center.X(), center.Y()), radius))
             else:
                 # Non-circular curve (ellipse, BSpline, Bezier, etc.)
                 # Store the raw OCP edge for parametric decomposition by finish planner
