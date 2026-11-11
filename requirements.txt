@@ -11,6 +11,9 @@ build123d==0.10.0
 # (imports OCP.collections), which 7.8 lacks -> ImportError. Cap it on the 7.8
 # era. Remove both pins together if/when geometry/ migrates to the OCP 8.0 API.
 ocp_gordon>=0.1.17,<0.2
+# Lathe PC note (2026-11-10): the lathe's system python runs ocp_gordon 0.2.0 with
+# build123d 0.10.0 / cadquery-ocp 7.8.1 and imports fine. Do NOT `pip install -r` on
+# the lathe - it would downgrade working packages on the machine PC.
 shapely>=2.1.0
 ezdxf>=1.4.0
 PyQt5>=5.15.0

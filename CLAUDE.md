@@ -47,12 +47,25 @@ encoder.02 = Z MPG (7i85s TB3 enc 2), encoder.03 = X MPG (7i85s TB2 enc 3), enco
 
 ## Axis Config
 
-| Axis | Travel | Max vel | STEP_SCALE | ENCODER_SCALE |
-|---|---|---|---|---|
-| X (Joint 0) | 0–4.25" radius | 2.0 in/s | 54186.667 | 5080 |
-| Z (Joint 1) | 0–23.5" | 2.0 in/s | 27093.333 | 5080 |
+**`industry-cam.ini` is the source of truth** — this table is a snapshot
+(2026-11-10). Re-read the INI before relying on any number here.
 
-PID initial: P=500, FF1=1.0 (critical for velocity-mode stepgen), deadband=0.0001", FERROR=0.050" (loose, for tuning)
+| | X (Joint 0) | Z (Joint 1) |
+|---|---|---|
+| Soft limits (joint) | -0.05 … 5.95 | -5.0 … 5.0 |
+| MAX_VELOCITY joint / axis (in/s) | 1.7 / 1.8 | 1.5 / 0.75 |
+| MAX_ACCELERATION joint / axis | 10 / 10 | 5 / 2 |
+| STEPGEN_MAXVEL | 1.8 | 2.0 |
+| STEP_SCALE | **-54186.667** | **-27093.333** |
+| ENCODER_SCALE | **-5080** | **+5080** |
+| PID P / I / D / FF1 | 125 / 0 / .002 / 1.0 | 60 / 0 / .005 / 1.0 |
+| DEADBAND | .0005 | .0002 |
+| FERROR / MIN_FERROR | .100 / .050 | .200 / .100 |
+
+Signs: both STEP_SCALEs are negative and the ENCODER_SCALE signs differ per
+axis (2026-05-20 "triple flip"). Never flip ENCODER_SCALE alone — the loop
+goes unstable (positive feedback). See
+`session-notes/2026-05-20-axis-convention-triple-flip.md`.
 
 ---
 

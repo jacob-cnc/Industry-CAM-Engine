@@ -1,247 +1,318 @@
-; Industry CAM Engine — Generated Program
-; Profile: 5 segments, Mode: OD
-; Stock: 2.0000 dia, Z 0.1000 to -1.0000
-; DOC: 0.0500 dia, Rough Feed: 0.0080
-; Fin Allowance: 0.0050 dia, Finish Feed: 0.0030
-; RPM: 1200
-; Tool: T1 Default T1 CNMG
+%
 
-N10 G20 G18 G40 G49 G80  (Safety line - inch, ZX plane, comp off)
-N20 G90 G95  (Absolute positioning, feed per revolution)
+; Industry CAM Engine - Generated Program
+; Units: inch
+; Mode: OD
+;
+; === STOCK ===
+; Diameter: 2.0000
+; X Start: 0.0000
+; Z Start: 0.1000
+; Z End: -1.0000
+; X Park: 2.0000
+; Z Park: 2.0000
+;
+; === TOOL ===
+; Tool Number: T4
+; Description: 
+; Nose Radius: 0.0160
+; Tip Angle: 80.0 deg
+; Edge Length: 0.0000
+; Orientation: 2
+; Direction: R
+; Type: turning
+;
+; === FEEDS & SPEEDS ===
+; Spindle RPM: 1200
+; Roughing Strategy: offset_contour
+; Roughing DOC (dia): 0.0500
+; Roughing Feed: 0.0080
+; Finish Allowance (dia): 0.0050
+; Finish Passes: 1
+; Spring Pass: 0
+; Finish DOC (dia): 0.0050
+; Finish Feed: 0.0030
+;
+; === PROFILE (5 segments) ===
+; Z Start: 0.0000
+; Z End: -1.0000
+; Seg 1: LINE X0.0000 Z0.0000
+; Seg 2: LINE X0.5000 Z0.0000
+; Seg 3: LINE X0.5000 Z-0.5000
+; Seg 4: LINE X1.0000 Z-0.5000
+; Seg 5: ARC X1.2500 Z-1.0000 R-1.0000
+;
+; Passes: 33 total, Moves: 177
+; Generation time: 712.6 ms
 
-N30 S1200 M3  (Spindle CW - enables encoder for feed/rev)
-N40 G00 X2.0000 Z2.0000  (Move to park position)
+N10 G20 G7 G18 G40 G49 G80  ; Safety line - inch, diameter mode, ZX plane, comp off
+N20 G90 G95  ; Absolute positioning, feed per revolution
 
-N50 T1 M6  (Load tool T1 - Default T1 CNMG)
-N60 G43  (Tool length comp on)
-N70 G42  (Cutter radius compensation on)
+N30 S1200 M3  ; Spindle CW - enables encoder for feed/rev
+N40 G00 X2.0000 Z2.0000  ; Move to park position
+
+N50 T4 M6  ; Load tool T4 - 
+N60 G43  ; Tool length comp on
+; --- tool check: program generated for T4 D0.032000 Q2 ---
+o9001 if [[#5400 NE 4] OR [ABS[#5410 - 0.032000] GT 0.000050] OR [#5413 NE 2]]
+  (DEBUG, TOOL MISMATCH: program expects T4 D0.0320 Q2 - LinuxCNC has T#5400 D#5410 Q#5413. Fix tool table and regenerate, or Resume to continue anyway.)
+  M0
+o9001 endif
+
+N70 G40  ; Cutter comp off - roughing is uncompensated
 
 ; === FACE PASSES (4 passes) ===
-N80 G00 X2.0000 Z0.1000  (Approach: Stock OD, Z_start)
-N90 G01 X2.0000 Z0.0750 F0.0080  (Face pass 1: feed Z to 0.0750)
-
-N100 G01 X0.0000 Z0.0750  (Face pass 1: feed to X_start)
-N110 G00 X2.0000 Z0.1000  (Retract X to stock OD, Z=0.1000 (prev pass))
-N120 G01 X2.0000 Z0.0500  (Face pass 2: feed Z to 0.0500)
-
-N130 G01 X0.0000 Z0.0500  (Face pass 2: feed to X_start)
-N140 G00 X2.0000 Z0.0750  (Retract X to stock OD, Z=0.0750 (prev pass))
-N150 G01 X2.0000 Z0.0250  (Face pass 3: feed Z to 0.0250)
-
-N160 G01 X0.0000 Z0.0250  (Face pass 3: feed to X_start)
-N170 G00 X2.0000 Z0.0500  (Retract X to stock OD, Z=0.0500 (prev pass))
-N180 G01 X2.0000 Z0.0025  (Face pass 4: feed Z to 0.0025)
-
-N190 G01 X0.0000 Z0.0025  (Face pass 4: feed to X_start)
-N200 G00 X2.0000 Z0.0250  (Retract X to stock OD, Z=0.0250 (prev pass))
+N80 G00 X2.0100 Z0.1000  ; Approach: Stock OD, Z_start
+N90 G01 X2.0100 Z0.0750 F0.0080  ; Face pass 1: feed Z to 0.0750
+N100 G01 X2.0000 Z0.0750  ; Face pass 1: feed to X_start
+N110 G01 X0.0000 Z0.0750  ; Face pass 1: feed to X_start
+N120 G00 X2.0100 Z0.1000  ; Retract X to stock OD, Z=0.1000 (prev pass)
+N130 G01 X2.0100 Z0.0500  ; Face pass 2: feed Z to 0.0500
+N140 G01 X2.0000 Z0.0500  ; Face pass 2: feed to X_start
+N150 G01 X0.0000 Z0.0500  ; Face pass 2: feed to X_start
+N160 G00 X2.0100 Z0.0750  ; Retract X to stock OD, Z=0.0750 (prev pass)
+N170 G01 X2.0100 Z0.0250  ; Face pass 3: feed Z to 0.0250
+N180 G01 X2.0000 Z0.0250  ; Face pass 3: feed to X_start
+N190 G01 X0.0000 Z0.0250  ; Face pass 3: feed to X_start
+N200 G00 X2.0100 Z0.0500  ; Retract X to stock OD, Z=0.0500 (prev pass)
+N210 G01 X2.0100 Z0.0025  ; Face pass 4: feed Z to 0.0025
+N220 G01 X2.0000 Z0.0025  ; Face pass 4: feed to X_start
+N230 G01 X0.0000 Z0.0025  ; Face pass 4: feed to X_start
+N240 G00 X2.0100 Z0.0250  ; Retract X to stock OD, Z=0.0250 (prev pass)
 
 ; === ROUGHING PASSES (27 passes) ===
-N210 G00 X2.0000 Z0.0025  (Rough pass 1: traverse Z to 0.0025 at X2.0000)
-N220 G01 X1.9633 Z0.0025  (Rough pass 1: feed X to DOC level 1.9633)
+N250 G00 X2.0100 Z0.0025  ; Rough pass 1: traverse Z to 0.0025 at X2.0100
+N260 G01 X1.9633 Z0.0025  ; Rough pass 1: feed X to DOC level 1.9633
 
-N230 G03 X2.0000 Z-0.0232 I-2.7130 K-0.9868  (Rough pass 1 cut)
-N240 G00 X2.0000 Z0.0025  (Diagonal retract to prev X level 2.0000 (clears shoulder))
-N250 G00 X2.0000 Z0.0025  (Rough pass 2: traverse Z to 0.0025 at X2.0000)
-N260 G01 X1.9012 Z0.0025  (Rough pass 2: feed X to DOC level 1.9012)
+N270 G02 X2.0000 Z-0.0232 I-1.3565 K-0.9868  ; Rough pass 1 cut
+N280 G00 X2.0100 Z0.0025  ; Diagonal retract to X2.0100 (clears shoulder)
+N290 G00 X2.0100 Z0.0025  ; Rough pass 2: traverse Z to 0.0025 at X2.0100
+N300 G00 X1.9512 Z0.0025  ; Rough pass 2: rapid X to prev cleared 1.9512
+N310 G01 X1.9012 Z0.0025  ; Rough pass 2: feed X to DOC level 1.9012
 
-N270 G03 X2.0000 Z-0.0676 I-2.6510 K-0.9868  (Rough pass 2 cut)
-N280 G00 X2.0000 Z0.0025  (Diagonal retract to prev X level 2.0000 (clears shoulder))
-N290 G00 X2.0000 Z0.0025  (Rough pass 3: traverse Z to 0.0025 at X2.0000)
-N300 G01 X2.0000 Z0.0025  (Rough pass 3: feed X to DOC level 2.0000)
-N310 G01 X1.8386 Z0.0025  (Rough pass 3 cut)
-N320 G03 X2.0000 Z-0.1134 I-2.5884 K-0.9868  (Rough pass 3 cut)
-N330 G01 X2.0000 Z-1.0000  (Rough pass 3 cut)
-N340 G00 X2.0000 Z-1.0000  (Retract X to prev pass level 2.0000)
-N350 G00 X2.0000 Z0.0025  (Rough pass 4: traverse Z to 0.0025 at X2.0000)
-N360 G01 X2.0000 Z0.0025  (Rough pass 4: feed X to DOC level 2.0000)
-N370 G01 X1.7754 Z0.0025  (Rough pass 4 cut)
-N380 G03 X2.0000 Z-0.1611 I-2.5252 K-0.9868  (Rough pass 4 cut)
-N390 G01 X2.0000 Z-1.0000  (Rough pass 4 cut)
-N400 G00 X2.0000 Z-1.0000  (Retract X to prev pass level 2.0000)
-N410 G00 X2.0000 Z0.0025  (Rough pass 5: traverse Z to 0.0025 at X2.0000)
-N420 G01 X2.0000 Z0.0025  (Rough pass 5: feed X to DOC level 2.0000)
-N430 G01 X1.7117 Z0.0025  (Rough pass 5 cut)
-N440 G03 X2.0000 Z-0.2109 I-2.4614 K-0.9868  (Rough pass 5 cut)
-N450 G01 X2.0000 Z-1.0000  (Rough pass 5 cut)
-N460 G00 X2.0000 Z-1.0000  (Retract X to prev pass level 2.0000)
-N470 G00 X2.0000 Z0.0025  (Rough pass 6: traverse Z to 0.0025 at X2.0000)
-N480 G01 X2.0000 Z0.0025  (Rough pass 6: feed X to DOC level 2.0000)
-N490 G01 X1.6472 Z0.0025  (Rough pass 6 cut)
-N500 G03 X2.0000 Z-0.2633 I-2.3970 K-0.9868  (Rough pass 6 cut)
-N510 G01 X2.0000 Z-1.0000  (Rough pass 6 cut)
-N520 G00 X2.0000 Z-1.0000  (Retract X to prev pass level 2.0000)
-N530 G00 X2.0000 Z0.0025  (Rough pass 7: traverse Z to 0.0025 at X2.0000)
-N540 G01 X2.0000 Z0.0025  (Rough pass 7: feed X to DOC level 2.0000)
-N550 G01 X1.5821 Z0.0025  (Rough pass 7 cut)
-N560 G03 X2.0000 Z-0.3188 I-2.3319 K-0.9868  (Rough pass 7 cut)
-N570 G01 X2.0000 Z-1.0000  (Rough pass 7 cut)
-N580 G00 X2.0000 Z-1.0000  (Retract X to prev pass level 2.0000)
-N590 G00 X2.0000 Z0.0025  (Rough pass 8: traverse Z to 0.0025 at X2.0000)
-N600 G01 X2.0000 Z0.0025  (Rough pass 8: feed X to DOC level 2.0000)
-N610 G01 X1.5162 Z0.0025  (Rough pass 8 cut)
-N620 G03 X2.0000 Z-0.3784 I-2.2660 K-0.9868  (Rough pass 8 cut)
-N630 G01 X2.0000 Z-1.0000  (Rough pass 8 cut)
-N640 G00 X2.0000 Z-1.0000  (Retract X to prev pass level 2.0000)
-N650 G00 X2.0000 Z0.0025  (Rough pass 9: traverse Z to 0.0025 at X2.0000)
-N660 G01 X1.4550 Z0.0025  (Rough pass 9: feed X to DOC level 1.4550)
+N320 G02 X2.0000 Z-0.0676 I-1.3255 K-0.9868  ; Rough pass 2 cut
+N330 G00 X2.0100 Z0.0025  ; Diagonal retract to X2.0100 (clears shoulder)
+N340 G00 X2.0100 Z0.0025  ; Rough pass 3: traverse Z to 0.0025 at X2.0100
+N350 G00 X1.8886 Z0.0025  ; Rough pass 3: rapid X to prev cleared 1.8886
+N360 G01 X1.8386 Z0.0025  ; Rough pass 3: feed X to DOC level 1.8386
 
-N670 G01 X1.4550 Z-0.0225  (Rough pass 9 cut)
-N680 G01 X1.4933 Z-0.0225  (Rough pass 9 cut)
-N690 G03 X2.0000 Z-0.4433 I-2.2431 K-0.9618  (Rough pass 9 cut)
-N700 G01 X2.0000 Z-1.0000  (Rough pass 9 cut)
-N710 G00 X2.0000 Z-1.0000  (Retract X to prev pass level 2.0000)
-N720 G00 X2.0000 Z0.0025  (Rough pass 10: traverse Z to 0.0025 at X2.0000)
-N730 G01 X1.4050 Z0.0025  (Rough pass 10: feed X to DOC level 1.4050)
+N370 G02 X2.0000 Z-0.1134 I-1.2942 K-0.9868  ; Rough pass 3 cut
+N380 G00 X2.0100 Z0.0025  ; Diagonal retract to X2.0100 (clears shoulder)
+N390 G00 X2.0100 Z0.0025  ; Rough pass 4: traverse Z to 0.0025 at X2.0100
+N400 G00 X1.8254 Z0.0025  ; Rough pass 4: rapid X to prev cleared 1.8254
+N410 G01 X1.7754 Z0.0025  ; Rough pass 4: feed X to DOC level 1.7754
 
-N740 G01 X1.4050 Z-0.0475  (Rough pass 10 cut)
-N750 G01 X1.4702 Z-0.0475  (Rough pass 10 cut)
-N760 G03 X2.0000 Z-0.5159 I-2.2200 K-0.9368  (Rough pass 10 cut)
-N770 G01 X2.0000 Z-1.0000  (Rough pass 10 cut)
-N780 G00 X2.0000 Z-1.0000  (Retract X to prev pass level 2.0000)
-N790 G00 X2.0000 Z0.0025  (Rough pass 11: traverse Z to 0.0025 at X2.0000)
-N800 G01 X1.3550 Z0.0025  (Rough pass 11: feed X to DOC level 1.3550)
+N420 G02 X2.0000 Z-0.1611 I-1.2626 K-0.9868  ; Rough pass 4 cut
+N430 G00 X2.0100 Z0.0025  ; Diagonal retract to X2.0100 (clears shoulder)
+N440 G00 X2.0100 Z0.0025  ; Rough pass 5: traverse Z to 0.0025 at X2.0100
+N450 G00 X1.7617 Z0.0025  ; Rough pass 5: rapid X to prev cleared 1.7617
+N460 G01 X1.7117 Z0.0025  ; Rough pass 5: feed X to DOC level 1.7117
 
-N810 G01 X1.3550 Z-0.0725  (Rough pass 11 cut)
-N820 G01 X1.4469 Z-0.0725  (Rough pass 11 cut)
-N830 G03 X2.0000 Z-0.6003 I-2.1966 K-0.9118  (Rough pass 11 cut)
-N840 G01 X2.0000 Z-1.0000  (Rough pass 11 cut)
-N850 G00 X2.0000 Z-1.0000  (Retract X to prev pass level 2.0000)
-N860 G00 X2.0000 Z0.0025  (Rough pass 12: traverse Z to 0.0025 at X2.0000)
-N870 G01 X1.3050 Z0.0025  (Rough pass 12: feed X to DOC level 1.3050)
+N470 G02 X2.0000 Z-0.2109 I-1.2307 K-0.9868  ; Rough pass 5 cut
+N480 G00 X2.0100 Z0.0025  ; Diagonal retract to X2.0100 (clears shoulder)
+N490 G00 X2.0100 Z0.0025  ; Rough pass 6: traverse Z to 0.0025 at X2.0100
+N500 G00 X1.6972 Z0.0025  ; Rough pass 6: rapid X to prev cleared 1.6972
+N510 G01 X1.6472 Z0.0025  ; Rough pass 6: feed X to DOC level 1.6472
 
-N880 G01 X1.3050 Z-0.0975  (Rough pass 12 cut)
-N890 G01 X1.4233 Z-0.0975  (Rough pass 12 cut)
-N900 G03 X2.0000 Z-0.7074 I-2.1730 K-0.8868  (Rough pass 12 cut)
-N910 G01 X2.0000 Z-1.0000  (Rough pass 12 cut)
-N920 G00 X2.0000 Z-1.0000  (Retract X to prev pass level 2.0000)
-N930 G00 X2.0000 Z0.0025  (Rough pass 13: traverse Z to 0.0025 at X2.0000)
-N940 G01 X1.2550 Z0.0025  (Rough pass 13: feed X to DOC level 1.2550)
+N520 G02 X2.0000 Z-0.2633 I-1.1985 K-0.9868  ; Rough pass 6 cut
+N530 G00 X2.0100 Z0.0025  ; Diagonal retract to X2.0100 (clears shoulder)
+N540 G00 X2.0100 Z0.0025  ; Rough pass 7: traverse Z to 0.0025 at X2.0100
+N550 G00 X1.6321 Z0.0025  ; Rough pass 7: rapid X to prev cleared 1.6321
+N560 G01 X1.5821 Z0.0025  ; Rough pass 7: feed X to DOC level 1.5821
 
-N950 G01 X1.2550 Z-0.1225  (Rough pass 13 cut)
-N960 G01 X1.3994 Z-0.1225  (Rough pass 13 cut)
-N970 G03 X2.0000 Z-0.8994 I-2.1492 K-0.8618  (Rough pass 13 cut)
-N980 G01 X2.0000 Z-1.0000  (Rough pass 13 cut)
-N990 G00 X2.0000 Z-1.0000  (Retract X to prev pass level 2.0000)
-N1000 G00 X2.0000 Z0.0025  (Rough pass 14: traverse Z to 0.0025 at X2.0000)
-N1010 G01 X1.2050 Z0.0025  (Rough pass 14: feed X to DOC level 1.2050)
+N570 G02 X2.0000 Z-0.3188 I-1.1659 K-0.9868  ; Rough pass 7 cut
+N580 G00 X2.0100 Z0.0025  ; Diagonal retract to X2.0100 (clears shoulder)
+N590 G00 X2.0100 Z0.0025  ; Rough pass 8: traverse Z to 0.0025 at X2.0100
+N600 G00 X1.5662 Z0.0025  ; Rough pass 8: rapid X to prev cleared 1.5662
+N610 G01 X1.5162 Z0.0025  ; Rough pass 8: feed X to DOC level 1.5162
 
-N1020 G01 X1.2050 Z-0.1475  (Rough pass 14 cut)
-N1030 G01 X1.3753 Z-0.1475  (Rough pass 14 cut)
-N1040 G03 X1.9551 Z-1.0000 I-2.1250 K-0.8368  (Rough pass 14 cut)
-N1050 G00 X2.0000 Z-1.0000  (Retract X to prev pass level 2.0000)
-N1060 G00 X1.9552 Z0.0025  (Rough pass 15: traverse Z to 0.0025 at X1.9552)
-N1070 G01 X1.1550 Z0.0025  (Rough pass 15: feed X to DOC level 1.1550)
+N620 G02 X2.0000 Z-0.3784 I-1.1330 K-0.9868  ; Rough pass 8 cut
+N630 G00 X2.0100 Z0.0025  ; Diagonal retract to X2.0100 (clears shoulder)
+N640 G00 X2.0100 Z0.0025  ; Rough pass 9: traverse Z to 0.0025 at X2.0100
+N650 G00 X1.5050 Z0.0025  ; Rough pass 9: rapid X to prev cleared 1.5050
+N660 G01 X1.4550 Z0.0025  ; Rough pass 9: feed X to DOC level 1.4550
 
-N1080 G01 X1.1550 Z-0.1725  (Rough pass 15 cut)
-N1090 G01 X1.3509 Z-0.1725  (Rough pass 15 cut)
-N1100 G03 X1.9051 Z-1.0000 I-2.1006 K-0.8118  (Rough pass 15 cut)
-N1110 G00 X1.9552 Z-1.0000  (Retract X to prev pass level 1.9552)
-N1120 G00 X1.9052 Z0.0025  (Rough pass 16: traverse Z to 0.0025 at X1.9052)
-N1130 G01 X1.1050 Z0.0025  (Rough pass 16: feed X to DOC level 1.1050)
+N670 G01 X1.4550 Z-0.0225  ; Rough pass 9 cut
+N680 G01 X1.4933 Z-0.0225  ; Rough pass 9 cut
+N690 G02 X2.0000 Z-0.4433 I-1.1215 K-0.9618  ; Rough pass 9 cut
+N700 G00 X2.0100 Z0.0025  ; Diagonal retract to X2.0100 (clears shoulder)
+N710 G00 X2.0100 Z0.0025  ; Rough pass 10: traverse Z to 0.0025 at X2.0100
+N720 G00 X1.4550 Z0.0025  ; Rough pass 10: rapid X to prev cleared 1.4550
+N730 G01 X1.4050 Z0.0025  ; Rough pass 10: feed X to DOC level 1.4050
 
-N1140 G01 X1.1050 Z-0.1975  (Rough pass 16 cut)
-N1150 G01 X1.3262 Z-0.1975  (Rough pass 16 cut)
-N1160 G03 X1.8551 Z-1.0000 I-2.0759 K-0.7868  (Rough pass 16 cut)
-N1170 G00 X1.9052 Z-1.0000  (Retract X to prev pass level 1.9052)
-N1180 G00 X1.8552 Z0.0025  (Rough pass 17: traverse Z to 0.0025 at X1.8552)
-N1190 G01 X1.0550 Z0.0025  (Rough pass 17: feed X to DOC level 1.0550)
+N740 G01 X1.4050 Z-0.0475  ; Rough pass 10 cut
+N750 G01 X1.4702 Z-0.0475  ; Rough pass 10 cut
+N760 G02 X2.0000 Z-0.5159 I-1.1100 K-0.9368  ; Rough pass 10 cut
+N770 G00 X2.0100 Z0.0025  ; Diagonal retract to X2.0100 (clears shoulder)
+N780 G00 X2.0100 Z0.0025  ; Rough pass 11: traverse Z to 0.0025 at X2.0100
+N790 G00 X1.4050 Z0.0025  ; Rough pass 11: rapid X to prev cleared 1.4050
+N800 G01 X1.3550 Z0.0025  ; Rough pass 11: feed X to DOC level 1.3550
 
-N1200 G01 X1.0550 Z-0.2225  (Rough pass 17 cut)
-N1210 G01 X1.3012 Z-0.2225  (Rough pass 17 cut)
-N1220 G03 X1.8051 Z-1.0000 I-2.0510 K-0.7618  (Rough pass 17 cut)
-N1230 G00 X1.8552 Z-1.0000  (Retract X to prev pass level 1.8552)
-N1240 G00 X1.8052 Z0.0025  (Rough pass 18: traverse Z to 0.0025 at X1.8052)
-N1250 G01 X1.0050 Z0.0025  (Rough pass 18: feed X to DOC level 1.0050)
+N810 G01 X1.3550 Z-0.0725  ; Rough pass 11 cut
+N820 G01 X1.4469 Z-0.0725  ; Rough pass 11 cut
+N830 G02 X2.0000 Z-0.6003 I-1.0983 K-0.9118  ; Rough pass 11 cut
+N840 G00 X2.0100 Z0.0025  ; Diagonal retract to X2.0100 (clears shoulder)
+N850 G00 X2.0100 Z0.0025  ; Rough pass 12: traverse Z to 0.0025 at X2.0100
+N860 G00 X1.3550 Z0.0025  ; Rough pass 12: rapid X to prev cleared 1.3550
+N870 G01 X1.3050 Z0.0025  ; Rough pass 12: feed X to DOC level 1.3050
 
-N1260 G01 X1.0050 Z-0.2475  (Rough pass 18 cut)
-N1270 G01 X1.2759 Z-0.2475  (Rough pass 18 cut)
-N1280 G03 X1.7550 Z-1.0000 I-2.0257 K-0.7368  (Rough pass 18 cut)
-N1290 G00 X1.8052 Z-1.0000  (Retract X to prev pass level 1.8052)
-N1300 G00 X1.7552 Z0.0025  (Rough pass 19: traverse Z to 0.0025 at X1.7552)
-N1310 G01 X0.9550 Z0.0025  (Rough pass 19: feed X to DOC level 0.9550)
+N880 G01 X1.3050 Z-0.0975  ; Rough pass 12 cut
+N890 G01 X1.4233 Z-0.0975  ; Rough pass 12 cut
+N900 G02 X2.0000 Z-0.7074 I-1.0865 K-0.8868  ; Rough pass 12 cut
+N910 G00 X2.0100 Z0.0025  ; Diagonal retract to X2.0100 (clears shoulder)
+N920 G00 X2.0100 Z0.0025  ; Rough pass 13: traverse Z to 0.0025 at X2.0100
+N930 G00 X1.3050 Z0.0025  ; Rough pass 13: rapid X to prev cleared 1.3050
+N940 G01 X1.2550 Z0.0025  ; Rough pass 13: feed X to DOC level 1.2550
 
-N1320 G01 X0.9550 Z-0.2725  (Rough pass 19 cut)
-N1330 G01 X1.2503 Z-0.2725  (Rough pass 19 cut)
-N1340 G03 X1.7050 Z-1.0000 I-2.0000 K-0.7118  (Rough pass 19 cut)
-N1350 G00 X1.7552 Z-1.0000  (Retract X to prev pass level 1.7552)
-N1360 G00 X1.7052 Z0.0025  (Rough pass 20: traverse Z to 0.0025 at X1.7052)
-N1370 G01 X0.9050 Z0.0025  (Rough pass 20: feed X to DOC level 0.9050)
+N950 G01 X1.2550 Z-0.1225  ; Rough pass 13 cut
+N960 G01 X1.3994 Z-0.1225  ; Rough pass 13 cut
+N970 G02 X2.0000 Z-0.8994 I-1.0746 K-0.8618  ; Rough pass 13 cut
+N980 G00 X2.0100 Z0.0025  ; Diagonal retract to X2.0100 (clears shoulder)
+N990 G00 X2.0052 Z0.0025  ; Rough pass 14: traverse Z to 0.0025 at X2.0052
+N1000 G00 X1.2550 Z0.0025  ; Rough pass 14: rapid X to prev cleared 1.2550
+N1010 G01 X1.2050 Z0.0025  ; Rough pass 14: feed X to DOC level 1.2050
 
-N1380 G01 X0.9050 Z-0.2975  (Rough pass 20 cut)
-N1390 G01 X1.2243 Z-0.2975  (Rough pass 20 cut)
-N1400 G03 X1.6550 Z-1.0000 I-1.9741 K-0.6868  (Rough pass 20 cut)
-N1410 G00 X1.7052 Z-1.0000  (Retract X to prev pass level 1.7052)
-N1420 G00 X1.6552 Z0.0025  (Rough pass 21: traverse Z to 0.0025 at X1.6552)
-N1430 G01 X0.8550 Z0.0025  (Rough pass 21: feed X to DOC level 0.8550)
+N1020 G01 X1.2050 Z-0.1475  ; Rough pass 14 cut
+N1030 G01 X1.3753 Z-0.1475  ; Rough pass 14 cut
+N1040 G02 X1.9551 Z-1.0000 I-1.0625 K-0.8368  ; Rough pass 14 cut
+N1050 G00 X2.0052 Z-1.0000  ; Retract X to prev pass level 2.0052
+N1060 G00 X1.9552 Z0.0025  ; Rough pass 15: traverse Z to 0.0025 at X1.9552
+N1070 G00 X1.2050 Z0.0025  ; Rough pass 15: rapid X to prev cleared 1.2050
+N1080 G01 X1.1550 Z0.0025  ; Rough pass 15: feed X to DOC level 1.1550
 
-N1440 G01 X0.8550 Z-0.3225  (Rough pass 21 cut)
-N1450 G01 X1.1980 Z-0.3225  (Rough pass 21 cut)
-N1460 G03 X1.6050 Z-1.0000 I-1.9478 K-0.6618  (Rough pass 21 cut)
-N1470 G00 X1.6552 Z-1.0000  (Retract X to prev pass level 1.6552)
-N1480 G00 X1.6052 Z0.0025  (Rough pass 22: traverse Z to 0.0025 at X1.6052)
-N1490 G01 X0.8050 Z0.0025  (Rough pass 22: feed X to DOC level 0.8050)
+N1090 G01 X1.1550 Z-0.1725  ; Rough pass 15 cut
+N1100 G01 X1.3509 Z-0.1725  ; Rough pass 15 cut
+N1110 G02 X1.9051 Z-1.0000 I-1.0503 K-0.8118  ; Rough pass 15 cut
+N1120 G00 X1.9552 Z-1.0000  ; Retract X to prev pass level 1.9552
+N1130 G00 X1.9052 Z0.0025  ; Rough pass 16: traverse Z to 0.0025 at X1.9052
+N1140 G00 X1.1550 Z0.0025  ; Rough pass 16: rapid X to prev cleared 1.1550
+N1150 G01 X1.1050 Z0.0025  ; Rough pass 16: feed X to DOC level 1.1050
 
-N1500 G01 X0.8050 Z-0.3475  (Rough pass 22 cut)
-N1510 G01 X1.1714 Z-0.3475  (Rough pass 22 cut)
-N1520 G03 X1.5550 Z-1.0000 I-1.9211 K-0.6368  (Rough pass 22 cut)
-N1530 G00 X1.6052 Z-1.0000  (Retract X to prev pass level 1.6052)
-N1540 G00 X1.5552 Z0.0025  (Rough pass 23: traverse Z to 0.0025 at X1.5552)
-N1550 G01 X0.7550 Z0.0025  (Rough pass 23: feed X to DOC level 0.7550)
+N1160 G01 X1.1050 Z-0.1975  ; Rough pass 16 cut
+N1170 G01 X1.3262 Z-0.1975  ; Rough pass 16 cut
+N1180 G02 X1.8551 Z-1.0000 I-1.0380 K-0.7868  ; Rough pass 16 cut
+N1190 G00 X1.9052 Z-1.0000  ; Retract X to prev pass level 1.9052
+N1200 G00 X1.8552 Z0.0025  ; Rough pass 17: traverse Z to 0.0025 at X1.8552
+N1210 G00 X1.1050 Z0.0025  ; Rough pass 17: rapid X to prev cleared 1.1050
+N1220 G01 X1.0550 Z0.0025  ; Rough pass 17: feed X to DOC level 1.0550
 
-N1560 G01 X0.7550 Z-0.3725  (Rough pass 23 cut)
-N1570 G01 X1.1443 Z-0.3725  (Rough pass 23 cut)
-N1580 G03 X1.5050 Z-1.0000 I-1.8941 K-0.6118  (Rough pass 23 cut)
-N1590 G00 X1.5552 Z-1.0000  (Retract X to prev pass level 1.5552)
-N1600 G00 X1.5052 Z0.0025  (Rough pass 24: traverse Z to 0.0025 at X1.5052)
-N1610 G01 X0.7050 Z0.0025  (Rough pass 24: feed X to DOC level 0.7050)
+N1230 G01 X1.0550 Z-0.2225  ; Rough pass 17 cut
+N1240 G01 X1.3012 Z-0.2225  ; Rough pass 17 cut
+N1250 G02 X1.8051 Z-1.0000 I-1.0255 K-0.7618  ; Rough pass 17 cut
+N1260 G00 X1.8552 Z-1.0000  ; Retract X to prev pass level 1.8552
+N1270 G00 X1.8052 Z0.0025  ; Rough pass 18: traverse Z to 0.0025 at X1.8052
+N1280 G00 X1.0550 Z0.0025  ; Rough pass 18: rapid X to prev cleared 1.0550
+N1290 G01 X1.0050 Z0.0025  ; Rough pass 18: feed X to DOC level 1.0050
 
-N1620 G01 X0.7050 Z-0.3975  (Rough pass 24 cut)
-N1630 G01 X1.1169 Z-0.3975  (Rough pass 24 cut)
-N1640 G03 X1.4550 Z-1.0000 I-1.8667 K-0.5868  (Rough pass 24 cut)
-N1650 G00 X1.5052 Z-1.0000  (Retract X to prev pass level 1.5052)
-N1660 G00 X1.4552 Z0.0025  (Rough pass 25: traverse Z to 0.0025 at X1.4552)
-N1670 G01 X0.6550 Z0.0025  (Rough pass 25: feed X to DOC level 0.6550)
+N1300 G01 X1.0050 Z-0.2475  ; Rough pass 18 cut
+N1310 G01 X1.2759 Z-0.2475  ; Rough pass 18 cut
+N1320 G02 X1.7550 Z-1.0000 I-1.0128 K-0.7368  ; Rough pass 18 cut
+N1330 G00 X1.8052 Z-1.0000  ; Retract X to prev pass level 1.8052
+N1340 G00 X1.7552 Z0.0025  ; Rough pass 19: traverse Z to 0.0025 at X1.7552
+N1350 G00 X1.0050 Z0.0025  ; Rough pass 19: rapid X to prev cleared 1.0050
+N1360 G01 X0.9550 Z0.0025  ; Rough pass 19: feed X to DOC level 0.9550
 
-N1680 G01 X0.6550 Z-0.4225  (Rough pass 25 cut)
-N1690 G01 X1.0891 Z-0.4225  (Rough pass 25 cut)
-N1700 G03 X1.4050 Z-1.0000 I-1.8388 K-0.5618  (Rough pass 25 cut)
-N1710 G00 X1.4552 Z-1.0000  (Retract X to prev pass level 1.4552)
-N1720 G00 X1.4052 Z0.0025  (Rough pass 26: traverse Z to 0.0025 at X1.4052)
-N1730 G01 X0.6050 Z0.0025  (Rough pass 26: feed X to DOC level 0.6050)
+N1370 G01 X0.9550 Z-0.2725  ; Rough pass 19 cut
+N1380 G01 X1.2503 Z-0.2725  ; Rough pass 19 cut
+N1390 G02 X1.7050 Z-1.0000 I-1.0000 K-0.7118  ; Rough pass 19 cut
+N1400 G00 X1.7552 Z-1.0000  ; Retract X to prev pass level 1.7552
+N1410 G00 X1.7052 Z0.0025  ; Rough pass 20: traverse Z to 0.0025 at X1.7052
+N1420 G00 X0.9550 Z0.0025  ; Rough pass 20: rapid X to prev cleared 0.9550
+N1430 G01 X0.9050 Z0.0025  ; Rough pass 20: feed X to DOC level 0.9050
 
-N1740 G01 X0.6050 Z-0.4475  (Rough pass 26 cut)
-N1750 G01 X1.0608 Z-0.4475  (Rough pass 26 cut)
-N1760 G03 X1.3550 Z-1.0000 I-1.8106 K-0.5368  (Rough pass 26 cut)
-N1770 G00 X1.4052 Z-1.0000  (Retract X to prev pass level 1.4052)
-N1780 G00 X1.3552 Z0.0025  (Rough pass 27: traverse Z to 0.0025 at X1.3552)
-N1790 G01 X0.5550 Z0.0025  (Rough pass 27: feed X to DOC level 0.5550)
+N1440 G01 X0.9050 Z-0.2975  ; Rough pass 20 cut
+N1450 G01 X1.2243 Z-0.2975  ; Rough pass 20 cut
+N1460 G02 X1.6550 Z-1.0000 I-0.9870 K-0.6868  ; Rough pass 20 cut
+N1470 G00 X1.7052 Z-1.0000  ; Retract X to prev pass level 1.7052
+N1480 G00 X1.6552 Z0.0025  ; Rough pass 21: traverse Z to 0.0025 at X1.6552
+N1490 G00 X0.9050 Z0.0025  ; Rough pass 21: rapid X to prev cleared 0.9050
+N1500 G01 X0.8550 Z0.0025  ; Rough pass 21: feed X to DOC level 0.8550
 
-N1800 G01 X0.5550 Z-0.4725  (Rough pass 27 cut)
-N1810 G01 X1.0321 Z-0.4725  (Rough pass 27 cut)
-N1820 G03 X1.3050 Z-1.0000 I-1.7819 K-0.5118  (Rough pass 27 cut)
-N1830 G00 X1.3552 Z-1.0000  (Retract X to prev pass level 1.3552)
+N1510 G01 X0.8550 Z-0.3225  ; Rough pass 21 cut
+N1520 G01 X1.1980 Z-0.3225  ; Rough pass 21 cut
+N1530 G02 X1.6050 Z-1.0000 I-0.9739 K-0.6618  ; Rough pass 21 cut
+N1540 G00 X1.6552 Z-1.0000  ; Retract X to prev pass level 1.6552
+N1550 G00 X1.6052 Z0.0025  ; Rough pass 22: traverse Z to 0.0025 at X1.6052
+N1560 G00 X0.8550 Z0.0025  ; Rough pass 22: rapid X to prev cleared 0.8550
+N1570 G01 X0.8050 Z0.0025  ; Rough pass 22: feed X to DOC level 0.8050
+
+N1580 G01 X0.8050 Z-0.3475  ; Rough pass 22 cut
+N1590 G01 X1.1714 Z-0.3475  ; Rough pass 22 cut
+N1600 G02 X1.5550 Z-1.0000 I-0.9606 K-0.6368  ; Rough pass 22 cut
+N1610 G00 X1.6052 Z-1.0000  ; Retract X to prev pass level 1.6052
+N1620 G00 X1.5552 Z0.0025  ; Rough pass 23: traverse Z to 0.0025 at X1.5552
+N1630 G00 X0.8050 Z0.0025  ; Rough pass 23: rapid X to prev cleared 0.8050
+N1640 G01 X0.7550 Z0.0025  ; Rough pass 23: feed X to DOC level 0.7550
+
+N1650 G01 X0.7550 Z-0.3725  ; Rough pass 23 cut
+N1660 G01 X1.1443 Z-0.3725  ; Rough pass 23 cut
+N1670 G02 X1.5050 Z-1.0000 I-0.9470 K-0.6118  ; Rough pass 23 cut
+N1680 G00 X1.5552 Z-1.0000  ; Retract X to prev pass level 1.5552
+N1690 G00 X1.5052 Z0.0025  ; Rough pass 24: traverse Z to 0.0025 at X1.5052
+N1700 G00 X0.7550 Z0.0025  ; Rough pass 24: rapid X to prev cleared 0.7550
+N1710 G01 X0.7050 Z0.0025  ; Rough pass 24: feed X to DOC level 0.7050
+
+N1720 G01 X0.7050 Z-0.3975  ; Rough pass 24 cut
+N1730 G01 X1.1169 Z-0.3975  ; Rough pass 24 cut
+N1740 G02 X1.4550 Z-1.0000 I-0.9333 K-0.5868  ; Rough pass 24 cut
+N1750 G00 X1.5052 Z-1.0000  ; Retract X to prev pass level 1.5052
+N1760 G00 X1.4552 Z0.0025  ; Rough pass 25: traverse Z to 0.0025 at X1.4552
+N1770 G00 X0.7050 Z0.0025  ; Rough pass 25: rapid X to prev cleared 0.7050
+N1780 G01 X0.6550 Z0.0025  ; Rough pass 25: feed X to DOC level 0.6550
+
+N1790 G01 X0.6550 Z-0.4225  ; Rough pass 25 cut
+N1800 G01 X1.0891 Z-0.4225  ; Rough pass 25 cut
+N1810 G02 X1.4050 Z-1.0000 I-0.9194 K-0.5618  ; Rough pass 25 cut
+N1820 G00 X1.4552 Z-1.0000  ; Retract X to prev pass level 1.4552
+N1830 G00 X1.4052 Z0.0025  ; Rough pass 26: traverse Z to 0.0025 at X1.4052
+N1840 G00 X0.6550 Z0.0025  ; Rough pass 26: rapid X to prev cleared 0.6550
+N1850 G01 X0.6050 Z0.0025  ; Rough pass 26: feed X to DOC level 0.6050
+
+N1860 G01 X0.6050 Z-0.4475  ; Rough pass 26 cut
+N1870 G01 X1.0608 Z-0.4475  ; Rough pass 26 cut
+N1880 G02 X1.3550 Z-1.0000 I-0.9053 K-0.5368  ; Rough pass 26 cut
+N1890 G00 X1.4052 Z-1.0000  ; Retract X to prev pass level 1.4052
+N1900 G00 X1.3552 Z0.0025  ; Rough pass 27: traverse Z to 0.0025 at X1.3552
+N1910 G00 X0.6050 Z0.0025  ; Rough pass 27: rapid X to prev cleared 0.6050
+N1920 G01 X0.5550 Z0.0025  ; Rough pass 27: feed X to DOC level 0.5550
+
+N1930 G01 X0.5550 Z-0.4725  ; Rough pass 27 cut
+N1940 G01 X1.0321 Z-0.4725  ; Rough pass 27 cut
+N1950 G02 X1.3050 Z-1.0000 I-0.8909 K-0.5118  ; Rough pass 27 cut
+N1960 G00 X1.3552 Z-1.0000  ; Retract X to prev pass level 1.3552
 
 ; === CLEANUP PASS (semi-finish, roughing boundary contour) ===
-N1840 G00 X2.0000 Z0.0025  (Rapid to stock OD at Z0+fin)
-N1850 G00 X0.0050 Z0.0025  (Rapid to X_start+fin=0.0050)
-N1860 G01 X0.5050 Z0.0025  (Cleanup move 1)
-N1870 G01 X0.5050 Z-0.4975  (Cleanup move 2)
-N1880 G01 X1.0029 Z-0.4975  (Cleanup move 3)
-N1890 G03 X1.2550 Z-1.0000 I-1.7527 K-0.4868  (Cleanup move 4)
-N1900 G00 X2.0000 Z-1.0000  (Retract X after cleanup)
-N1910 G00 X2.0000 Z0.1000  (Traverse Z to Z_start)
+N1970 G00 X1.3552 Z0.1000  ; Contour approach: rise to clearance Z (comp off)
+N1980 G00 X-0.0270 Z0.1000  ; Contour approach: above entry point (comp off)
+N1990 G42  ; Cutter comp on (TNR=0.0160)
+N2000 G01 X-0.0270 Z0.0025  ; Comp entry move (in air)
+N2010 G01 X0.0050 Z0.0025  ; Comp entry: onto face start
+N2020 G01 X0.5050 Z0.0025  ; Cleanup move 1
+N2030 G01 X0.5050 Z-0.4975  ; Cleanup move 2
+N2040 G01 X1.0051 Z-0.4975  ; Cleanup move 3
+N2050 G02 X1.2529 Z-0.9975 I0.9973 K-0.0182  ; Cleanup move 4
+N2060 G40  ; Cutter comp off - exit
+N2070 G00 X2.0100 Z0.0025  ; Diagonal retract after cleanup
 
 ; === FINISH PASS (profile contour) ===
-N1920 G00 X2.0000 Z0.0010  (Rapid to stock OD at Z0+fin)
-N1930 G00 X0.0000 Z0.0010  (Rapid to X_start=0.0000)
-N1940 G01 X0.0000 Z0.0000 F0.0030  (Finish move 1)
-N1950 G01 X0.5000 Z0.0000  (Finish move 2)
-N1960 G01 X0.5000 Z-0.5000  (Finish move 3)
-N1970 G01 X1.0000 Z-0.5000  (Finish move 4)
-N1980 G03 X1.2500 Z-1.0000 I-1.7498 K-0.4843  (Finish move 5)
+; Finish cutting pass 1
+N2080 G00 X2.0100 Z0.1000  ; Contour approach: rise to clearance Z (comp off)
+N2090 G00 X-0.0320 Z0.1000  ; Contour approach: above entry point (comp off)
+N2100 G42  ; Cutter comp on (TNR=0.0160)
+N2110 G01 X-0.0320 Z0.0000 F0.0030  ; Comp entry move (in air)
+N2120 G01 X0.0000 Z0.0000  ; Comp entry: onto face start
+N2130 G01 X0.5000 Z0.0000  ; Finish cutting pass 1: move 1
+N2140 G01 X0.5000 Z-0.5000  ; Finish cutting pass 1: move 2
+N2150 G01 X1.0000 Z-0.5000  ; Finish cutting pass 1: move 3
+N2160 G02 X1.2500 Z-1.0000 I0.9999 K-0.0157  ; Finish cutting pass 1: move 4
 
+N2170 G40  ; Cutter comp off - exit
+N2180 G00 X2.0100 Z0.0010  ; Diagonal retract after final finish/spring
 ; === PROGRAM END ===
-N1990 G40  (Cutter comp cancel)
-N2000 G00 X2.0000 Z2.0000  (Return to park)
-N2010 M5  (Spindle stop)
-N2020 M2  (Program end)
+N2190 G40  ; Cutter comp cancel
+N2200 G00 X2.0500 Z0.0010  ; Return to park (1/3): retract X clear
+N2210 G00 X2.0500 Z2.0000  ; Return to park (2/3): traverse Z to park
+N2220 G00 X2.0000 Z2.0000  ; Return to park (3/3): X to park
+N2230 M5  ; Spindle stop
+N2240 M2  ; Program end
+%
