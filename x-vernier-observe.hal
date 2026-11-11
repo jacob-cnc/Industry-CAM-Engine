@@ -1,0 +1,34 @@
+# ============================================================================
+# x-vernier-observe.hal — X vernier in SHADOW mode (no change to the X loop)
+# docs/handoffs/2026-11-10-x-vernier-commissioning.md
+#
+# Loads xvernier (rtcomp/xvernier.comp; install once with
+#   sudo halcompile --install rtcomp/xvernier.comp)
+# and feeds it the X step feedback and scale count. X still closes on the raw
+# scale exactly as before; xvernier.pos-est is only watched and logged.
+# Enable:  [HAL] HALFILE = x-vernier-observe.hal   (after industry-cam.hal)
+# Disable: comment that line out.
+# ============================================================================
+
+loadrt xvernier
+# position 2: right after hm2_7i96s.0.read, before estop-latch and pid.x
+addf xvernier servo-thread 2
+
+setp xvernier.scale          [JOINT_0]ENCODER_SCALE
+setp xvernier.alpha          [XVERNIER]ALPHA
+setp xvernier.alpha-h        [XVERNIER]ALPHA_H
+setp xvernier.h-init         [XVERNIER]H_INIT
+setp xvernier.h-max          [XVERNIER]H_MAX
+setp xvernier.lead           [XVERNIER]LEAD
+setp xvernier.harm-cos-init  [XVERNIER]HARM_COS
+setp xvernier.harm-sin-init  [XVERNIER]HARM_SIN
+setp xvernier.alpha-harm     [XVERNIER]ALPHA_HARM
+setp xvernier.slope          [XVERNIER]SLOPE
+setp xvernier.span-max       [XVERNIER]SPAN_MAX
+setp xvernier.lag-time       [XVERNIER]LAG_TIME
+setp xvernier.hyst           [XVERNIER]HYST
+setp xvernier.fault-limit    [XVERNIER]FAULT_LIMIT
+
+net x-step-fb       hm2_7i96s.0.stepgen.01.position-fb => xvernier.step-fb
+net x-scale-counts  hm2_7i96s.0.encoder.01.count       => xvernier.scale-counts
+net x-enable        => xvernier.enable

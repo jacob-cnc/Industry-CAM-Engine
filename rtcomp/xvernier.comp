@@ -1,0 +1,275 @@
+component xvernier "Sub-count position estimate from a quantized linear scale plus step feedback";
+
+description """
+X-axis "vernier" for the industry-cam lathe
+(docs/handoffs/2026-11-10-x-vernier-commissioning.md).
+
+The X scale counts in .000197 radius steps (.0004 diameter). The stepper is
+about 11x finer (.0000185 radius per step) and the closed-loop drive holds
+each step. This component estimates the TRUE carriage position between scale
+counts:
+
+  pos_est = step_fb - b0 - screw(step_fb) + u
+
+  b0      offset between step space and scale space, learned online
+  screw() slope + once-per-lead harmonic of the screw/step error (calibrated
+          from a slow sweep at commissioning, refined online)
+  u       backlash play state, -h..+h (a play operator: the estimate never jumps)
+
+Learning comes from scale EDGES: the instant the scale count ticks, the
+carriage is exactly at that count's edge, and the step feedback at that
+instant is known to within the step travel of one servo period. h is
+measured from the first edges after each reversal.
+
+Safety property: the estimate is always kept consistent with the current
+scale reading (within half a count plus a margin), so it can never be worse
+than the plain scale; at worst it degenerates to it. A large forced
+correction in one cycle (lost steps, scale glitch) latches *fault*.
+
+Thread: servo-thread, right after the hostmot2 read and before pid.x.
+""";
+
+pin in  float step_fb      "stepgen position-fb, joint units (radius in)";
+pin in  s32   scale_counts "linear-scale encoder count (encoder.NN.count)";
+pin in  bit   enable       "faults only latch while enabled; a rising edge clears fault";
+
+pin out float pos_est      "estimated true carriage position, joint units";
+pin out float scale_pos    "scale position = scale_counts / scale";
+pin out float offset       "applied step-to-scale offset (step_fb - pos_est)";
+pin out float offset_mean  "learned b0";
+pin out float half_backlash "learned half backlash h (play is +-h)";
+pin out float play         "current backlash play state u, -h..+h";
+pin out float harm_cos     "learned screw harmonic, cos term, joint units";
+pin out float harm_sin     "learned screw harmonic, sin term, joint units";
+pin out float residual     "pos_est - scale_pos, in scale counts (|.| <= 0.5 + margin)";
+pin out float edge_resid   "residual of the last edge sample vs the model, joint units";
+pin out s32   samples      "edge samples used";
+pin out s32   reversals    "backlash measurements taken";
+pin out s32   clamps       "cycles the scale consistency clamp had to correct the estimate";
+pin out float max_shift    "largest single-cycle clamp correction, joint units";
+pin out bit   fault        "latched: a single clamp correction exceeded fault-limit while enabled";
+
+param rw float scale = 5080.0     "counts per joint unit, same sign as the encoder scale";
+param rw float alpha = 0.3        "learning gain for b0 per full-weight edge";
+param rw float alpha_h = 0.0      "online learning gain for h (first run-ticks edges after a slow reversal); 0 = use h-init as calibrated";
+param rw s32   run_ticks = 6      "edges after a reversal that measure backlash";
+param rw float h_init = 0.0       "starting half backlash, joint units";
+param rw float h_max = 0.002      "half backlash upper bound, joint units";
+param rw float lead = 0.0         "screw harmonic period in step space, joint units (0 = off)";
+param rw float harm_cos_init = 0.0 "screw harmonic cos term from calibration";
+param rw float harm_sin_init = 0.0 "screw harmonic sin term from calibration";
+param rw float alpha_harm = 0.02  "online learning gain for the screw harmonic (0 = frozen)";
+param rw float slope = 0.0        "linear step-vs-scale error, (step - true) per unit of step travel";
+param rw float span_max = 0.0001  "edges whose step travel in that cycle exceeds this are ignored";
+param rw float margin = 0.1       "consistency clamp margin, in scale counts";
+param rw float lag_cycles = 2.0   "extra clamp margin while moving, in cycles of step travel";
+param rw float lag_time = 0.0     "carriage lag behind steps at constant speed, seconds";
+param rw float hyst = 0.0         "scale edge hysteresis: up-edge minus down-edge location, joint units";
+param rw float fault_limit = 0.0005 "single-cycle clamp correction that latches fault, joint units";
+
+include <rtapi_math.h>;
+option singleton yes;
+option extra_setup yes;
+license "GPL";
+author "industry-cam";
+function _ fp;
+;;
+
+/* CORE-BEGIN  (extracted verbatim by tests/xvernier/build_bench.sh) */
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
+typedef struct {
+    double k_scale, k_alpha, k_alpha_h, k_h_init, k_h_max;
+    int    k_run_ticks;
+    double k_lead, k_hc_init, k_hs_init, k_alpha_harm, k_slope;
+    double k_span_max, k_margin, k_lag_cycles, k_lag_time, k_hyst, k_fault_limit;
+} xv_param;
+
+typedef struct {
+    int    init;
+    int    prev_counts;
+    double prev_s;
+    double b0;          /* learned step-to-scale offset                     */
+    double h;           /* half backlash                                    */
+    double u;           /* play: carriage = s - b0 - screw(s) + u           */
+    double hc, hs;      /* screw harmonic                                    */
+    int    last_dir;    /* direction of the last motor-driven edge (+1/-1/0) */
+    int    last_edge;   /* id of the last edge crossed (lower count of the pair) */
+    int    run;         /* motor-driven edges since that direction began     */
+    int    prev_run;    /* length of the previous run                        */
+    int    prev_enable;
+    long   n_samples, n_rev, n_clamps;
+    double mx_shift, last_r;
+    int    flt;
+} xv_state;
+
+typedef struct {
+    double x, p, b, res;
+} xv_out;
+
+static double xv_clampd(double v, double lo, double hi)
+{
+    return v < lo ? lo : (v > hi ? hi : v);
+}
+
+static double xv_screw(const xv_state *st, const xv_param *pa, double s)
+{
+    double e = pa->k_slope * s;
+    if (pa->k_lead > 0.0) {
+        double ph = 2.0 * M_PI * s / pa->k_lead;
+        e += st->hc * cos(ph) + st->hs * sin(ph);
+    }
+    return e;
+}
+
+static void xv_reset(xv_state *st, const xv_param *pa, double s, int counts)
+{
+    double p = counts / pa->k_scale;
+    st->init = 1;
+    st->prev_counts = counts;
+    st->prev_s = s;
+    st->h = xv_clampd(pa->k_h_init, 0.0, pa->k_h_max);
+    st->u = 0.0;
+    st->hc = pa->k_hc_init;
+    st->hs = pa->k_hs_init;
+    st->b0 = s - xv_screw(st, pa, s) - p;
+    st->last_dir = 0; st->run = 0; st->prev_run = 0;
+    st->last_edge = counts;
+    st->n_samples = 0; st->n_rev = 0; st->n_clamps = 0;
+    st->mx_shift = 0.0; st->last_r = 0.0;
+    st->flt = 0;
+}
+
+static void xv_update(xv_state *st, const xv_param *pa, double s, int counts,
+                      int en, double dt, xv_out *o)
+{
+    double c, p, ds, v, x, lo, hi, m, shift, xc;
+    int dc;
+
+    if (pa->k_scale == 0.0) { o->x = s; o->p = 0; o->b = 0; o->res = 0; return; }
+    if (!st->init) xv_reset(st, pa, s, counts);
+    if (en && !st->prev_enable) st->flt = 0;
+    st->prev_enable = en;
+
+    c  = 1.0 / fabs(pa->k_scale);
+    p  = counts / pa->k_scale;
+    ds = s - st->prev_s;
+    v  = dt > 0.0 ? ds / dt : 0.0;
+    dc = (int)((unsigned)counts - (unsigned)st->prev_counts);
+
+    /* backlash play: after a reversal the carriage waits until the motor takes up 2h */
+    st->u = xv_clampd(st->u - ds, -st->h, st->h);
+
+    /* 1. learn from a single-count edge when the step travel this cycle is small */
+    if ((dc == 1 || dc == -1) && fabs(ds) <= pa->k_span_max) {
+        double prev_p = st->prev_counts / pa->k_scale;
+        int    td = (p > prev_p) ? 1 : -1;                     /* carriage direction */
+        double edge = 0.5 * (prev_p + p) + td * 0.5 * pa->k_hyst;
+        double s_mid = 0.5 * (st->prev_s + s) - v * pa->k_lag_time;
+        double w = pa->k_span_max > 0.0 ? 1.0 - fabs(ds) / pa->k_span_max : 1.0;
+        /* motor-driven: the motor moved this cycle in the same direction as the carriage,
+           and this is a new edge. Re-crossing the edge just crossed is flicker (noise,
+           vibration while parked on an edge): still an exact position sample, but it
+           says nothing about direction or backlash. */
+        int    edge_id = counts < st->prev_counts ? counts : st->prev_counts;
+        int    driven = (ds * td > 1e-9) && edge_id != st->last_edge;
+        double u_tick = driven ? -td * st->h : st->u;
+        double r = (s_mid - edge) - (st->b0 + xv_screw(st, pa, s_mid) - u_tick);
+        double a = pa->k_alpha * w;
+        if (st->n_samples < 1.0 / (pa->k_alpha > 1e-9 ? pa->k_alpha : 1e-9))
+            a = w / (double)(st->n_samples + 1);              /* running mean at start */
+
+        if (driven) {
+            if (td != st->last_dir) {
+                st->prev_run = st->last_dir ? st->run : 0;
+                st->last_dir = td; st->run = 0;
+                if (st->prev_run >= pa->k_run_ticks) st->n_rev++;
+            }
+            /* first edges after a reversal measure backlash (b0 is fresh from the
+               previous run); after that they track b0 */
+            if (st->run < pa->k_run_ticks && st->prev_run >= pa->k_run_ticks) {
+                /* only slow edges: drive lag would otherwise read as backlash */
+                if (w >= 0.5)
+                    st->h = xv_clampd(st->h + td * pa->k_alpha_h * w * r, 0.0, pa->k_h_max);
+            } else {
+                st->b0 += a * r;
+            }
+            st->run++;
+            st->u = -td * st->h;
+        } else {
+            st->b0 += a * r;
+        }
+        if (pa->k_lead > 0.0 && pa->k_alpha_harm > 0.0 && st->n_samples > 20) {
+            double ph = 2.0 * M_PI * s_mid / pa->k_lead;
+            st->hc += pa->k_alpha_harm * w * r * cos(ph);
+            st->hs += pa->k_alpha_harm * w * r * sin(ph);
+        }
+        st->last_edge = edge_id;
+        st->last_r = r;
+        st->n_samples++;
+    }
+
+    /* 2. never disagree with the scale by more than half a count (+ margin) */
+    x  = s - st->b0 - xv_screw(st, pa, s) + st->u;
+    m  = pa->k_margin * c + pa->k_lag_cycles * fabs(ds);
+    lo = p - 0.5 * c - m;
+    hi = p + 0.5 * c + m;
+    xc = x - v * pa->k_lag_time;
+    shift = 0.0;
+    if (xc < lo) shift = lo - xc;
+    else if (xc > hi) shift = hi - xc;
+    if (shift != 0.0) {
+        st->b0 -= shift;
+        x += shift;
+        st->n_clamps++;
+        if (fabs(shift) > st->mx_shift) st->mx_shift = fabs(shift);
+        if (en && fabs(shift) > pa->k_fault_limit) st->flt = 1;
+    }
+
+    st->prev_s = s;
+    st->prev_counts = counts;
+    o->x = x;
+    o->p = p;
+    o->b = s - x;
+    o->res = (x - p) / c;
+}
+/* CORE-END */
+
+static xv_state ST;
+
+EXTRA_SETUP() {
+    ST.init = 0;
+    return 0;
+}
+
+FUNCTION(_) {
+    xv_param pa;
+    xv_out o;
+    pa.k_scale = scale; pa.k_alpha = alpha; pa.k_alpha_h = alpha_h;
+    pa.k_h_init = h_init; pa.k_h_max = h_max; pa.k_run_ticks = run_ticks;
+    pa.k_lead = lead; pa.k_hc_init = harm_cos_init; pa.k_hs_init = harm_sin_init;
+    pa.k_alpha_harm = alpha_harm; pa.k_slope = slope;
+    pa.k_span_max = span_max; pa.k_margin = margin;
+    pa.k_lag_cycles = lag_cycles; pa.k_lag_time = lag_time; pa.k_hyst = hyst;
+    pa.k_fault_limit = fault_limit;
+
+    xv_update(&ST, &pa, step_fb, scale_counts, enable, fperiod, &o);
+
+    pos_est = o.x;
+    scale_pos = o.p;
+    offset = o.b;
+    offset_mean = ST.b0;
+    half_backlash = ST.h;
+    play = ST.u;
+    harm_cos = ST.hc;
+    harm_sin = ST.hs;
+    residual = o.res;
+    edge_resid = ST.last_r;
+    samples = (int)ST.n_samples;
+    reversals = (int)ST.n_rev;
+    clamps = (int)ST.n_clamps;
+    max_shift = ST.mx_shift;
+    fault = ST.flt;
+}

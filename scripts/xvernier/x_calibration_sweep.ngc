@@ -1,0 +1,38 @@
+%
+( X VERNIER CALIBRATION SWEEP  -  AIR ONLY, MOVES X ONLY, SPINDLE OFF          )
+( docs/handoffs/2026-11-10-x-vernier-commissioning.md, step 3                   )
+( Start capture.sh 150 OUT.txt first, then run this. About 2 minutes.           )
+( X travels from XD up to XD + 0.5 dia and back, slowly, at three feeds, then   )
+( makes ten short back-and-forth reversals for backlash. Z never moves.         )
+( Set XD so there is 0.5 dia of clear travel above it.                          )
+#<xd> = 2.0000
+#<span> = 0.5000
+N10 G20 G7 G18 G90 G94 G40 G49 G80
+N20 M5
+N30 G00 X[#<xd>]
+N40 G04 P1.0
+( three speeds: slow edges for the map, faster ones for drive lag )
+N50 G01 X[#<xd> + #<span>] F0.6
+N60 G04 P0.5
+N70 G01 X[#<xd>] F0.6
+N80 G04 P0.5
+N90 G01 X[#<xd> + #<span>] F1.5
+N100 G04 P0.5
+N110 G01 X[#<xd>] F1.5
+N120 G04 P0.5
+N130 G01 X[#<xd> + #<span>] F3.0
+N140 G04 P0.5
+N150 G01 X[#<xd>] F3.0
+N160 G04 P0.5
+( backlash: ten .010 dia reversals, stepping up .020 each time )
+#<i> = 0
+o100 while [#<i> LT 10]
+  G01 X[#<xd> + 0.020 * #<i> + 0.010] F0.6
+  G04 P0.3
+  G01 X[#<xd> + 0.020 * #<i>] F0.6
+  G04 P0.3
+  #<i> = [#<i> + 1]
+o100 endwhile
+N900 G00 X[#<xd>]
+N910 M2
+%
