@@ -171,9 +171,9 @@ class StaircasePlanner:
         peck_length = params.peck_length
         total_z_travel = z_start - z_end  # positive (feeding in -Z direction)
 
-        # Compute dwell time: 5 spindle revolutions
+        # Compute dwell time: 2.5 spindle revolutions (owner, 2026-11-10: was 5)
         rpm = params.spindle_rpm if params.spindle_rpm > 0 else 1200.0
-        dwell_seconds = (5.0 / rpm) * 60.0
+        dwell_seconds = (2.5 / rpm) * 60.0
 
         moves = []
         z_current = z_start

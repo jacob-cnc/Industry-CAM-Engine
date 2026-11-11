@@ -1900,8 +1900,9 @@ class ProgramTab(QWidget):
 
     def _od_corner_result(self, segments=None, corner_breaks=None):
         """Engine corner-break result (geometry + per-vertex reports) for the
-        current profile, or None for ID / an incomplete profile."""
-        if self._get_machining_mode() != "od":
+        current profile (OD or ID), or None for an incomplete profile."""
+        mode = self._get_machining_mode()
+        if mode not in ("od", "id"):
             return None
         if segments is None:
             segments = self._segment_list.get_segments()
@@ -1912,10 +1913,10 @@ class ProgramTab(QWidget):
         try:
             from pipeline.model_builder import profile_from_fields
             from geometry.corner_breaks_od import build_od_corner_coords
-            profile = profile_from_fields(segments, "od", corner_breaks)
+            profile = profile_from_fields(segments, mode, corner_breaks)
             return build_od_corner_coords(profile)
         except Exception:
-            logger.debug("OD corner-break solve failed for preview", exc_info=True)
+            logger.debug("Corner-break solve failed for preview", exc_info=True)
             return None
 
     def _od_corner_geometry(self, segments, corner_breaks) -> dict:
@@ -1956,23 +1957,21 @@ class ProgramTab(QWidget):
             try:
                 from pipeline.model_builder import profile_from_fields
                 from geometry.corner_breaks_od import od_vertex_kinds
-                kinds = od_vertex_kinds(profile_from_fields(segs, "od", breaks))
+                kinds = od_vertex_kinds(profile_from_fields(
+                    segs, self._get_machining_mode(), breaks))
             except Exception:
                 kinds = {}
-        is_id = self._get_machining_mode() == "id"
         rows = []
         for i in range(max(0, len(segs) - 1)):
             rep = reports.get(i)
             badge = SegmentListWidget.break_badge(breaks[i] if i < len(breaks) else None)
-            if is_id and badge:
-                status, msg = "unvalidated", "ID corner breaks are not validated yet (legacy method)."
-            elif rep is not None:
+            if rep is not None:
                 status, msg = rep.status, rep.message
             else:
                 status, msg = "ok", ""
             rows.append({"index": i, "z": float(segs[i].get("z", 0.0)),
                          "x_dia": float(segs[i].get("x", 0.0)),
-                         "corner": "" if is_id else kinds.get(i, ""),
+                         "corner": kinds.get(i, ""),
                          "badge": badge, "status": status, "message": msg})
         self._cb_panel.set_vertices(rows)
 
@@ -2249,10 +2248,10 @@ class ProgramTab(QWidget):
 
         corner_breaks = self._segment_list.get_corner_breaks()
 
-        # OD corner breaks come from the engine's validated vertex solver, so
-        # the preview shows exactly what is machined (incl. V1 at the face and
-        # NX-style trims). Point index -> VertexGeometry. ID and arc-adjacent
-        # vertices are not in it and keep the legacy preview math below.
+        # Corner breaks (OD and ID) come from the engine's validated vertex
+        # solver, so the preview shows exactly what is machined (incl. V1 at
+        # the face and NX-style trims). Point index -> VertexGeometry.
+        # Arc-adjacent vertices are not in it and keep the legacy preview math.
         od_geom = self._od_corner_geometry(segments, corner_breaks)
 
         # Build per-segment polylines for drawing (avoids pyqtgraph bounding-box
