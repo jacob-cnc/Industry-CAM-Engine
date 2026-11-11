@@ -371,6 +371,10 @@ class MainWindow(QMainWindow):
     def _poll_status_bar_inner(self):
         self._backend.poll()
         s = self._backend.state
+        take = getattr(self._backend, "take_state_warning", None)
+        warning = take() if take is not None else ""
+        if warning:
+            self._status_bar.show_error(warning)
 
         # Position
         self._status_bar.update_position(s.x.position, s.z.position)
