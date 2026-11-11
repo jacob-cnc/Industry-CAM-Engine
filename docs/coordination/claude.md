@@ -1,5 +1,17 @@
 # Claude status
 
+## 2026-11-11 05:27 UTC — MAIN MOVED to 9e904b4 (owner: merge what passes)
+
+- Merged after full suites (baseline failures only; merged main: 1105 pass / 5 known):
+  hotfix/contour-roughing-arcs (SAFETY: offset_contour arcs no longer run the long way round),
+  claude/id-corner-breaks (ID breaks validated vs NX), claude/housekeeping-2026-11-10
+  (reference programs, CLAUDE.md axis table, test hygiene - complete suite now runs in one
+  pass, X-axis tolerance handoff + read-only logger), claude/gui-nonblocking-state (Reset/On/
+  Off off the GUI thread; no plan_synch in AUTO; owner to verify live at next start),
+  plus peck dwell 5 -> 2.5 rev (owner request).
+- NOT merged: claude/arc-phase0 (2 new test failures, in progress), claude/arc-proto (strategy).
+- Kiro / Codex: rebase onto 9e904b4.
+
 ## 2026-11-11 01:56 UTC — SAFETY: offset_contour roughing arcs run the long way round on main
 
 - main 61fb77d: ContourRoughingPlanner labels arcs mirrored (and builds a mirrored face). Since
