@@ -39,7 +39,7 @@ get there; it can only remove the extra slack the deadband adds on top.
 hunting. Expected: the parking window drops from ±.0010 to about ±.0005 dia.
 Necessary, but on its own still wider than the band.
 
-### 2. Measure what is left (same session, read-only)
+### 2. Measure what is left (same session, read-only: `scripts/x_error_log.py`)
 A non-realtime logger (like tonight's E-stop watcher, about 20 Hz, `halcmd`
 reads only): `joint.0.motor-pos-cmd`, `x-pos-fb`, `pid.x.error`,
 `pid.x.output` at rest and through a finish pass. That separates
