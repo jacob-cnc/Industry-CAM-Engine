@@ -427,35 +427,61 @@ class LiveBackend(HALBackend):
             self.machine_off()
             return False
 
-    def estop_reset(self) -> bool:
-        logger.info("estop_reset: sending STATE_ESTOP_RESET")
-        try:
-            self._cmd.state(linuxcnc.STATE_ESTOP_RESET)
-            logger.info("estop_reset: command accepted")
-            return True
-        except linuxcnc.error as e:
-            logger.error("estop_reset: FAILED — %s", e)
+    # ------------------------------------------------------------------
+    # Reset / On / Off without blocking the GUI (2026-11-10)
+    # ------------------------------------------------------------------
+    # linuxcnc.command.state() waits up to 5 s for task to acknowledge. When
+    # the E-stop chain cannot clear (lathe 2026-11-10 17:53: the I/O
+    # controller stopped answering after an E-stop), every Reset/On click
+    # froze the GUI for 5 s and the clicks queued. These commands now run on
+    # a worker thread with their OWN command channel, one at a time; extra
+    # clicks are ignored, and a slow acknowledgement is reported through
+    # take_state_warning() (shown in the error area by the GUI poll).
+    # Software E-STOP (estop()) stays synchronous on the GUI thread.
+    STATE_ACK_WARN_S = 2.0
+
+    def _state_async(self, state, name: str) -> bool:
+        import threading, time
+        lock = self.__dict__.setdefault("_state_lock", threading.Lock())
+        if not lock.acquire(blocking=False):
+            logger.warning("%s: ignored - previous Reset/On/Off still waiting for LinuxCNC", name)
+            self._state_warning = (f"{name}: still waiting for LinuxCNC to answer the previous "
+                                   "command - click ignored")
             return False
+
+        def run():
+            t0 = time.monotonic()
+            try:
+                logger.info("%s: sending %s", name, state)
+                linuxcnc.command().state(state)
+                dt = time.monotonic() - t0
+                logger.info("%s: command accepted (%.2f s)", name, dt)
+                if dt >= self.STATE_ACK_WARN_S:
+                    self._state_warning = (
+                        f"{name}: LinuxCNC took {dt:.1f} s to answer - the E-stop chain may "
+                        "still be latched. If Reset keeps failing, restart LinuxCNC.")
+            except Exception as e:                      # linuxcnc.error and friends
+                logger.error("%s: FAILED - %s", name, e)
+                self._state_warning = f"{name} failed: {e}"
+            finally:
+                lock.release()
+
+        threading.Thread(target=run, name=f"lcnc-{name}", daemon=True).start()
+        return True
+
+    def take_state_warning(self) -> str:
+        """Pop the last Reset/On/Off warning ('' if none). Called by the GUI poll."""
+        w, self._state_warning = getattr(self, "_state_warning", ""), ""
+        return w
+
+    def estop_reset(self) -> bool:
+        return self._state_async(linuxcnc.STATE_ESTOP_RESET, "estop_reset")
 
     def machine_on(self) -> bool:
-        logger.info("machine_on: sending STATE_ON")
-        try:
-            self._cmd.state(linuxcnc.STATE_ON)
-            logger.info("machine_on: command accepted")
-            return True
-        except linuxcnc.error as e:
-            logger.error("machine_on: FAILED — %s", e)
-            return False
+        return self._state_async(linuxcnc.STATE_ON, "machine_on")
 
     def machine_off(self) -> bool:
-        logger.info("machine_off: sending STATE_OFF")
-        try:
-            self._cmd.state(linuxcnc.STATE_OFF)
-            logger.info("machine_off: command accepted")
-            return True
-        except linuxcnc.error as e:
-            logger.error("machine_off: FAILED — %s", e)
-            return False
+        return self._state_async(linuxcnc.STATE_OFF, "machine_off")
 
     # ------------------------------------------------------------------
     # Homing
