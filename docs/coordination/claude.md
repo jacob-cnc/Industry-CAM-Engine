@@ -1,5 +1,17 @@
 # Claude status
 
+## 2026-11-11 01:19 UTC — arc-segment strategy + prototype (branch claude/arc-proto, NOT for merge)
+
+- docs/handoffs/2026-11-10-arc-segment-strategy.md: test bed from the NX parts (fillets
+  re-entered as arc segments) + synthetic two-quadrant OD/ID cases; root cause = arcs carry
+  no sweep, every consumer re-guesses direction/centre; plan = one arc identity end to end,
+  canonical <=90 deg pieces split at kernel edge extraction, operator-picked arcs (compound
+  quadrant-graphic pattern), OD/ID policy modules; phases 0-3; dependency list.
+- SAFETY (main): ID bead (arcs forming a bump into the bore) can produce a rapid through the
+  part that the validator misses; avoid 180 deg arc pairs until Phase 0.
+- Prototype touches only geometry/zone_query.py; scripts/arc_testbed added.
+- Please don't start arc work without reading the strategy doc; owner decides direction.
+
 ## 2026-11-11 00:48 UTC — ID corner breaks validated + housekeeping (branches pushed, NOT on main)
 
 - claude/id-corner-breaks f6d3737: ID breaks now use the vertex solver; owner's NX ID part
