@@ -80,6 +80,19 @@ def execute(
 
     # Step 1: Pre-planning validation
     pre_results = validate_profile(profile, stock)
+    # Tool reach: the insert must fit every part of the finished contour
+    # (geometry/tool_reach.py). Roughing and finishing tools both cut to it.
+    from geometry.tool_reach import reach_messages
+    reach_tools = [tool] + ([finish_tool] if finish_tool is not None and finish_tool != tool else [])
+    for rt in reach_tools:
+        for msg in reach_messages(profile, rt):
+            pre_results.append(ValidationResult(
+                severity=Severity.ERROR, category="tool_reach",
+                message=msg,
+                recommendation="Split the contour into blocks cut with tools that can reach "
+                               "each part (e.g. a left-hand or neutral tool for faces that "
+                               "look toward the chuck), or change the contour.",
+            ))
     all_validations.extend(pre_results)
 
     if _has_errors(pre_results):

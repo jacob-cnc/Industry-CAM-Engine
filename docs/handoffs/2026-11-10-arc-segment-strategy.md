@@ -228,6 +228,43 @@ up, as on real parts, generates fine. Rapid routing around bumps remains Phase 2
   tangent maths was checked on 995 random cases.
 - **Tests:** `tests/unit/test_arc_picker_ui.py`.
 
-**Still to do in Phase 1:** ID-side checks for reach and clearance.
+**Phase 1, part 3 (2026-11-11): tool reach, OD and ID.** `geometry/tool_reach.py`
+- **The model.** The insert is the wedge between its front edge F and back edge B.
+  These come from the tool table I/J words (insert defaults in
+  `pipeline/insert_geometry_lookup.py`) and are measured in the tool's own frame:
+  from its feed direction round toward the air.
+  - At every tangent of the finished contour (both ends of every line, both ends
+    and every quadrant point of every arc, corner breaks included), the wedge must
+    sit on the air side. That means rise ≤ F and fall ≤ 180 − B.
+  - ID is the same check with X mirrored; a left-hand tool mirrors Z.
+  - So a CNMG in a 95° holder (95/175) handles square shoulders but can only follow
+    a falling contour for 5°. A neutral VNMG (72.5/107.5) handles both up to 72.5°.
+- **ToolDef now carries `front_angle` and `back_angle`** from the tool card. Before
+  this they were collapsed into the included angle and lost.
+- **`pipeline.execute` makes a violation an ERROR** (category `tool_reach`, unused
+  until now) for the roughing tool and for a separate finish tool.
+  - Tolerance is 1°, because the table holds insert defaults, not measured holders.
+  - The check is skipped for tools whose angles are unknown (0/0), and for
+    threading and grooving tools.
+- **Why ERROR.** On the owner's NX OD part, today's engine runs the CNMG finish pass
+  straight down the back face of the collar (X.3937→X.315 at Z-.4724) and down a
+  60° falling chamfer, and reports SUCCESS. The insert's back edge would plough
+  into the part. None of the existing validators look at the insert's shape.
+- **What it reports on the reference programs, using the real `tool.tbl`:**
+  - Corner Break Test: 45° falling chamfers, with T4 CNMG.
+  - Hemisphere Test and Test Program Tab: 60° and 7.4° falls. These were saved
+    with T1, a boring bar, on an OD block, which the mode check refuses anyway.
+  - No problems: Bearing Sleeves (ID), GUI Conv Test, Test Cut, Test Run Program.
+- **Tests:** `tests/integration/test_tool_reach.py`, 28 tests covering both sides.
+  - OD: shoulders, falls of 3–90° for CNMG and VNMG, a left-hand tool, arcs at their
+    steepest tangent, and the OD test-bed parts.
+  - ID: the mouth chamfer and steps in, a bore opening up, and the ID test-bed parts.
+  - Pipeline: blocking, the finish tool, and the skip when angles are unknown.
+- **What this means for the owner:** a contour with a face that looks toward the
+  chuck (a neck, the back of a collar or bead, a groove's far wall) needs its own
+  block with a tool that reaches it: left-hand, neutral, or a grooving tool. The
+  engine now says so instead of producing a gouging program. Cutting such a part
+  in one program with two tools, each cutting only what it reaches, is future work
+  that belongs with Phase 2 retract routing.
 **Phase 2:** rapid routing around bumps (the end-behind-a-bead case), and reach
 checks for the back flank of a bead or a groove wall.

@@ -159,6 +159,8 @@ def tool_card_to_tool_def(card: ToolCardData) -> ToolDef:
         z_offset=card.z_offset,
         x_wear=card.x_wear * 2.0,       # radius → diameter
         z_wear=card.z_wear,
+        front_angle=card.front_angle,
+        back_angle=card.back_angle,
     )
 
 
@@ -205,8 +207,8 @@ def tool_def_to_tool_card(tool: ToolDef) -> ToolCardData:
         orientation=tool.orientation.value,
         description=tool.description,
         nose_radius=tool.nose_radius,
-        front_angle=0.0,   # Not derivable from tip_angle alone; user selects insert
-        back_angle=0.0,
+        front_angle=tool.front_angle,   # 0 when unknown; user selects insert
+        back_angle=tool.back_angle,
         x_offset=tool.x_offset / 2.0,   # diameter → radius
         z_offset=tool.z_offset,
         x_wear=tool.x_wear / 2.0,       # diameter → radius
