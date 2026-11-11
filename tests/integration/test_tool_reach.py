@@ -170,21 +170,121 @@ def _execute(rows, tool, finish_tool=None, mode="od"):
 NECK = _rows(1.0, (1.0, -0.4), (0.7, -0.4), (0.7, -0.8), (1.2, -0.8), (1.2, -1.2))
 
 
-def test_pipeline_blocks_a_back_face_for_a_right_hand_tool():
+def _finish_points(res):
+    """Sampled tool-path points of the finish passes, (X dia, Z)."""
+    from models.moves import MoveType
+    out = []
+    for fp in res.plan_result.finish_passes:
+        pos = None
+        for m in fp.moves:
+            if pos is not None and m.move_type in (MoveType.FEED, MoveType.ARC_CW, MoveType.ARC_CCW):
+                for k in range(11):
+                    out.append((pos[0] + (m.x - pos[0]) * k / 10, pos[1] + (m.z - pos[1]) * k / 10))
+            pos = (m.x, m.z)
+    return out
+
+
+def test_pipeline_leaves_the_neck_uncut_and_says_where():
     res = _execute(NECK, CNMG)
-    assert res.status == PipelineStatus.BLOCKED_BY_ERROR
-    msgs = [v.message for v in res.validations if v.category == "tool_reach"]
-    assert msgs and "X1.0000 Z-0.4000" in msgs[0] and "falls toward the chuck at 90.0" in msgs[0]
+    assert res.status == PipelineStatus.SUCCESS_WITH_WARNINGS, [
+        v.message for v in res.validations if v.severity.value == "error"]
+    warn = [v.message for v in res.validations if v.category == "tool_reach"]
+    assert len(warn) == 1
+    assert warn[0].startswith("Left uncut: X0.7000-X1.0000, Z-0.4000 to Z-0.8000")
+    assert "grooving" in warn[0]
+    # the finish pass follows the 5 deg line X1.0 Z-.4 -> X.93 Z-.8, never into the neck
+    for x, z in _finish_points(res):
+        if -0.79 < z < -0.41:
+            line_x = 1.0 - (0.07 * (-0.4 - z) / 0.4)
+            assert x >= line_x - 0.002, (x, z)
+    from outputs.gcode_writer import GCodeWriter
+    code = GCodeWriter().write(res.plan_result)
+    assert "UNCUT: THIS TOOL CAN'T REACH" in code
 
 
 def test_pipeline_checks_the_finish_tool_too():
     ok = _rows(1.0, (1.0, -0.4), (1.2, -0.4), (1.2, -1.2))          # shoulder up only
-    assert _execute(ok, CNMG).plan_result is not None
+    res = _execute(ok, CNMG)
+    assert res.status == PipelineStatus.SUCCESS
     res = _execute(ok, CNMG, finish_tool=VNMG)                       # VNMG can't climb 90
-    assert res.status == PipelineStatus.BLOCKED_BY_ERROR
-    assert any("VNMG" in v.message for v in res.validations if v.category == "tool_reach")
+    assert res.plan_result is not None
+    warn = [v.message for v in res.validations if v.category == "tool_reach"]
+    assert warn and "VNMG" in warn[0] and "climbs" in warn[0]
 
 
 def test_pipeline_unchanged_for_tools_without_angles():
     res = _execute(NECK, replace(CNMG, front_angle=0.0, back_angle=0.0))
     assert not any(v.category == "tool_reach" for v in res.validations)
+
+
+# ----------------------------------------------------------------------
+# make_reachable: the contour the tool can follow, and the report
+# ----------------------------------------------------------------------
+
+from geometry.tool_reach import make_reachable  # noqa: E402
+
+
+def test_reachable_contour_unchanged_when_nothing_is_out_of_reach():
+    prof = _od(0.5, (0.5, -0.5), (1.0, -0.5), (1.0, -1.0))
+    assert make_reachable(prof, CNMG) == (prof, [])
+
+
+def test_neck_bridged_at_the_back_clearance_angle():
+    newp, regs = make_reachable(profile_from_fields(NECK, "od"), CNMG)
+    pts = [(round(m.x, 4), round(m.z, 4)) for m in newp.segments]
+    assert pts == [(1.0, 0.0), (1.0, -0.4), (0.93, -0.8), (1.2, -0.8), (1.2, -1.2)]
+    assert len(regs) == 1 and regs[0].kind == "fall" and regs[0].depth == pytest.approx(0.1494, abs=1e-3)
+    assert reach_problems(newp, CNMG) == []
+
+
+@pytest.mark.parametrize("name,tool,mode,n,hint", [
+    ("OD_NX_arcs_noV1", CNMG, "od", 2, "VNMG"),     # neck: grooving; 60 deg chamfer: VNMG/DNMG/TNMG
+    ("OD_bead_2x90", CNMG, "od", 1, "left-hand"),   # back of the bead: a left-hand 95 deg tool
+    ("OD_groove_2x90", VNMG, "od", 2, "CNMG"),      # walls: a 95 deg tool of each hand
+    ("ID_groove_2x90", BAR, "id", 1, "grooving"),
+    ("ID_bead_2x90", BAR, "id", 1, "left-hand"),
+])
+def test_testbed_parts_become_cuttable_with_the_regions_reported(name, tool, mode, n, hint):
+    d = json.load(open(os.path.join(FIX, name + ".json")))
+    prof = profile_from_fields(d["segments"], mode, d.get("corner_breaks"))
+    newp, regs = make_reachable(prof, tool)
+    assert reach_problems(newp, tool) == []
+    assert len(regs) == n
+    assert any(hint in r.message for r in regs), [r.message for r in regs]
+    for r in regs:
+        assert r.message.startswith("Left uncut: X") and r.depth > 0
+
+
+def test_nx_part_60_deg_chamfer_suggests_the_right_inserts():
+    d = json.load(open(os.path.join(FIX, "OD_NX_arcs_noV1.json")))
+    _, regs = make_reachable(profile_from_fields(d["segments"], "od"), CNMG)
+    chamfer = next(r for r in regs if 55 < r.worst_deg < 65)
+    for code in ("VNMG", "DNMG", "TNMG"):
+        assert code in chamfer.message
+    assert "CNMG" not in chamfer.message.split("Cut it")[1]
+
+
+def test_neck_program_runs_in_linuxcnc(tmp_path):
+    import shutil
+    rs274 = shutil.which("rs274")
+    if rs274 is None:
+        pytest.skip("LinuxCNC rs274 not installed")
+    import sys
+    repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    sys.path.insert(0, os.path.join(repo, "scripts", "arc_testbed"))
+    from sweep_audit import audit
+    from outputs.gcode_writer import GCodeWriter
+    code = GCodeWriter().write(_execute(NECK, CNMG).plan_result)
+    assert max(len(line) for line in code.splitlines()) <= 255     # LinuxCNC line limit
+    for f in ("industry-cam.ini", "tool.tbl"):
+        shutil.copy(os.path.join(repo, f), tmp_path / f)
+    var = os.path.join(repo, "industry-cam.var")
+    if os.path.exists(var):
+        shutil.copy(var, tmp_path / "industry-cam.var")
+    else:
+        (tmp_path / "industry-cam.var").write_text("5220\t1.000000\n")
+    (tmp_path / "p.ngc").write_text(code)
+    ended, n, bad, err = audit(str(tmp_path / "industry-cam.ini"), str(tmp_path / "tool.tbl"),
+                               str(tmp_path / "industry-cam.var"), str(tmp_path / "p.ngc"))
+    assert ended, err
+    assert not bad, bad

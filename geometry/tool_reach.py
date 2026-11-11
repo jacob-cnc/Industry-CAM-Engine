@@ -172,3 +172,376 @@ def reach_messages(profile, tool) -> List[str]:
                 f"the front edge at {p.limit:g} deg). Use a tool whose front angle is at least "
                 f"{p.phi:.0f}, a left-hand tool, or change the contour.")
     return msgs
+
+
+# ----------------------------------------------------------------------
+# Leave what the tool can't reach (owner decision 2026-11-11)
+# ----------------------------------------------------------------------
+#
+# Instead of refusing the program, the finished contour is replaced by the one
+# the insert CAN follow: where the contour falls (or climbs) more steeply than
+# the insert allows, the stretch is bridged by a straight line at the insert's
+# limit angle, from where the trouble starts to where that line meets the
+# contour again. Everything downstream (roughing, finish, validation, G-code)
+# runs unchanged on that contour, so the unreachable material is simply left on
+# the part, and each region is reported with its X/Z range, why, and which
+# inserts from pipeline/insert_geometry_lookup.py would reach it. The operator
+# cuts it in its own block with a suitable tool. Multi-tool segment builds that
+# know what is already cut are future work.
+#
+# Why the line is exact: the material a wedge-shaped tool can never remove is
+# the part swept along the wedge's edge directions (a point is reachable only
+# if the whole wedge placed there is in air). For a falling stretch that sweep
+# is bounded by the ray from the first point where the fall exceeds the back
+# clearance, in the back-edge direction; for an over-steep climb, the same
+# thing seen from the other end (Z mirrored, order reversed).
+
+_TURNING_INSERTS = ("CNMG", "CCMT", "WNMG", "DNMG", "DCMT", "VNMG", "TNMG", "SNMG")
+_DENSIFY_DEG = 0.5
+
+
+def _piece_geom(c0, c1):
+    """(centre, sweep, R) of an arc piece c0 -> c1, or None for a line."""
+    p0, p1 = (c0["x_radius"], c0["z"]), (c1["x_radius"], c1["z"])
+    if c1.get("quadrant", False):
+        c = quadrant_centre(p0, p1, c1.get("quadrant_sign", 1))
+        a0 = math.atan2(p0[1] - c[1], p0[0] - c[0])
+        a1 = math.atan2(p1[1] - c[1], p1[0] - c[0])
+        return c, math.atan2(math.sin(a1 - a0), math.cos(a1 - a0)), math.hypot(p0[0] - c[0], p0[1] - c[1])
+    r = c1.get("radius", 0.0) or 0.0
+    if abs(r) > 1e-9 and str(c1.get("type", "")).lower().endswith("arc"):
+        c = radius_arc_centre(p0, p1, r)
+        if c is not None:
+            return c, radius_arc_sweep(p0, p1, c, r), abs(r)
+    return None
+
+
+def _densify(coords):
+    """Polyline of the contour in radius space, and for each polyline segment
+    the coord piece k (coords[k] -> coords[k+1]) it lies on."""
+    pts = [(coords[0]["x_radius"], coords[0]["z"])]
+    seg_piece = []
+    for k in range(len(coords) - 1):
+        c0, c1 = coords[k], coords[k + 1]
+        p1 = (c1["x_radius"], c1["z"])
+        g = _piece_geom(c0, c1)
+        if g is None:
+            sub = [p1]
+        else:
+            c, sw, R = g
+            a0 = math.atan2(pts[-1][1] - c[1], pts[-1][0] - c[0])
+            n = max(2, int(math.ceil(abs(math.degrees(sw)) / _DENSIFY_DEG)))
+            sub = [(c[0] + R * math.cos(a0 + sw * i / n), c[1] + R * math.sin(a0 + sw * i / n))
+                   for i in range(1, n)] + [p1]
+        for q in sub:
+            if math.hypot(q[0] - pts[-1][0], q[1] - pts[-1][1]) > 1e-12:
+                pts.append(q)
+                seg_piece.append(k)
+    return pts, seg_piece
+
+
+def _ray_hit(a, u, p, q):
+    """t > 0 where the ray a + t u meets segment p-q, or None."""
+    d = (q[0] - p[0], q[1] - p[1])
+    den = u[0] * d[1] - u[1] * d[0]
+    if abs(den) < 1e-15:
+        return None
+    w = (p[0] - a[0], p[1] - a[1])
+    t = (w[0] * d[1] - w[1] * d[0]) / den
+    s = (w[0] * u[1] - w[1] * u[0]) / den
+    if t > 1e-9 and -1e-9 <= s <= 1 + 1e-9:
+        return t
+    return None
+
+
+def _shadow_pass(pts, max_fall_deg, tol_deg):
+    """Canonical frame (material below, travel -Z). Returns bridges
+    [(segA, A, segB, B)]: the contour from A (start of polyline segment segA)
+    to B (on segment segB) is replaced by the line A-B. segB None: to the end."""
+    th = math.radians(max_fall_deg)
+    u = (-math.sin(th), -math.cos(th))
+    out = []
+    cur, i, n = pts[0], 0, len(pts) - 1
+    floor = 0                        # can't back up past the last bridge end
+
+    def steeper(a, b):               # chord a -> b falls more steeply than the limit
+        d = (b[0] - a[0], b[1] - a[1])
+        return math.hypot(*d) > 1e-12 and math.degrees(math.atan2(d[0], -d[1])) < -max_fall_deg
+
+    while i < n:
+        nxt = pts[i + 1]
+        d = (nxt[0] - cur[0], nxt[1] - cur[1])
+        if math.hypot(*d) < 1e-12:
+            i += 1
+            cur = pts[i]
+            continue
+        phi = math.degrees(math.atan2(d[0], -d[1]))
+        if phi < -(max_fall_deg + tol_deg):
+            # start where the contour first got steeper than the limit itself (on a
+            # convex arc that is the tangent point, within the densify step)
+            while i - 1 >= floor and cur == pts[i] and steeper(pts[i - 1], pts[i]):
+                i -= 1
+                cur = pts[i]
+            best = None
+            for j in range(i + 1, n):
+                t = _ray_hit(cur, u, pts[j], pts[j + 1])
+                if t is not None and (best is None or t < best[0]):
+                    best = (t, j)
+            if best is None:                           # runs out past the end of the contour
+                zt = pts[n][1]
+                t = (zt - cur[1]) / u[1] if u[1] < -1e-12 else 0.0
+                out.append((i, cur, None, (cur[0] + t * u[0], cur[1] + t * u[1])))
+                break
+            t, j = best
+            b = (cur[0] + t * u[0], cur[1] + t * u[1])
+            out.append((i, cur, j, b))
+            i, cur, floor = j, b, j + 1
+            continue
+        i += 1
+        cur = pts[i]
+    return out
+
+
+def _signed_radius(c0, c1):
+    """A piece as a signed-R arc (+R = clockwise), for splitting a Q."""
+    g = _piece_geom(c0, c1)
+    if g is None:
+        return 0.0
+    c, sw, R = g
+    return R if sw < 0 else -R
+
+
+def _piece_to(c0, c1, p):
+    """Coord element for the piece c0 -> c1 cut short to end at point p
+    (same circle for arcs; a partial quadrant becomes a signed R)."""
+    g = _piece_geom(c0, c1)
+    if g is None:
+        return {"type": c1["type"], "x_radius": p[0], "z": p[1], "radius": 0.0,
+                "quadrant": False, "quadrant_sign": 1}
+    c, _sw, R = g
+    a = math.atan2(p[1] - c[1], p[0] - c[0])                  # snap onto the circle
+    p = (c[0] + R * math.cos(a), c[1] + R * math.sin(a))
+    return {"type": c1["type"], "x_radius": p[0], "z": p[1], "radius": _signed_radius(c0, c1),
+            "quadrant": False, "quadrant_sign": 1}
+
+
+def _line(p, kind):
+    return {"type": kind, "x_radius": p[0], "z": p[1], "radius": 0.0,
+            "quadrant": False, "quadrant_sign": 1}
+
+
+def _apply_bridges(coords, seg_piece, bridges, line_type):
+    """New coords with each bridge's stretch replaced by a straight line.
+    bridges: [(segA, A, segB or None, B)] in forward order, non-overlapping."""
+    out = [dict(coords[0])]
+    k_next = 1                       # next original element to copy (it ends piece k_next-1)
+    for segA, A, segB, B in bridges:
+        if segA == -1:               # the line starts the contour (undercut back to the face)
+            out = [dict(coords[0], x_radius=A[0], z=A[1])]
+            out.append(_line(B, line_type))
+            kb = seg_piece[segB]
+            end = coords[kb + 1]
+            if math.hypot(B[0] - end["x_radius"], B[1] - end["z"]) > 1e-9:
+                e = dict(end)
+                if _piece_geom(coords[kb], coords[kb + 1]) is not None:
+                    e["radius"] = _signed_radius(coords[kb], coords[kb + 1])
+                    e["quadrant"] = False
+                out.append(e)
+            k_next = kb + 2
+            continue
+        ka = seg_piece[segA]
+        out.extend(dict(c) for c in coords[k_next:ka + 1])
+        start = coords[ka]
+        if math.hypot(A[0] - start["x_radius"], A[1] - start["z"]) > 1e-9:
+            out.append(_piece_to(coords[ka], coords[ka + 1], A))
+        out.append(_line(B, line_type))
+        if segB is None:
+            return out
+        kb = seg_piece[segB]
+        end = coords[kb + 1]
+        if math.hypot(B[0] - end["x_radius"], B[1] - end["z"]) > 1e-9:
+            e = dict(end)
+            if e.get("quadrant", False) or _piece_geom(coords[kb], coords[kb + 1]) is not None:
+                e["radius"] = _signed_radius(coords[kb], coords[kb + 1])
+                e["quadrant"] = False
+            out.append(e)
+        k_next = kb + 2
+    out.extend(dict(c) for c in coords[k_next:])
+    return out
+
+
+def _canon(pts, s, mirror_z):
+    q = [(s * r, z) for r, z in pts]
+    if mirror_z:
+        q = [(r, -z) for r, z in reversed(q)]
+    return q
+
+
+def _uncanon_point(p, s, mirror_z):
+    r, z = p
+    if mirror_z:
+        z = -z
+    return (s * r, z)
+
+
+def _reaches(dirs, front, back, mode_id, left, tol=REACH_TOL_DEG):
+    for t in dirs:
+        phi = _phi(t, mode_id, left)
+        if phi > front + tol or phi < back - 180.0 - tol:
+            return False
+    return True
+
+
+def suggest_tools(region_dirs, all_dirs, mode_id: bool):
+    """(whole_part, this_region_only): insert names (with hand) from the insert
+    table that reach the whole contour / only this region."""
+    from pipeline.insert_geometry_lookup import INSERT_GEOMETRY
+    whole, region = [], []
+    seen = set()
+    for code in _TURNING_INSERTS:
+        f, b = INSERT_GEOMETRY[code]
+        for left in (False, True):
+            key = (f, b, left)
+            name = ("left-hand " if left else "") + code
+            if not _reaches(region_dirs, f, b, mode_id, left):
+                continue
+            if _reaches(all_dirs, f, b, mode_id, left):
+                whole.append((name, f, b, key in seen))
+            else:
+                region.append((name, f, b, key in seen))
+            seen.add(key)
+    return whole, region
+
+
+def _fmt_suggest(items):
+    """'DNMG/DCMT (62.5/117.5), VNMG (72.5/107.5), right- or left-hand'."""
+    hands = {}
+    for name, f, b, _ in items:
+        left = name.startswith("left-hand ")
+        hands.setdefault((f, b), [set(), set()])[1 if left else 0].add(name.replace("left-hand ", ""))
+    parts = []
+    # right-hand-capable first (same hand as most programs), at most three groups
+    order = sorted(hands.items(), key=lambda kv: (not kv[1][0], -(kv[0][1] - kv[0][0])))[:3]
+    for (f, b), (rh, lh) in order:
+        codes = "/".join(sorted(rh | lh))
+        hand = ("right- or left-hand" if rh and lh else "left-hand" if lh else "right-hand")
+        parts.append(f"{codes} ({f:g}/{b:g}, {hand})")
+    return "; ".join(parts)
+
+
+@dataclass(frozen=True)
+class UncutRegion:
+    x_min: float
+    x_max: float           # diameter
+    z_min: float
+    z_max: float
+    depth: float           # most material left, normal to the bridge line, inches
+    worst_deg: float       # steepest fall / climb in the region
+    limit_deg: float
+    kind: str              # "fall" or "rise"
+    line_from: Tuple[float, float]     # bridge line, (X dia, Z)
+    line_to: Tuple[float, float]
+    message: str
+
+
+def make_reachable(profile, tool, tol_deg: float = REACH_TOL_DEG):
+    """(profile the tool can cut, [UncutRegion]). The same profile object and []
+    when nothing is out of reach or the check does not apply."""
+    from dataclasses import replace as dc_replace
+    from models.profile import MachiningMode, ProfileMove, SegmentType
+    from models.tool import ToolDirection
+    from geometry.arc_entry import normalize_profile
+    from geometry.zone_builder import _profile_to_radius_coords
+
+    if not tool_applies(tool) or not reach_problems(profile, tool, tol_deg):
+        return profile, []
+    F, B = tool.front_angle, tool.back_angle
+    mode_id = profile.mode == MachiningMode.ID
+    left = tool.direction == ToolDirection.LEFT
+    s = -1.0 if (mode_id != left) else 1.0              # r mirror (ID, LH) - see _phi
+    coords = _profile_to_radius_coords(normalize_profile(profile))
+    line_type = coords[0]["type"]
+    regions_raw = []
+
+    for kind, mirror_z, max_fall in (("fall", False, 180.0 - B), ("rise", True, F)):
+        pts, seg_piece = _densify(coords)
+        cp = _canon(pts, s, mirror_z)
+        # rise: Z mirrored + order reversed turns "climb <= F" into "fall <= F"
+        bridges = _shadow_pass(cp, max_fall, tol_deg)
+        if not bridges:
+            continue
+        n = len(pts) - 1
+        fwd = []
+        for segA, A, segB, Bp in bridges:
+            A0, B0 = _uncanon_point(A, s, mirror_z), _uncanon_point(Bp, s, mirror_z)
+            if not mirror_z:
+                fwd.append((segA, A0, segB, B0))
+            else:                                   # reversed order: swap ends
+                sa = (n - 1 - segB) if segB is not None else 0
+                sb = n - 1 - segA
+                if segB is None:                    # ran past the START of the contour
+                    sa, B0 = -1, (B0[0], pts[0][1])
+                fwd.append((sa, B0, sb, A0))
+        fwd.sort(key=lambda b: b[0])
+        coords = _apply_bridges(coords, seg_piece, fwd, line_type)
+        for sa, P, sb, Q in fwd:
+            last = n if sb is None else sb + 1
+            stretch = [P] + pts[max(sa, 0) + 1:last] + [Q]       # the contour being bridged
+            regions_raw.append((kind, P, Q, stretch))
+
+    moves = []
+    for c in coords:
+        q = c.get("quadrant", False)
+        moves.append(ProfileMove(
+            segment_type=c["type"] if isinstance(c["type"], SegmentType) else SegmentType(str(c["type"]).lower()),
+            x=2.0 * c["x_radius"], z=c["z"],
+            radius=0.0 if q else float(c.get("radius", 0.0) or 0.0),
+            quadrant=bool(q), quadrant_sign=c.get("quadrant_sign", 1) if q else 1))
+    new_profile = dc_replace(profile, segments=moves,
+                             corner_breaks=[None] * max(0, len(moves) - 1))
+
+    # Report: the original contour between the bridge ends, per region
+    all_dirs = [t for _, t in contour_tangents(profile)]
+    regions = []
+    name = f"T{tool.tool_number}" + (f" ({tool.description})" if tool.description else "")
+    for kind, P, Q, stretch in regions_raw:
+        dirs = []
+        for a, b in zip(stretch, stretch[1:]):
+            L = math.hypot(b[0] - a[0], b[1] - a[1])
+            if L > 1e-12:
+                dirs.append(((b[0] - a[0]) / L, (b[1] - a[1]) / L))
+        phis = [_phi(t, mode_id, left) for t in dirs] or [0.0]
+        worst = -min(phis) if kind == "fall" else max(phis)
+        limit = 180.0 - B if kind == "fall" else F
+        lx, lz = Q[0] - P[0], Q[1] - P[1]
+        L = math.hypot(lx, lz) or 1.0
+        depth = max(abs((p[0] - P[0]) * lz - (p[1] - P[1]) * lx) / L for p in stretch)
+        xs = [2 * p[0] for p in stretch]
+        whole, region_only = suggest_tools(dirs, all_dirs, mode_id)
+        if whole:
+            fix = f"Insert(s) that reach the whole contour: {_fmt_suggest(whole)}."
+        elif region_only:
+            fix = (f"Cut it as its own block with: {_fmt_suggest(region_only)}"
+                   f" - or a grooving tool.")
+        else:
+            # no one insert covers the whole region: name what reaches the part
+            # this tool can't (the over-steep side), the rest it cuts itself
+            bad = [d for d in dirs if not _reaches([d], F, B, mode_id, left)]
+            w2, r2 = suggest_tools(bad, all_dirs, mode_id)
+            side = _fmt_suggest(w2 + r2)
+            fix = ("No single turning insert reaches all of it: use a grooving or form tool in its "
+                   "own block" + (f", or cut the {'falling' if kind == 'fall' else 'undercut'} side "
+                                  f"with {side} and the rest with this tool." if side else "."))
+        if kind == "fall":
+            why = (f"the contour {'falls toward the chuck' if not mode_id else 'opens up deeper in'} "
+                   f"at up to {worst:.1f} deg, and {name}'s back edge clears only {limit:.1f} deg")
+        else:
+            why = (f"the contour {'climbs' if not mode_id else 'steps in'} at up to {worst:.1f} deg, "
+                   f"past {name}'s front edge at {limit:g} deg (an undercut)")
+        msg = (f"Left uncut: X{min(xs):.4f}-X{max(xs):.4f}, Z{max(P[1], Q[1]):.4f} to "
+               f"Z{min(P[1], Q[1]):.4f} - {why}. The tool follows a straight line from "
+               f"X{2 * P[0]:.4f} Z{P[1]:.4f} to X{2 * Q[0]:.4f} Z{Q[1]:.4f} instead, leaving up "
+               f"to {depth:.4f} of material. {fix}")
+        regions.append(UncutRegion(min(xs), max(xs), min(P[1], Q[1]), max(P[1], Q[1]), depth,
+                                   worst, limit, kind, (2 * P[0], P[1]), (2 * Q[0], Q[1]), msg))
+    return new_profile, regions

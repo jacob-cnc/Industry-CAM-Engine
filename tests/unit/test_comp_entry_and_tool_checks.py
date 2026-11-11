@@ -102,9 +102,19 @@ def test_run_tab_tool_table_problems(table, expect):
     assert tab.tool_table_problems() == expect
 
 
-def test_program_tab_missing_tool_is_an_error():
+@pytest.fixture
+def tab():
+    """A Program tab that is closed and deleted afterwards (left to the garbage
+    collector, a top-level tab can be freed with Qt events still queued for it,
+    and a later test's teardown segfaults)."""
     from gui.program_tab import ProgramTab
-    tab = ProgramTab()
+    w = ProgramTab()
+    yield w
+    w.close()
+    w.deleteLater()
+
+
+def test_program_tab_missing_tool_is_an_error(tab):
     tab.set_tool_resolver(lambda n: None)
     block = SimpleNamespace(display_label="ID bore")
     with pytest.raises(ValueError, match="T7 .* not in the tool table"):
@@ -151,9 +161,7 @@ def test_no_lead_out_past_end_of_bar():
     ("id", 2, ToolType.TURNING, False),
     ("id", 7, ToolType.TURNING, True),      # along-Z orientations not checked
 ])
-def test_program_tab_tool_must_suit_mode(mode, q, ttype, ok):
-    from gui.program_tab import ProgramTab
-    tab = ProgramTab()
+def test_program_tab_tool_must_suit_mode(tab, mode, q, ttype, ok):
     td = ToolDef(tool_number=1, nose_radius=0.016, tip_angle=80.0, edge_length=0.375,
                  orientation=ToolOrientation(q), direction=ToolDirection.RIGHT,
                  tool_type=ttype, description="t")

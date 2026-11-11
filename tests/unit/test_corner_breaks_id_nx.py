@@ -144,6 +144,18 @@ def test_corner_break_tool_shows_id_vertices_as_validated():
     from gui.program_tab import ProgramTab
     mm = lambda v: v / 25.4
     tab = ProgramTab()
+    try:
+        _check_id_tool_rows(tab, mm)
+    finally:
+        # Close and delete it like the other Program-tab tests do. Left to the
+        # garbage collector, the top-level tab's C++ side was freed while its
+        # posted events / timers were still queued; the next teardown's
+        # processEvents() then segfaulted, depending on when GC happened to run.
+        tab.close()
+        tab.deleteLater()
+
+
+def _check_id_tool_rows(tab, mm):
     tab._load_program_data({
         "version": 1, "block_type": "ID Profile",
         "stock": {"diameter": mm(36), "x_start": mm(20), "z_start": 0.1, "z_end": mm(-27),

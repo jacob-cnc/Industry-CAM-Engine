@@ -241,7 +241,8 @@ up, as on real parts, generates fine. Rapid routing around bumps remains Phase 2
     a falling contour for 5°. A neutral VNMG (72.5/107.5) handles both up to 72.5°.
 - **ToolDef now carries `front_angle` and `back_angle`** from the tool card. Before
   this they were collapsed into the included angle and lost.
-- **`pipeline.execute` makes a violation an ERROR** (category `tool_reach`, unused
+- **Superseded the same day by the owner's decision below (leave it uncut).**
+- *(Original behaviour, superseded)* **`pipeline.execute` makes a violation an ERROR** (category `tool_reach`, unused
   until now) for the roughing tool and for a separate finish tool.
   - Tolerance is 1°, because the table holds insert defaults, not measured holders.
   - The check is skipped for tools whose angles are unknown (0/0), and for
@@ -266,5 +267,55 @@ up, as on real parts, generates fine. Rapid routing around bumps remains Phase 2
   engine now says so instead of producing a gouging program. Cutting such a part
   in one program with two tools, each cutting only what it reaches, is future work
   that belongs with Phase 2 retract routing.
+**Owner decision 2026-11-11: leave what the insert can't reach UNCUT.** The owner
+said to generate G-code for everything the tool can reach, leave the rest uncut,
+report where and why, and suggest an insert. Stay minimally invasive. Multi-tool
+segment builds that know what is already cut come later; for now the operator cuts
+complex features one block at a time.
+- **`tool_reach.make_reachable(profile, tool)`** replaces the finished contour with
+  the one the insert can follow. Wherever the contour falls more steeply than the
+  back clearance, or climbs more steeply than the front edge, the stretch is bridged
+  by a straight line at the limit angle.
+  - The line runs from the point where the contour first gets steeper than the
+    limit (the tangent point on a convex arc) to where it meets the contour again.
+  - Climbs are handled by the same pass with Z mirrored and the order reversed.
+  - That line is exact: a point is reachable only if the whole wedge placed there
+    is in air, so the unreachable material is the part swept along the wedge's edge
+    directions.
+  - Partial arcs stay arcs (a split quadrant becomes a signed R). Corner breaks are
+    baked in.
+- **`pipeline.execute`** runs everything (roughing, finish, validation, G-code)
+  unchanged on that contour, for the roughing tool and a separate finish tool.
+  - Each region becomes a WARNING (category `tool_reach`): "Left uncut: X..–X..,
+    Z.. to Z.. – why. The tool follows a straight line from … instead, leaving up
+    to … of material."
+  - It then suggests inserts from `insert_geometry_lookup`, right- or left-hand.
+    First choice is inserts that reach the whole contour. Next is inserts that reach
+    just this region (cut it as its own block). If no single insert covers the
+    region: "a grooving or form tool, or cut the falling side with …".
+  - Anything still out of reach afterwards is an ERROR (a safety net).
+  - A contour the tool can fully reach is untouched; it's the same object.
+- **The Program tab** lists the warnings in the status notes (hover).
+- **The G-code header** gets an `=== UNCUT: THIS TOOL CAN'T REACH ===` section, and
+  the PROFILE listing shows the contour actually followed.
+- **Results on the test parts:**
+  - NX OD part with a CNMG: the neck is bridged at 5° (grooving tool suggested). The
+    60° chamfer plus the neck behind it is bridged too (DNMG / VNMG / TNMG
+    suggested).
+  - Bead: a left-hand 95° tool for the back. Groove with a VNMG: a 95° tool for
+    each wall.
+  - The owner's Corner Break Test with T4 now generates. It leaves X.25–X.50,
+    Z-.495 to Z-.75 uncut and suggests SNMG/TNMG/DNMG for the falling side.
+  - Plotted and checked against the finish tool path.
+- **Fixed on the way:**
+  - The writer's `; WARNING:` comment lines weren't wrapped. A long warning made a
+    line over LinuxCNC's 255-character limit, and rs274 refused the whole program.
+    Comments are now wrapped at 100 characters, with a test that checks the limit.
+  - Three GUI tests created a top-level ProgramTab and never closed it. Garbage
+    collection could free it with Qt events still queued, and a later test's
+    teardown segfaulted. That depended on timing and memory layout: it never showed
+    on main, then showed on this branch with a warm `__pycache__`. Those tests now
+    close and delete their tab, and three back-to-back full runs pass.
+
 **Phase 2:** rapid routing around bumps (the end-behind-a-bead case), and reach
 checks for the back flank of a bead or a groove wall.

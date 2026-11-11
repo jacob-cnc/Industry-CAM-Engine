@@ -123,7 +123,11 @@ class ArcPicker(QWidget):
         # An arc bulging toward the material is concave (inside corner).
         chord_z = (self._p0[1] + self._p1[1]) / 2.0
         if abs(mid[0] - chord_r) > 1e-9:
-            toward_material = (mid[0] < chord_r) == bool(self.mode_od())
+            try:
+                od = bool(self.mode_od())
+            except Exception:             # owner being torn down: assume OD
+                od = True
+            toward_material = (mid[0] < chord_r) == od
             way = "concave (inside corner)" if toward_material else "convex (outside corner)"
         else:                                           # radial chord: bulges in Z
             way = "bulges toward the chuck" if mid[1] < chord_z else "bulges toward the tailstock"

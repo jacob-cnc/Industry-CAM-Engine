@@ -15,8 +15,9 @@ the distinction between the owner's verbatim request and later design advice.
     rapid would cross it), never cut.
   - Phase 1 part 2 done: arc picker (click the arc; sets the sign of R), "T" =
     tangent radius. Stored identity stays end point + signed R (§7).
-  - Phase 1 part 3 done: tool reach check, OD + ID (geometry/tool_reach.py) -
-    blocks a contour the insert can't follow (e.g. CNMG on a back face / neck).
+  - Phase 1 part 3 done: tool reach, OD + ID (geometry/tool_reach.py). Per owner:
+    what the insert can't reach is LEFT UNCUT (bridged at its limit angle), the
+    rest generates; each uncut X/Z range is reported with why + suggested inserts.
     Next: Phase 2 (rapid routing around beads; two-tool blocks for necks).
 
 - [Corner-Break Tool, OD Engine, GUI Tuning - lathe integration](2026-11-10-corner-break-tool-and-gui.md)

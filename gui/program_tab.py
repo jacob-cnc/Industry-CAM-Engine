@@ -1068,6 +1068,12 @@ class ProgramTab(QWidget):
         target = then_select + 1 if then_select > row_index else then_select
 
         def apply():
+            try:
+                import sip
+            except ImportError:
+                from PyQt5 import sip
+            if sip.isdeleted(self) or sip.isdeleted(self._segment_list):
+                return                    # the tab went away before the event loop ran
             self._selected_segment_index = target
             self._segment_list.set_segments(new_segs, new_breaks)
             if target >= 0:
@@ -1326,6 +1332,11 @@ class ProgramTab(QWidget):
             return None, None
 
         plan_result = pipeline_result.plan_result
+        # Material the tool can't reach is left uncut (geometry/tool_reach.py):
+        # tell the operator where, why and which insert would reach it.
+        for v in pipeline_result.validations:
+            if v.category == "tool_reach" and v.severity.value == "warning":
+                self._generate_notes.append(f"{block.display_label}: {v.message}")
         block_writer = GCodeWriter()
         gcode_text = block_writer.write(plan_result, unit_mode=unit_state.mode.value)
         for note in block_writer.notes:

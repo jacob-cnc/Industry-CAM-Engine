@@ -7,6 +7,7 @@ Imports from: models/ only
 """
 
 import math
+import textwrap
 from typing import List, Optional
 
 from models.results import PlanResult
@@ -143,6 +144,18 @@ class GCodeWriter:
         lines.append(f"; Finish Feed: {pr.finishing_params.feed * conv:{fmt}}")
         lines.append(";")
 
+        # --- Material left uncut (the tool can't reach it; geometry/tool_reach.py) ---
+        uncut = [v for v in (pr.validations or [])
+                 if getattr(v, "category", "") == "tool_reach"
+                 and getattr(getattr(v, "severity", None), "value", "") == "warning"]
+        if uncut:
+            lines.append("; === UNCUT: THIS TOOL CAN'T REACH (cut in its own block) ===")
+            for v in uncut:
+                for chunk in textwrap.wrap(v.message, 100):
+                    lines.append(f"; {chunk}")
+            lines.append("; The PROFILE below is the contour this tool follows.")
+            lines.append(";")
+
         # --- Profile Segments ---
         lines.append(f"; === PROFILE ({len(pr.profile.segments)} segments) ===")
         lines.append(f"; Z Start: {pr.profile.z_start * conv:{fmt}}")
@@ -175,10 +188,13 @@ class GCodeWriter:
         lines.append(f"; Generation time: {pr.generation_time_ms:.1f} ms")
         lines.append("")
 
-        # Warnings
+        # Warnings. Wrapped: LinuxCNC refuses lines over 255 characters, and a long
+        # warning on one line used to make the whole program unloadable.
+        # (Uncut-region warnings are already in their own header section.)
         for v in pr.validations:
-            if v.severity.value == "warning":
-                lines.append(f"; WARNING: {v.message}")
+            if v.severity.value == "warning" and getattr(v, "category", "") != "tool_reach":
+                for k, chunk in enumerate(textwrap.wrap(v.message, 100) or [""]):
+                    lines.append(f"; WARNING: {chunk}" if k == 0 else f";          {chunk}")
 
         # Safety preamble
         unit_code = "G21" if self._metric else "G20"

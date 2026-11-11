@@ -80,18 +80,28 @@ def execute(
 
     # Step 1: Pre-planning validation
     pre_results = validate_profile(profile, stock)
-    # Tool reach: the insert must fit every part of the finished contour
-    # (geometry/tool_reach.py). Roughing and finishing tools both cut to it.
-    from geometry.tool_reach import reach_messages
+    # Tool reach (geometry/tool_reach.py): what the insert can't reach is LEFT
+    # UNCUT (owner decision 2026-11-11). The contour is replaced by the one the
+    # tool can follow, each uncut region is reported as a warning with its X/Z
+    # range and the inserts that would reach it, and planning runs unchanged on
+    # that contour. Roughing and finishing tools both cut to it. Anything still
+    # out of reach afterwards is an error (safety net).
+    from geometry.tool_reach import make_reachable, reach_messages
     reach_tools = [tool] + ([finish_tool] if finish_tool is not None and finish_tool != tool else [])
     for rt in reach_tools:
+        profile, uncut = make_reachable(profile, rt)
+        for reg in uncut:
+            pre_results.append(ValidationResult(
+                severity=Severity.WARNING, category="tool_reach",
+                message=reg.message,
+                recommendation="Cut the uncut region in its own block with a tool that reaches it.",
+                location=reg.line_from,
+            ))
         for msg in reach_messages(profile, rt):
             pre_results.append(ValidationResult(
-                severity=Severity.ERROR, category="tool_reach",
-                message=msg,
-                recommendation="Split the contour into blocks cut with tools that can reach "
-                               "each part (e.g. a left-hand or neutral tool for faces that "
-                               "look toward the chuck), or change the contour.",
+                severity=Severity.ERROR, category="tool_reach", message=msg,
+                recommendation="Cut this part of the contour in its own block with a tool "
+                               "that reaches it, or change the contour.",
             ))
     all_validations.extend(pre_results)
 
