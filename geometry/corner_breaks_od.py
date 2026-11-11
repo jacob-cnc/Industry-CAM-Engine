@@ -1,12 +1,15 @@
-"""OD corner breaks: equal-leg chamfers and fillets at profile vertices.
+"""OD and ID corner breaks: equal-leg chamfers and fillets at profile vertices.
 
-OD ONLY. ID profiles keep the legacy path in zone_builder until an ID
-reference part validates their (different) build parameters. Do not reuse
-this module for ID without that validation.
+(Module name kept from when it was OD-only.) Validated against the owner's
+NX reference parts: OD since 2026-11-10 (tests/unit/test_corner_breaks_od_nx.py),
+ID since 2026-11-10 evening (tests/unit/test_corner_breaks_id_nx.py). The two
+modes differ only in where the implied front face comes from and which side
+the material is on; the line/fillet/chamfer geometry is identical.
 
 Vertex numbering (owner's convention): V1 is the corner at the first profile
-point, between the implied front face (centreline -> first point at Z0) and
-segment 1. Vertex Vk sits at profile point k-1, i.e. corner_breaks[k-1].
+point, between the implied front face and segment 1. OD: the face runs from
+the centreline out to the first point. ID: it runs from the bar OD in to the
+first point (the bore mouth). Vertex Vk sits at profile point k-1, i.e. corner_breaks[k-1].
 The last profile point (into the closure) has no vertex.
 
 Geometry is computed in RADIUS space, (r, z), from each neighbour's real
@@ -142,17 +145,32 @@ def _angle_between(u, v) -> float:
     return math.degrees(math.acos(max(-1.0, min(1.0, _dot(u, v)))))
 
 
-def _od_corner_kind(u_in, u_out) -> str:
-    """Convex/concave for OD (material between profile and centreline).
+def _od_corner_kind(u_in, u_out, is_id: bool = False) -> str:
+    """Convex/concave of the MATERIAL corner.
 
-    Travel runs from the front face toward the chuck; on OD the material is
-    on the RIGHT of travel in (r, z) (toward r = 0 for a -Z run). A turn
-    away from the material (left turn, cross > 0) is a concave corner.
+    Travel runs from the front face toward the chuck. OD: the material is on
+    the RIGHT of travel in (r, z) (toward r = 0 for a -Z run), so a left turn
+    (cross > 0) turns away from it: concave. ID: the material is outside the
+    bore, on the LEFT of travel, so the rule flips.
     """
     c = _cross(u_in, u_out)
     if abs(c) < 1e-12:
         return ""
+    if is_id:
+        c = -c
     return "concave" if c > 0 else "convex"
+
+
+# ID front face: the run into V1 comes from the bar OD (radially inward). Its
+# true start is the stock diameter, which the profile does not carry; only
+# its direction and "plenty of room" matter to the solver, never emitted.
+_ID_FACE_REACH = 1.0e3
+
+
+def _face_start(pts, is_id: bool):
+    """Start of the implied front face that arrives at the first point."""
+    r0, z0 = pts[0]
+    return (r0 + _ID_FACE_REACH, z0) if is_id else (0.0, z0)
 
 
 # ----------------------------------------------------------------------
@@ -161,10 +179,10 @@ def _od_corner_kind(u_in, u_out) -> str:
 
 def build_od_corner_coords(profile: ClosedProfile) -> OdCornerResult:
     """Profile segments -> zone_builder coordinate descriptors with corner
-    breaks applied, plus a per-vertex report. OD profiles only."""
+    breaks applied, plus a per-vertex report. OD and ID profiles (the name
+    is historical)."""
     from models.profile import MachiningMode
-    if profile.mode != MachiningMode.OD:
-        raise ValueError("build_od_corner_coords is OD-only")
+    is_id = profile.mode == MachiningMode.ID
 
     segs = profile.segments
     if not segs:
@@ -175,9 +193,9 @@ def build_od_corner_coords(profile: ClosedProfile) -> OdCornerResult:
     reports: List[VertexReport] = []
 
     # Start of the run INTO each point: point i is reached from pts[i-1];
-    # point 0 from the implied face start (r = 0, z = first z).
+    # point 0 from the implied front face (see _face_start).
     def seg_start(i):
-        return pts[i - 1] if i > 0 else (0.0, pts[0][1])
+        return pts[i - 1] if i > 0 else _face_start(pts, is_id)
 
     def seg_is_line(i):
         """Is the move arriving at point i a straight line?"""
@@ -228,7 +246,7 @@ def build_od_corner_coords(profile: ClosedProfile) -> OdCornerResult:
         u_in = _unit(_sub(c, a))
         u_out = _unit(_sub(b, c))
         turn = _angle_between(u_in, u_out)          # 0 = straight on
-        rep.corner = _od_corner_kind(u_in, u_out)
+        rep.corner = _od_corner_kind(u_in, u_out, is_id)
         if turn < 1e-6 or turn > 180 - 1e-6:
             rep.status = "skipped"
             rep.message = f"{rep.label}: no corner (collinear or reversal), no break applied"
@@ -510,13 +528,15 @@ def od_vertex_kinds(profile: ClosedProfile) -> dict:
     """Convex / concave for EVERY vertex (point index -> str), whether or
     not it has a break - for labelling vertices in the corner-break tool.
     Uses segment chords (exact for lines; a label only for arc neighbours)."""
+    from models.profile import MachiningMode
+    is_id = profile.mode == MachiningMode.ID
     segs = profile.segments
     pts = [(s.x / 2.0, s.z) for s in segs]
     kinds = {}
     for i in range(len(pts) - 1):
-        a = pts[i - 1] if i > 0 else (0.0, pts[0][1])
+        a = pts[i - 1] if i > 0 else _face_start(pts, is_id)
         u_in, u_out = _unit(_sub(pts[i], a)), _unit(_sub(pts[i + 1], pts[i]))
-        kinds[i] = _od_corner_kind(u_in, u_out) if u_in != (0.0, 0.0) and \
+        kinds[i] = _od_corner_kind(u_in, u_out, is_id) if u_in != (0.0, 0.0) and \
             u_out != (0.0, 0.0) else ""
     return kinds
 
