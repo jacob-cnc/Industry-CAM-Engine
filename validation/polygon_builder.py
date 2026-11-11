@@ -111,5 +111,14 @@ class ValidationPolygons:
         if not poly.is_valid:
             from shapely.validation import make_valid
             poly = make_valid(poly)
+            # make_valid can return the area plus zero-area debris (e.g. a
+            # LineString where a 180 deg arc meets a line, 2026-11-10 OD bead).
+            # Validators need an areal geometry (.boundary / .contains):
+            # keep only the polygonal parts.
+            if poly.geom_type == "GeometryCollection":
+                from shapely.ops import unary_union
+                parts = [g for g in poly.geoms
+                         if g.geom_type in ("Polygon", "MultiPolygon") and g.area > 0]
+                poly = unary_union(parts) if parts else Polygon()
 
         return poly
