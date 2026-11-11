@@ -12,10 +12,12 @@ exact measurement of b = step_fb - true position at that instant. The fit is
            + H*dir + LAG_TIME*v
 
 (dir = +1 moving +X, -1 moving -X; v = step velocity). LEAD is found by a grid
-search. Prints the [XVERNIER] INI lines and how good the fit is, in DIAMETER.
+search. Prints the [XVERNIER] INI lines and how good the fit is, in DIAMETER
+(X, the default) or in LENGTH (--units length, for Z).
 
 usage: fit_calibration.py CAPTURE [--scale -5080] [--dt 0.002] [--span-max 0.0001]
                           [--lead-min 0.02 --lead-max 0.5] [--plot out.png]
+  Z:   fit_calibration.py CAPTURE --scale 5080 --units length --steps-per-unit 27093.333
 """
 import argparse
 import math
@@ -85,11 +87,15 @@ def main(argv=None):
     ap.add_argument("--span-max", type=float, default=0.0001)
     ap.add_argument("--lead-min", type=float, default=0.02)
     ap.add_argument("--lead-max", type=float, default=0.5)
+    ap.add_argument("--units", choices=("dia", "length"), default="dia",
+                    help="report X errors on diameter (default) or Z errors as length")
+    ap.add_argument("--steps-per-unit", type=float, default=54186.667, help="|STEP_SCALE| (Z: 27093.333)")
     ap.add_argument("--plot", help="write a residual plot (needs matplotlib)")
     ap.add_argument("--json", action="store_true", help="print the result as JSON (for tests)")
     a = ap.parse_args(argv)
 
     s, counts, en = load(a.capture)
+    u, un = (2.0, "dia") if a.units == "dia" else (1.0, "length")
     e = edges(s, counts, en, a.scale, a.dt, a.span_max)
     c = 1.0 / abs(a.scale)
     if len(e) < 200:
@@ -135,7 +141,7 @@ def main(argv=None):
         "SLOPE": float(slope), "LAG_TIME": float(max(lag, 0.0)), "b0": float(b0),
         "harm_amp": amp, "resid_rms": rms, "resid_rms_no_harm": rms_noharm,
         "resid_max": float(np.max(np.abs(r))), "drift_chunks": drift,
-        "lead_steps": lead * 54186.667 if lead else 0.0,
+        "lead_steps": lead * a.steps_per_unit if lead else 0.0,
     }
     if a.json:
         import json
@@ -144,23 +150,23 @@ def main(argv=None):
 
     print(f"capture: {len(s)} samples, travel {span:.4f} r, {len(e)} usable edges "
           f"({res['edges_up']} up / {res['edges_down']} down)")
-    print(f"fit residual rms {2*rms:.6f} dia (max {2*res['resid_max']:.6f} dia); "
-          f"one scale count = {2*c:.6f} dia")
+    print(f"fit residual rms {u*rms:.6f} {un} (max {u*res['resid_max']:.6f} {un}); "
+          f"one scale count = {u*c:.6f} {un}")
     if lead:
         print(f"screw harmonic: lead {lead:.5f} in (= {res['lead_steps']:.0f} motor steps), "
-              f"amplitude {2*amp:.6f} dia; residual without it {2*rms_noharm:.6f} dia")
+              f"amplitude {u*amp:.6f} {un}; residual without it {u*rms_noharm:.6f} {un}")
     else:
         print("screw harmonic: none found (LEAD = 0)")
-    print(f"backlash: half {h:+.6f} r  -> total {2*h:.6f} r = {4*h:.6f} dia "
+    print(f"backlash: half {h:+.6f}  -> total {2*h:.6f} axis = {2*u*h:.6f} {un} "
           + ("(negative: check the capture; using 0)" if h < 0 else ""))
     print(f"drive lag: {lag*1000:+.3f} ms " + ("(negative: using 0)" if lag < 0 else ""))
     print(f"step-vs-scale slope: {slope:+.3e}  ({slope*1e6:+.1f} microinch per inch of travel)")
-    print("b0 drift over the capture (5 chunks, dia): " + " ".join(f"{2*d:+.6f}" for d in drift))
-    if 2 * rms > 0.0001:
-        print("WARNING: residual > .0001 dia - something the model doesn't cover "
+    print(f"b0 drift over the capture (5 chunks, {un}): " + " ".join(f"{u*d:+.6f}" for d in drift))
+    if u * rms > 0.0001:
+        print(f"WARNING: residual > .0001 {un} - something the model doesn't cover "
               "(vibration, loose gib, scale mounting?). Look before closing the loop.")
     print()
-    print("[XVERNIER] values:")
+    print("[XVERNIER] values:" if a.units == "dia" else "[ZVERNIER] values (for the Z phase):")
     print(f"H_INIT = {res['H_INIT']:.7f}")
     print(f"LEAD = {lead:.6f}")
     print(f"HARM_COS = {hc:.7f}")
@@ -174,12 +180,12 @@ def main(argv=None):
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
         fig, ax = plt.subplots(2, 1, figsize=(10, 7))
-        ax[0].plot(e[up, 1], 2e4 * (e[up, 4] - b0), ".", ms=2, label="up edges")
-        ax[0].plot(e[dn, 1], 2e4 * (e[dn, 4] - b0), ".", ms=2, label="down edges")
-        ax[0].set_xlabel("step position (r in)"); ax[0].set_ylabel("b - b0 (dia, .0001)")
+        ax[0].plot(e[up, 1], u * 1e4 * (e[up, 4] - b0), ".", ms=2, label="up edges")
+        ax[0].plot(e[dn, 1], u * 1e4 * (e[dn, 4] - b0), ".", ms=2, label="down edges")
+        ax[0].set_xlabel("step position (r in)"); ax[0].set_ylabel(f"b - b0 ({un}, .0001)")
         ax[0].legend()
-        ax[1].plot(e[:, 0], 2e4 * r, ".", ms=2)
-        ax[1].set_xlabel("time (s)"); ax[1].set_ylabel("fit residual (dia, .0001)")
+        ax[1].plot(e[:, 0], u * 1e4 * r, ".", ms=2)
+        ax[1].set_xlabel("time (s)"); ax[1].set_ylabel(f"fit residual ({un}, .0001)")
         fig.tight_layout(); fig.savefig(a.plot)
         print(f"plot: {a.plot}")
     return 0

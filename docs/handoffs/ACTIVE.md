@@ -21,7 +21,14 @@ the distinction between the owner's verbatim request and later design advice.
     parking vs ±.0009 today. No new hardware; wear workflow unchanged.
   - First action: merge (inert), `sudo halcompile --install rtcomp/xvernier.comp`,
     then the runbook steps 1-6 (shadow → baseline → sweep/fit → indicator check
-    → close → cut).
+    → close → cut). The bench-day card at the top of the runbook has the commands;
+    fill in its session log.
+
+- [Z Vernier: Plan](2026-11-11-z-vernier-plan.md)
+  - Status: Plan only (2026-11-11). Starts after X is closed and cutting parts.
+  - Same estimator, own twin component; Z differences: 5.3 steps/count, 10" travel
+    (maybe a pitch table), cutting thrust on the nut, deadband already 1 count.
+  - First data: optional X runbook step 7 (raw Z sweep, ~5 min, Z vernier not needed).
 
 - [X Axis: Hold a .0004" Diameter Band](2026-11-10-x-axis-tolerance.md)
   - Status: Plan written 2026-11-10 after an evening of chasing X wear by hand

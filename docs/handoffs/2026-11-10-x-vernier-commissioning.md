@@ -8,6 +8,32 @@ it is (owner decision 2026-11-10).
 Branch: `claude/x-vernier`. Nothing on it changes the machine until the
 `HALFILE` lines below are uncommented, and either step rolls back with one line.
 
+## Bench-day card
+
+Bring: a .0001 indicator and mag base for the cross-slide, a terminal in the config
+directory, and this page. The full detail for each step is further down.
+
+```
+cd ~/linuxcnc/configs/industry-cam
+git fetch origin && git merge --ff-only origin/claude/x-vernier   # this is the merge; your local tool.tbl is untouched
+sudo halcompile --install rtcomp/xvernier.comp                    # your own terminal
+ls /usr/lib/linuxcnc/modules/xvernier.so
+```
+
+| step | do | pass |
+|---|---|---|
+| 1 shadow | uncomment `HALFILE = x-vernier-observe.hal`, start, home | X behaves exactly as before; `resid` ±0.6, `fault` FALSE |
+| 2 baseline | `capture.sh 200 xv_baseline.txt` + `x_positioning_test.ngc`, `analyze_holds.py` | just record it: today's real parking error |
+| 3 sweep | `capture.sh 150 xv_sweep.txt` + `x_calibration_sweep.ngc`, `fit_calibration.py` | fit rms ≲ .00005 dia; paste `[XVERNIER]` values |
+| 4 indicator | restart (still shadow), MPG single clicks | `pos-est` follows the indicator to ~.00005 r both ways |
+| 5 close | also uncomment `x-vernier-close.hal`, restart, home | quiet at rest; positioning max ≤ .0001 dia; staircase .0001 per step on the indicator |
+| 6 cut | finish pass, then a .0002 wear change, recut | part moves .0002 ± .0001 |
+| 7 Z grab (optional) | `capture.sh 330 z_sweep.txt z` + `z_calibration_sweep.ngc` | just keep the file, for the Z phase |
+
+Stop at any step that fails. Re-commenting the `HALFILE` lines puts the machine back
+exactly as it was. Fill in the **session log** at the bottom as you go. After a good
+session, `git push origin main`.
+
 ## Why the loop parks where it does
 
 - X closes on the scale: `encoder.01` → `pid.x` → `stepgen.01`, velocity mode.
@@ -85,12 +111,13 @@ To run: `QT_QPA_PLATFORM=offscreen LD_LIBRARY_PATH=/home/jacob/miniforge3/lib /h
 | `x-vernier-observe.hal` | shadow mode: loads it, `addf xvernier servo-thread 2` (right after hm2 read), feeds it, sets params from `[XVERNIER]` |
 | `x-vernier-close.hal` | closed mode: `pid.x.feedback` and `joint.0.motor-pos-fb` ← `xvernier.pos-est`, `pid.x.deadband` ← `PID_DEADBAND`, `xvernier.fault` → `joint.0.amp-fault-in` |
 | `industry-cam.ini` | `[XVERNIER]` section (zeros = uncalibrated), and two commented `HALFILE` lines in `[HAL]` |
-| `scripts/xvernier/capture.sh` | servo-rate capture (standard `sampler` + `halsampler`) |
+| `scripts/xvernier/capture.sh` | servo-rate capture (standard `sampler` + `halsampler`); `… z` records raw Z on a second channel |
 | `scripts/xvernier/fit_calibration.py` | sweep capture → `[XVERNIER]` values |
 | `scripts/xvernier/analyze_holds.py` | positioning capture → parking error per hold |
 | `scripts/xvernier/x_calibration_sweep.ngc` | air: slow X sweeps at 3 feeds + 10 reversals (~2 min) |
 | `scripts/xvernier/x_positioning_test.ngc` | air: 12 targets × (feed up, feed down, rapid) with 3 s dwells (~3 min) |
 | `scripts/xvernier/x_wear_staircase.ngc` | air: 10 × .0002 dia steps up and down, 5 s dwells, for an indicator |
+| `scripts/xvernier/z_calibration_sweep.ngc` | air, Z only: 1.0 sweeps at F1/2/3 + 10 reversals (~5 min), optional step 7 |
 
 `industry-cam.hal` is **not** modified. The add-on files only add to it.
 
@@ -173,6 +200,18 @@ This is the key check **before** the estimate drives anything.
 3. Repeat 2–3 times, including after a long roughing cycle (warm screw).
 4. Then real parts.
 
+### 7. Optional: Z data for the next phase (5 min)
+
+This doesn't need a Z vernier, and Z keeps running on today's loop. It records the
+Z steps and the Z scale together so that the Z screw can be characterised at the desk
+(docs/handoffs/2026-11-11-z-vernier-plan.md).
+
+1. Set `#<zs>` in `scripts/xvernier/z_calibration_sweep.ngc`. It needs 1.0 of clear Z
+   travel toward the chuck at the current X. X never moves.
+2. `scripts/xvernier/capture.sh 330 z_sweep.txt z`, then run the program (~5 min).
+3. Keep `z_sweep.txt` and leave it in the config dir. To look at it right away:
+   `python3 scripts/xvernier/fit_calibration.py z_sweep.txt --scale 5080 --units length --steps-per-unit 27093.333`
+
 ### Rollback (any time)
 
 - Re-comment `HALFILE = x-vernier-close.hal` → back to the old loop (still logging in shadow).
@@ -195,5 +234,25 @@ This is the key check **before** the estimate drives anything.
 
 - **Rapid straight onto a finish diameter with a loose nut:** ±.00015 on the bench. Finish passes in our programs feed in (comp entry → face → diameter), so this is the uncommon case.
 - **Scale edge hysteresis** is indistinguishable from backlash and lands in `H_INIT`. Effect about .00001 dia.
-- **Z** is not touched. The same component would work for Z, but Z's scale resolution isn't the limiting factor for these parts.
+- **Z** is not touched. The Z phase comes after X is proven:
+  docs/handoffs/2026-11-11-z-vernier-plan.md. Step 7 collects its first data.
 - **Fallback:** if the vernier can't be made to work, Step 1 (deadband .00011 on the raw scale) still gets ±.0002–.0004.
+
+## Session log (fill in at the machine)
+
+| item | value |
+|---|---|
+| date / who | |
+| step 1: shadow loads, resid at rest, fault | |
+| step 2 baseline: est-cmd max / rms (dia) | |
+| step 2 baseline: from-up mean / from-down mean | |
+| step 3 fit: resid rms (dia), H_INIT, LEAD (steps), harmonic amp, LAG_TIME, b0 drift | |
+| step 3: second region agrees? | |
+| step 4 indicator: est vs indicator at clicks, after reversal | |
+| step 5 closed: hum at rest? PID_DEADBAND used | |
+| step 5 closed: est-cmd max / rms (dia), faults, max-shift | |
+| step 5 staircase: indicator readings per .0002 dia step | |
+| step 6 cut: wear change → part change (each try) | |
+| step 7 Z grab: file, fit summary | |
+| decision: keep closed / back to shadow / fallback Step 1 | |
+| notes | |
