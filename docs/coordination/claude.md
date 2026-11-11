@@ -1,5 +1,16 @@
 # Claude status
 
+## 2026-11-11 01:56 UTC — SAFETY: offset_contour roughing arcs run the long way round on main
+
+- main 61fb77d: ContourRoughingPlanner labels arcs mirrored (and builds a mirrored face). Since
+  the arc dialect fix LinuxCNC ACCEPTS these and runs e.g. -359 deg instead of +1 deg
+  (GUI Conv Test: 27 arcs). Staircase (GUI default) unaffected. Owner told: do not use
+  Offset Contour until fixed.
+- Fix ready: branch hotfix/contour-roughing-arcs 88666ae (from main; staircase output byte-
+  identical; audited with scripts/arc_testbed/sweep_audit.py). Awaiting owner OK to merge.
+- Phase 0 (claude/arc-phase0, in progress) includes the same fix plus kernel sweep + quadrant
+  split at edge extraction, explicit densify direction everywhere, writer re-merge.
+
 ## 2026-11-11 01:19 UTC — arc-segment strategy + prototype (branch claude/arc-proto, NOT for merge)
 
 - docs/handoffs/2026-11-10-arc-segment-strategy.md: test bed from the NX parts (fillets
