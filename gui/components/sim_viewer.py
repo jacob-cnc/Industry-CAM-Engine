@@ -565,9 +565,66 @@ class SimViewerWidget(QWidget):
         if self._gcode_panel:
             self.sim_line_changed.connect(self._gcode_panel.highlight_line)
 
-        # Controls bar
+        # Section legend (shown once sections are drawn), then the controls bar
+        self._legend = self._build_section_legend()
+        layout.addWidget(self._legend)
         bar = self._build_controls()
         layout.addWidget(bar)
+
+    _SECTION_KEYS = ("finished", "band", "rough", "face", "uncut")
+
+    def _build_section_legend(self) -> QWidget:
+        """One checkbox per shaded section, colour swatch in front, remembered
+        between sessions. Program errors (red hatch) always show."""
+        from PyQt5.QtWidgets import QCheckBox, QLabel
+        from PyQt5.QtGui import QPixmap, QColor, QIcon
+        from PyQt5.QtCore import QSettings
+        from gui.components.graph_widget import MachiningGraphWidget as _G
+        w = QWidget()
+        w.setStyleSheet(f"background-color: {COLORS['bg_panel']};")
+        row = QHBoxLayout(w)
+        row.setContentsMargins(8, 2, 8, 2)
+        row.setSpacing(14)
+        lab = QLabel("Shading:")
+        lab.setStyleSheet(f"color: {COLORS['text_secondary']};")
+        row.addWidget(lab)
+        self._section_boxes = {}
+        settings = QSettings("IndustryCAM", "graph")
+        for key in self._SECTION_KEYS:
+            label, ckey, _ = _G.SECTION_STYLES[key]
+            pm = QPixmap(14, 14)
+            import pyqtgraph as pg
+            c = pg.mkColor(COLORS[ckey])                # #RRGGBBAA, as the graph reads it
+            c.setAlpha(255)
+            pm.fill(c)
+            box = QCheckBox(label)
+            box.setIcon(QIcon(pm))
+            box.setStyleSheet(f"color: {COLORS['text_primary']};")
+            on = settings.value(f"section_{key}", True, type=bool)
+            box.setChecked(on)
+            box.toggled.connect(lambda v, k=key: self._on_section_toggled(k, v))
+            row.addWidget(box)
+            self._section_boxes[key] = box
+        row.addStretch(1)
+        w.setVisible(False)
+        return w
+
+    def _on_section_toggled(self, key: str, on: bool):
+        from PyQt5.QtCore import QSettings
+        try:
+            QSettings("IndustryCAM", "graph").setValue(f"section_{key}", on)
+        except Exception:
+            pass
+        self._graph.set_section_visible(key, on)
+
+    def set_sections(self, sections: dict):
+        """Shaded sections after Generate (outputs/cut_regions.py)."""
+        visible = {k: b.isChecked() for k, b in self._section_boxes.items()}
+        self._graph.set_sections(sections, visible)
+        present = {k for k, v in sections.items() if v}
+        for k, b in self._section_boxes.items():
+            b.setVisible(k in present)
+        self._legend.setVisible(bool(present))
 
     def _build_controls(self) -> QWidget:
         bar = QWidget()

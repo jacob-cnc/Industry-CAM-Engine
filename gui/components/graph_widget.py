@@ -193,6 +193,8 @@ class MachiningGraphWidget(pg.PlotWidget):
         self._tool_dot = None
         self._next_seg_item = None
         self._profile_overlay_items = []
+        self._uncut_overlay_items = []
+        self._section_items = {}
         self._material_fill_items = []
         self._graph_data = data
 
@@ -337,6 +339,75 @@ class MachiningGraphWidget(pg.PlotWidget):
             item = self.plot(seg_z, seg_x, pen=profile_pen)
             item.setZValue(5)  # Above zones, below tool dot
             self._profile_overlay_items.append(item)
+
+    # Shaded sections (outputs/cut_regions.py): key -> (label, colour key, edge style)
+    SECTION_STYLES = {
+        "face": ("Face stock", "graph_sec_face", None),
+        "rough": ("Roughing", "graph_sec_rough", None),
+        "band": ("Cleanup / finish", "graph_sec_band", None),
+        "finished": ("Finished part", "graph_sec_finished", None),
+        "uncut": ("Left uncut", "graph_sec_uncut", "dash"),
+        "gouge": ("Program error", "graph_sec_error", "hatch"),
+        "not_removed": ("Program error", "graph_sec_error", "hatch"),
+    }
+
+    def set_sections(self, sections: dict, visible: dict = None):
+        """Draw shaded sections. sections: key -> list of closed rings of (Z, X
+        radius) points (exterior and hole rings; odd-even fill). Exact polygons in
+        data coordinates (QGraphicsPathItem): no fillLevel, no bitmap - the
+        failures of the earlier shading (docs/handoffs/2026-11-11-zone-shading-plan.md)."""
+        from PyQt5.QtGui import QPainterPath, QColor
+        from PyQt5.QtWidgets import QGraphicsPathItem
+        from pyqtgraph.Qt import QtCore as _QtCore
+
+        for items in getattr(self, '_section_items', {}).values():
+            for item in items:
+                self.removeItem(item)
+        self._section_items = {}
+        visible = visible or {}
+        order = ["face", "rough", "band", "finished", "uncut", "gouge", "not_removed"]
+        for z, key in enumerate(order):
+            rings = sections.get(key) or []
+            if not rings:
+                continue
+            _label, ckey, edge = self.SECTION_STYLES[key]
+            colour = pg.mkColor(COLORS[ckey])          # project hex is #RRGGBBAA (QColor reads #AARRGGBB)
+            path = QPainterPath()
+            path.setFillRule(_QtCore.Qt.OddEvenFill)
+            for ring in rings:
+                if len(ring) < 3:
+                    continue
+                path.moveTo(ring[0][0], ring[0][1])
+                for zz, rr in ring[1:]:
+                    path.lineTo(zz, rr)
+                path.closeSubpath()
+            item = QGraphicsPathItem(path)
+            if edge == "hatch":
+                brush = pg.mkBrush(colour)
+                brush.setStyle(_QtCore.Qt.BDiagPattern)
+                item.setBrush(brush)
+                pen = pg.mkPen(colour, width=2)
+            else:
+                item.setBrush(pg.mkBrush(colour))
+                if edge == "dash":
+                    solid = QColor(colour)
+                    solid.setAlpha(255)
+                    pen = pg.mkPen(solid, width=1.5, style=_QtCore.Qt.DashLine)
+                else:
+                    pen = pg.mkPen(None)
+            pen.setCosmetic(True)
+            item.setPen(pen)
+            item.setZValue(1 + z * 0.1 if key not in ("gouge", "not_removed") else 4.5)
+            item.setToolTip(_label)
+            item.setVisible(visible.get(key, True) or key in ("gouge", "not_removed"))
+            self.addItem(item)
+            self._section_items.setdefault(key, []).append(item)
+
+    def set_section_visible(self, key: str, on: bool):
+        if key in ("gouge", "not_removed"):
+            return                                   # program errors always show
+        for item in getattr(self, '_section_items', {}).get(key, []):
+            item.setVisible(on)
 
     def set_uncut_overlay(self, outlines: list):
         """Shade material the tool can't reach (geometry/tool_reach.py) between
@@ -525,80 +596,9 @@ class MachiningGraphWidget(pg.PlotWidget):
         # (The SimViewerWidget handles per-move granularity via move_states)
         self.set_material_state(pass_index - 1)
 
-    def _draw_zones_as_image(self, data):
-        """Rasterize all zone polygons into a single RGBA ImageItem.
-
-        This is the nuclear option — bypasses all pyqtgraph fill rendering
-        and just paints colored pixels at the right data coordinates.
-        ImageItem is well-tested and scales correctly with zoom/pan.
-        """
-        import numpy as np
-        from PyQt5.QtGui import QColor
-
-        # Determine the data extent from stock rect
-        x_min_r, x_max_r, z_min, z_max = data.stock_rect
-        if x_max_r <= x_min_r or z_max <= z_min:
-            return
-
-        # Image resolution: ~200 pixels per inch of data range
-        ppi = 200
-        z_range = z_max - z_min
-        x_range = x_max_r - x_min_r
-        img_w = max(10, int(z_range * ppi))
-        img_h = max(10, int(x_range * ppi))
-
-        # Cap at reasonable size
-        img_w = min(img_w, 800)
-        img_h = min(img_h, 800)
-
-        # Create RGBA image (H x W x 4), initialized transparent
-        img = np.zeros((img_h, img_w, 4), dtype=np.uint8)
-
-        # For each zone, rasterize the polygon into the image
-        for zone in data.zone_shadings:
-            if not zone.z_coords or not zone.x_coords or len(zone.z_coords) < 3:
-                continue
-
-            color_hex = COLORS.get(zone.color_key, COLORS['graph_zone_material'])
-            color = QColor(color_hex[:7])
-            if len(color_hex) == 9:
-                alpha = int(color_hex[7:9], 16)
-            else:
-                alpha = 80
-
-            r, g, b = color.red(), color.green(), color.blue()
-
-            # Convert zone polygon to pixel coordinates
-            z_coords = zone.z_coords
-            x_coords = [max(0.0, x) for x in zone.x_coords]
-
-            # Map data coords to pixel coords
-            # pixel_col = (z - z_min) / z_range * img_w
-            # pixel_row = (x - x_min_r) / x_range * img_h
-            poly_pixels = []
-            for z, x in zip(z_coords, x_coords):
-                col = int((z - z_min) / z_range * (img_w - 1))
-                row = int((x - x_min_r) / x_range * (img_h - 1))
-                col = max(0, min(img_w - 1, col))
-                row = max(0, min(img_h - 1, row))
-                poly_pixels.append((row, col))
-
-            # Scanline fill the polygon into the image
-            self._scanline_fill(img, poly_pixels, r, g, b, alpha)
-
-        # Create ImageItem positioned at the correct data coordinates
-        # The graph has invertY(True) — Y increases downward on screen.
-        # ImageItem renders with row 0 at the bottom by default.
-        # With invertY, we need to flip the image vertically so row 0 (x_min_r)
-        # appears at the top of the display (smallest X = top with invertY).
-        img = np.flip(img, axis=0)
-
-        img_item = pg.ImageItem(image=img)
-        img_item.setRect(z_min, x_min_r, z_range, x_range)
-        img_item.setZValue(-10)  # Behind everything else
-        self.addItem(img_item)
-
-    @staticmethod
+    # (_draw_zones_as_image removed 2026-11-11: it rasterised zones into a
+    # 200 px/in bitmap capped at 800 px, so its edges could never match the
+    # toolpath. Sections are now exact polygons: set_sections.)
     def _scanline_fill(img, poly_pixels, r, g, b, a):
         """Simple scanline polygon fill into an RGBA numpy array.
 

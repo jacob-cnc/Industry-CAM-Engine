@@ -2,6 +2,20 @@
 
 import pytest
 
+_made = []
+
+
+@pytest.fixture(autouse=True)
+def _close_tabs():
+    """Tabs made by a test are closed and deleted at teardown, not left to the
+    garbage collector (that could free one with Qt events queued and crash a
+    later test's teardown)."""
+    yield
+    while _made:
+        w = _made.pop()
+        w.close()
+        w.deleteLater()
+
 from outputs.run_from_line import (
     RunFromError, build_resume_program, find_n_line, has_n_numbers)
 
@@ -135,6 +149,7 @@ def test_run_tab_types_n_number_and_runs_resume_program(monkeypatch, tmp_path):
     b._task_mode = TaskMode.MANUAL
     from gui.run_tab import RunTab
     tab = RunTab()
+    _made.append(tab)       # closed + deleted at teardown (see _close_tabs)
     opened, runs = [], []
     monkeypatch.setattr(b, "program_open", lambda p: opened.append(p) or True)
     monkeypatch.setattr(b, "program_run", lambda start_line=0: runs.append(start_line) or True)
@@ -183,6 +198,7 @@ def test_run_from_mapping_survives_stale_not_busy_polls(monkeypatch, tmp_path):
     b._task_mode = TaskMode.MANUAL
     from gui.run_tab import RunTab
     tab = RunTab()
+    _made.append(tab)       # closed + deleted at teardown (see _close_tabs)
     opened = []
     monkeypatch.setattr(b, "program_open", lambda p: opened.append(p) or True)
     monkeypatch.setattr(b, "program_run", lambda start_line=0: True)

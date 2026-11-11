@@ -1053,6 +1053,47 @@ class ProgramTab(QWidget):
             return f"{text} — arc{'s' if n > 1 else ''} split into two (hover for details)"
         return text
 
+    def _preview_finished_rings(self, segments_to_draw, stock_r):
+        """The drawn finished part as one closed ring of (Z, X radius): the
+        preview's own profile points, closed to the axis (OD) or to the stock
+        diameter (ID)."""
+        pts = []
+        for seg_z, seg_x in segments_to_draw:
+            for z, x in zip(seg_z, seg_x):
+                if not pts or abs(pts[-1][0] - z) > 1e-12 or abs(pts[-1][1] - x) > 1e-12:
+                    pts.append((z, x))
+        if len(pts) < 2:
+            return []
+        edge = stock_r if self._get_machining_mode() == "id" else 0.0
+        return [[(pts[0][0], edge)] + pts + [(pts[-1][0], edge), (pts[0][0], edge)]]
+
+    def _show_cut_sections(self) -> None:
+        """Shade face / roughing / cleanup+finish / finished / uncut for every
+        profile block, computed from its G-code through LinuxCNC's interpreter,
+        plus any program error the check finds. If that can't run, say so and
+        shade only the uncut regions (never a guessed picture)."""
+        from outputs.cut_regions import compute_sections, CutRegionsUnavailable, geom_rings
+        from shapely.ops import unary_union
+        parts = {k: [] for k in ("face", "rough", "band", "finished", "uncut", "gouge", "not_removed")}
+        try:
+            for gcode_text, plan_result, outlines in getattr(self, "_section_inputs", []):
+                sec = compute_sections(gcode_text, plan_result, outlines)
+                for k in parts:
+                    parts[k].append(getattr(sec, k))
+                self._generate_notes.extend(sec.notes)
+        except CutRegionsUnavailable as exc:
+            self._generate_notes.append(f"Shaded sections not shown: {exc}")
+            self._sim_viewer.set_uncut_overlay(getattr(self, "_uncut_outlines", []))
+            return
+        except Exception as exc:                      # never let shading break Generate
+            logger.exception("cut sections failed")
+            self._generate_notes.append(f"Shaded sections not shown (internal error: {exc})")
+            self._sim_viewer.set_uncut_overlay(getattr(self, "_uncut_outlines", []))
+            return
+        rings = {k: geom_rings(unary_union(v)) if v else [] for k, v in parts.items()}
+        self._sim_viewer.set_sections(rings)
+        self._last_cut_rings = rings
+
     def _split_arc_row(self, row_index: int, then_select: int) -> bool:
         """Split segment row `row_index` if it is a two-piece arc. Deferred to
         the event loop (we are inside the table's selection signal)."""
@@ -1124,6 +1165,7 @@ class ProgramTab(QWidget):
             all_gcode_sections = []
             self._generate_notes = []
             self._uncut_outlines = []
+            self._section_inputs = []          # (gcode, plan_result, uncut outlines) per profile block
             self._arc_split_notes = []
             first_plan_result = None
             prev_tool_number = None
@@ -1134,6 +1176,7 @@ class ProgramTab(QWidget):
 
                 if block.is_profile:
                     # Profile block — run the full pipeline
+                    n_outlines = len(self._uncut_outlines)
                     gcode_text, plan_result = self._generate_profile_block(block, writer)
                     if gcode_text is None:
                         # Error occurred — already displayed to user
@@ -1142,6 +1185,8 @@ class ProgramTab(QWidget):
                     if first_plan_result is None:
                         first_plan_result = plan_result
                     all_gcode_sections.append(gcode_text)
+                    self._section_inputs.append(
+                        (gcode_text, plan_result, list(self._uncut_outlines[n_outlines:])))
 
                 elif block.is_threading:
                     # Threading block — emit G76 section
@@ -1181,8 +1226,9 @@ class ProgramTab(QWidget):
 
             if hasattr(self, '_profile_contour_segments') and self._profile_contour_segments:
                 self._sim_viewer.set_profile_overlay(self._profile_contour_segments)
-            # Drawn profile (above) AND the contour cut: shade what's left uncut
-            self._sim_viewer.set_uncut_overlay(getattr(self, "_uncut_outlines", []))
+            # Drawn profile (above) AND what the program cuts: shaded sections
+            # from the G-code as LinuxCNC runs it (outputs/cut_regions.py)
+            self._show_cut_sections()
 
             # Emit signals
             self._last_gcode_text = combined_gcode
@@ -2570,6 +2616,13 @@ class ProgramTab(QWidget):
             profile_pen = pg.mkPen(profile_color, width=2)
             for seg_z, seg_x in segments_to_draw:
                 self._graph_widget.plot(seg_z, seg_x, pen=profile_pen)
+
+            # Finished part (steel) under the profile, built from the very same
+            # points as the profile line, so edge and line can't disagree. Only
+            # the finished part while editing; all sections after Generate.
+            self._graph_widget._section_items = {}          # clear() removed them
+            self._graph_widget.set_sections(
+                {"finished": self._preview_finished_rings(segments_to_draw, stock_r)})
 
             # Draw OTHER visible profile blocks' profiles (dimmer, behind active)
             self._draw_other_block_profiles(pg)

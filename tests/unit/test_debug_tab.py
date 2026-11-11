@@ -4,7 +4,7 @@ import pytest
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import Qt
 
-from gui.debug_tab import DebugTab
+from gui.debug_tab import DebugTab as _DebugTab
 from models.results import PlanResult, TurningPass, SweptRegion
 from models.moves import ToolMove, MoveType, PassType
 from models.profile import ClosedProfile, ProfileMove, SegmentType, MachiningMode
@@ -14,6 +14,26 @@ from models.params import RoughingParams, FinishingParams, RoughingStrategy
 
 # QApplication must exist before creating any QWidget
 _app = QApplication.instance() or QApplication([])
+
+_made = []
+
+
+def DebugTab(*a, **k):                # noqa: N802 - keeps the tests' spelling
+    """Create the tab and hold it until teardown, then close + delete it. Left
+    to the garbage collector, a top-level tab can be freed with Qt events still
+    queued and a later test's teardown segfaults (timing dependent)."""
+    w = _DebugTab(*a, **k)
+    _made.append(w)
+    return w
+
+
+@pytest.fixture(autouse=True)
+def _close_tabs():
+    yield
+    while _made:
+        w = _made.pop()
+        w.close()
+        w.deleteLater()
 
 
 def _make_plan_result() -> PlanResult:

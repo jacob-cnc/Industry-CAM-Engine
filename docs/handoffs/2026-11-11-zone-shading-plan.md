@@ -1,4 +1,4 @@
-# Zone shading on the graph: plan (2026-11-11, not started)
+# Zone shading on the graph: plan and status (2026-11-11)
 
 **Owner request (2026-11-11).** Shade the graph's discrete sections in different
 colours: material to be removed, the finished part, the cleanup allowance, and so
@@ -6,9 +6,10 @@ on, so the operator can tell them apart. "It's imperative that the
 sim/preview/graph is 100% accurate so the user can rely on it as a valuable
 validation tool." Look at why the earlier shading failed, then plan for success.
 
-Status: plan only. The groundwork already on `claude/arc-phase0` is the uncut-region
-shading (`graph_widget.set_uncut_overlay`). It uses the rendering method this plan
-builds on, and it was checked visually.
+Status: **S0–S2 built 2026-11-11** on `claude/arc-phase0` (see §6). S3 (playback)
+is not started. Owner choices: cleanup and finish are one band; the finished part
+is steel; the live preview shows only the finished part, and all sections appear
+after Generate.
 
 ## 1. What failed before, and why
 
@@ -140,3 +141,78 @@ sessions. The defaults are in the table above.
 3. Should the sections also show in the live preview while editing? There, only
    planned geometry exists, with no G-code yet. Proposal: show finished part + uncut
    only in the preview, and everything after Generate.
+
+## 6. What was built (2026-11-11)
+
+**`outputs/cut_regions.py`**
+- `tag_sections` puts a `(ICAM_SECTION x)` comment after each `; === … ===` header.
+  CLEANUP is matched before ROUGH, because the cleanup header says "roughing
+  boundary".
+- `run_rs274` runs the program with a generated tool table (the program's tools,
+  zero offsets).
+- `parse_canon` turns the output into moves. It follows SELECT_TOOL, and arcs use
+  one chord-error densifier (2e-5").
+- **Verified:** rs274 reports the imaginary tip, compensated or not. On a G42
+  chamfer, the nose centre (tip minus TNR × Q direction) sits exactly TNR from the
+  drawn line (test).
+- Swept area: the nose circle along the path, plus the insert wedge (front and back
+  edges, 0.25" long). Wedge contact with the intended part is ignored; the nose
+  decides the part edge.
+- Sections come from Shapely boolean operations. They partition the stock exactly
+  (checked every time).
+- Error sections:
+  - **gouge** = intended part ∩ nose sweep.
+  - **not removed** = as cut − intended, judged at Z0 and behind only, outside
+    nose-radius margins at concave corners, the start point and Z end.
+  - Both are filtered at 1e-4" thickness and reported as "GRAPH CHECK" notes.
+- About 70–230 ms per block.
+
+**GUI**
+- `graph_widget.set_sections`: one `QGraphicsPathItem` per section (odd-even fill,
+  data coordinates).
+- Colours `graph_sec_*` in `colors.py` are #RRGGBBAA. They are parsed with
+  `pg.mkColor`; `QColor` would read them as #AARRGGBB, which is what made "steel"
+  render olive on the first try.
+- Errors draw as red hatch and always show.
+- `sim_viewer` has a legend row of checkboxes (QSettings `IndustryCAM/graph`) that
+  shows only the sections present.
+- `program_tab._show_cut_sections` runs after every Generate. If rs274 is missing, a
+  note says so and only the uncut regions are shaded; never a guessed picture.
+- The preview shades the finished part from the same points as the profile line.
+- The rasterised `_draw_zones_as_image` was removed.
+
+**Tests**
+- `tests/integration/test_cut_regions.py` (14): interpreter semantics, the
+  partition, matching the intended part, every test-bed part running in LinuxCNC,
+  a program with its finish pass deleted, an injected gouge, and the two real
+  defects below.
+- `tests/unit/test_cut_sections_ui.py` (3): pixel probes .0005" either side of the
+  finished edge at about .0001"/px, OD and ID, and the legend toggles.
+- The full suite passes three times in a row.
+
+**Real defects the check found in existing code** (shown red on the graph; fixes
+pending, owner to prioritise):
+1. **Roughing beside a falling flank cuts into the part.** Roughing is
+   uncompensated, so LinuxCNC drives the imaginary tip and the nose sits above and
+   behind it (Q2). A plunge next to a contour falling toward the chuck puts the
+   nose into the flank: .0125" on the 60° crest with a VNMG, against a .005"
+   allowance. The post-planning check looks at the tip path only. The CNMG's reach
+   limit keeps normal OD turning out of this; VNMG/DNMG/left-hand tools on falling
+   contours are exposed.
+2. **An ID bore-mouth chamfer is left up to .005" proud.** The finish pass enters
+   along Z0 across the mouth and turns back down the chamfer (135°). LinuxCNC comp
+   treats the in-air entry line as a surface and stops the nose short of the top of
+   the chamfer. Any ID program that starts with a mouth chamfer segment is affected.
+3. **The face is left at the face pass's allowance when the profile doesn't start
+   at X0.** The face pass stops at Z+fin allowance (.010 here) and the finish
+   starts at the profile's first point, so the face inside it is never finished.
+   It may be intended; owner to confirm. Shown as finished-part material in front
+   of Z0, not flagged.
+
+**Also fixed while building this:**
+- The reach bridge could end a few thou before the end of a contour piece. That
+  left a short arc or line after a concave corner, which LinuxCNC comp refuses
+  (bridged grooves failed in rs274). The bridge now runs to the end of a piece that
+  short.
+- More GUI tests leaked top-level tabs (RunTab, DebugTab); they now close and
+  delete them.

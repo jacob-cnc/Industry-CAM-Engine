@@ -55,6 +55,13 @@ COLORS = {
     "graph_warning_region": "#E56E7233",
     "graph_roundtrip": "#A8D8CC80",
     "graph_tool_dot": "#FFFFFF",
+    # Shaded sections after Generate (outputs/cut_regions.py; owner: finished = steel)
+    "graph_sec_finished": "#8DA4BC70",
+    "graph_sec_face": "#9A7FD045",
+    "graph_sec_rough": "#4C7FB845",
+    "graph_sec_band": "#D4A84060",
+    "graph_sec_uncut": "#E8934A80",
+    "graph_sec_error": "#FF3B5CD0",
     "graph_threading": "#E5B84C",
 
     # Tabs

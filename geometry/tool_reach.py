@@ -254,7 +254,7 @@ def _ray_hit(a, u, p, q):
     return None
 
 
-def _shadow_pass(pts, max_fall_deg, tol_deg):
+def _shadow_pass(pts, max_fall_deg, tol_deg, seg_piece=None, snap_len=0.0):
     """Canonical frame (material below, travel -Z). Returns bridges
     [(segA, A, segB, B)]: the contour from A (start of polyline segment segA)
     to B (on segment segB) is replaced by the line A-B. segB None: to the end."""
@@ -294,12 +294,29 @@ def _shadow_pass(pts, max_fall_deg, tol_deg):
                 break
             t, j = best
             b = (cur[0] + t * u[0], cur[1] + t * u[1])
+            # Don't leave a sliver of a contour piece after the concave corner the
+            # line makes: LinuxCNC's cutter comp refuses a short arc or line there
+            # ("... in concave corner cannot be reached by the tool without
+            # gouging"). Run the line on to the end of that piece instead: further
+            # along the rising contour, so it falls less and stays in air.
+            if seg_piece is not None and snap_len > 0.0:
+                k, rest, jj = seg_piece[j], math.hypot(pts[j + 1][0] - b[0], pts[j + 1][1] - b[1]), j
+                while jj + 1 < n and seg_piece[jj + 1] == k:
+                    jj += 1
+                    rest += math.hypot(pts[jj + 1][0] - pts[jj][0], pts[jj + 1][1] - pts[jj][1])
+                if rest < snap_len:
+                    j, b = jj, pts[jj + 1]
             out.append((i, cur, j, b))
             i, cur, floor = j, b, j + 1
             continue
         i += 1
         cur = pts[i]
     return out
+
+
+def _snap_len(tool) -> float:
+    """Shortest contour piece left after a bridge's concave corner (inches)."""
+    return 4.0 * max(getattr(tool, "nose_radius", 0.0), 0.0) + 0.010
 
 
 def _signed_radius(c0, c1):
@@ -468,7 +485,8 @@ def make_reachable(profile, tool, tol_deg: float = REACH_TOL_DEG):
         pts, seg_piece = _densify(coords)
         cp = _canon(pts, s, mirror_z)
         # rise: Z mirrored + order reversed turns "climb <= F" into "fall <= F"
-        bridges = _shadow_pass(cp, max_fall, tol_deg)
+        cpiece = list(reversed(seg_piece)) if mirror_z else seg_piece
+        bridges = _shadow_pass(cp, max_fall, tol_deg, cpiece, _snap_len(tool))
         if not bridges:
             continue
         n = len(pts) - 1

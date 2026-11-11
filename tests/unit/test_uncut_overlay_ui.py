@@ -46,11 +46,13 @@ def test_uncut_region_shaded_with_the_drawn_profile(tab):
     xs = [p[0] for p in tab._uncut_outlines[0]]
     assert min(xs) == pytest.approx(0.7) and max(xs) == pytest.approx(1.0, abs=1e-3)
     g = tab._sim_viewer._graph
-    assert g._profile_overlay_items and g._uncut_overlay_items
-    g.set_profile_visible(False)
-    assert not any(i.isVisible() for i in g._uncut_overlay_items)
-    g.set_profile_visible(True)
-    assert all(i.isVisible() for i in g._uncut_overlay_items)
+    # drawn profile line AND the uncut section (part of the shaded sections now)
+    assert g._profile_overlay_items and g._section_items.get("uncut")
+    box = tab._sim_viewer._section_boxes["uncut"]
+    box.setChecked(False)
+    assert not any(i.isVisible() for i in g._section_items["uncut"])
+    box.setChecked(True)
+    assert all(i.isVisible() for i in g._section_items["uncut"])
 
 
 def test_no_shading_when_the_tool_reaches_everything(tab):
@@ -63,4 +65,4 @@ def test_no_shading_when_the_tool_reaches_everything(tab):
     tab._on_generate_clicked()
     _app.processEvents()
     assert tab._uncut_outlines == []
-    assert not getattr(tab._sim_viewer._graph, "_uncut_overlay_items", [])
+    assert not tab._sim_viewer._graph._section_items.get("uncut")

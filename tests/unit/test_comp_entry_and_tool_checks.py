@@ -97,9 +97,13 @@ class _FakeBackend:
 def test_run_tab_tool_table_problems(table, expect):
     from gui.run_tab import RunTab
     tab = RunTab()
-    tab._backend = _FakeBackend(table)
-    tab._gcode_text = _gch_code()
-    assert tab.tool_table_problems() == expect
+    try:
+        tab._backend = _FakeBackend(table)
+        tab._gcode_text = _gch_code()
+        assert tab.tool_table_problems() == expect
+    finally:                      # left to GC, a top-level tab can crash a later teardown
+        tab.close()
+        tab.deleteLater()
 
 
 @pytest.fixture
