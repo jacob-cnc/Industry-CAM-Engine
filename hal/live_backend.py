@@ -647,8 +647,14 @@ class LiveBackend(HALBackend):
             if (self._stat.interp_state != linuxcnc.INTERP_IDLE
                     or self._program_busy(self._stat)):
                 return False   # never reload under a running/paused program
-            self._cmd.task_plan_synch()
-            self._cmd.wait_complete()
+            # task_plan_synch is refused in AUTO with the interpreter idle
+            # ("can't do that (EMC_TASK_PLAN_SYNCH) in auto mode ...", lathe
+            # 2026-11-10: the run tab reloads the source program right after a
+            # Run-From resume file ends, before the GUI returns to MANUAL).
+            # It is only needed to sync the interpreter after MDI/MANUAL.
+            if self._stat.task_mode != linuxcnc.MODE_AUTO:
+                self._cmd.task_plan_synch()
+                self._cmd.wait_complete()
             self._cmd.program_open(path)
             return True
         except linuxcnc.error:
