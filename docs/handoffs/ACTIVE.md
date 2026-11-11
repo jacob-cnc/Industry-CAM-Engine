@@ -6,6 +6,16 @@ the distinction between the owner's verbatim request and later design advice.
 
 ## Proposed
 
+- [Zone Shading on the Graph: Plan](2026-11-11-zone-shading-plan.md)
+  - Status: plan only (2026-11-11). Owner wants the discrete sections shaded
+    (finished part, roughing, cleanup/finish, face stock, uncut) and the graph
+    100% trustworthy as a validation tool.
+  - Why earlier tries failed (rasterised zones, fillLevel fills, kernel-tolerance
+    gaps, G-code-to-planner move matching, clutter) and the fix: sections from
+    the G-code via rs274, same numbers as the lines, real polygon items,
+    invariants checked on every Generate, toggles.
+  - Open: owner picks sections / colours / preview behaviour (§5).
+
 - [Arc Segments: Strategy + Phase 0/1 Status](2026-11-10-arc-segment-strategy.md)
   - Status: branch `claude/arc-phase0`, pushed, NOT merged (needs owner OK).
     Phase 0 done; Phase 1 part 1 done 2026-11-11: true circular Q / -Q (ellipses
