@@ -189,10 +189,10 @@ def _profile_to_radius_coords(profile: ClosedProfile) -> List[dict]:
     if not segments:
         return []
 
-    # OD: dedicated vertex solver, validated against an NX reference part
-    # (geometry/corner_breaks_od.py). ID keeps the legacy code below until an
-    # ID reference part validates its different build parameters.
-    if profile.mode == MachiningMode.OD:
+    # Vertex solver (geometry/corner_breaks_od.py), validated against the
+    # owner's NX reference parts for OD and ID. The legacy code below is no
+    # longer reached; kept for reference until it is removed.
+    if profile.mode in (MachiningMode.OD, MachiningMode.ID):
         from geometry.corner_breaks_od import build_od_corner_coords
         result = build_od_corner_coords(profile)
         if result.reports:

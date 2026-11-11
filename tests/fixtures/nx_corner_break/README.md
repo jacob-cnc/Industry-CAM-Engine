@@ -13,8 +13,7 @@ ground truth for the corner-break engine.
 
 OD pair: validated by `tests/unit/test_corner_breaks_od_nx.py`.
 
-ID pair: added 2026-11-10, **not yet used by any test**. Both load with
-`build123d.import_step`. Envelope Ø36 x 33 mm. Sharp: 13 straight faces, profile
-radii 10.5-18 mm. Broken: 16 straight + 3 toroidal (fillet) faces. Profile
-points and break sizes have not been extracted yet. The ID corner-break
-solver (separate from OD) is the next step that will read these.
+ID pair: added 2026-11-10, validated by `tests/unit/test_corner_breaks_id_nx.py`
+(same vertex solver as OD). Ø36 bar, blind stepped bore; breaks V1 C1, V2 R0.5,
+V3 R0.25, V4 C1, V6 R2, V7 C2. The full part does not generate yet: its two
+internal undercuts trip the retract-routing gouge check (pre-existing).

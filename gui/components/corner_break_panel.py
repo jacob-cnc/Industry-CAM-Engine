@@ -175,14 +175,16 @@ class CornerBreakPanel(QWidget):
                 color = QColor(STATUS_COLORS.get(row.get("status", "ok"),
                                                  COLORS["text_primary"]))
                 for c, v in enumerate(vals):
-                    item = self._table.item(r, c) or QTableWidgetItem()
+                    item = self._table.item(r, c)
+                    if item is None:                  # create once; re-setting an
+                        item = QTableWidgetItem()     # owned item warns in Qt
+                        self._table.setItem(r, c, item)
                     item.setText(v)
                     item.setToolTip(tip)
                     item.setTextAlignment(
                         Qt.AlignRight | Qt.AlignVCenter if c in (1, 2) else Qt.AlignCenter)
                     if c == 5:
                         item.setForeground(color)
-                    self._table.setItem(r, c, item)
         finally:
             self._updating = False
         self.set_selected(keep)
