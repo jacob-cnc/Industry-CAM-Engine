@@ -99,10 +99,32 @@ X re-runs its bench tests.
 5. Air positioning and staircase.
 6. Cut: shoulder lengths from both directions, and a Z wear change.
 
-## Questions for the owner (no rush, answer whenever)
+## Owner answers (2026-11-11)
 
-1. Z screw: ballscrew or acme? Nut adjustable or preloaded?
-2. Which Z dimensions are tight on your parts (shoulder lengths, face-to-face, groove
-   positions)? Roughly what tolerance?
-3. Typical Z finish feed and rpm, which set `SPAN_MAX`.
-4. Is the Z scale the same model as X's (5 µm)?
+1. **Screw:** acme with an adjustable nut, set about as tight as it will go (same as X). So
+   backlash should be small, and a once-per-turn harmonic is likely. The X fit will
+   show what this kind of screw looks like.
+2. **Tolerance:** Z holds **±.0005 to ±.001**.
+3. **Feeds:** the same as X, .002–.008 ipr at 80–2500 rpm, which is about 0.2 to 20 in/min.
+4. **Scale:** the same 5 µm model as X.
+
+### What the answers change
+
+- **Z is probably already within tolerance.** The estimated ±.0002–.0003 uses
+  20–60% of a ±.0005 band, and much less of ±.001. That makes the Z vernier
+  **margin, not a fix**, so it ranks below anything else open on X. **The first job is
+  to measure Z, not to build anything.** If the measured baseline is under about
+  ±.0002, Z work can stop there or wait.
+- **Z can be measured without installing anything for Z.** A raw Z capture (step
+  feedback plus scale counts) during a Z positioning program, plus the fit from the
+  step-7 sweep, can rebuild Z's sub-count parking error offline. The bench core
+  runs over the recorded data. That is a small desk addition to `analyze_holds.py`
+  (a `--replay` mode), plus `z_positioning_test.ngc`. It costs about 5 minutes of
+  machine time and carries zero risk.
+- **Feeds:** most real feeds run above the 3 in/min `SPAN_MAX`, so edges get used only
+  on slow feeds and while decelerating into each stop. That already works for X and
+  is fine for Z. At the top of the feed range, check that `FAULT_LIMIT` doesn't trip.
+  The bench gets a 20 in/min scenario.
+
+Revised order: Z0 gate (X done) → **measure Z** (step 7 + replay baseline) → decide →
+only then Z1–Z4.

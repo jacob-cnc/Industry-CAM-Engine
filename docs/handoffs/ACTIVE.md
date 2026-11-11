@@ -29,6 +29,8 @@ the distinction between the owner's verbatim request and later design advice.
   - Same estimator, own twin component; Z differences: 5.3 steps/count, 10" travel
     (maybe a pitch table), cutting thrust on the nut, deadband already 1 count.
   - First data: optional X runbook step 7 (raw Z sweep, ~5 min, Z vernier not needed).
+  - Owner: acme/tight nut, same scale, Z tolerance ±.0005–.001 → Z is likely already in
+    band; measure it first (offline replay of raw captures), build only if needed.
 
 - [X Axis: Hold a .0004" Diameter Band](2026-11-10-x-axis-tolerance.md)
   - Status: Plan written 2026-11-10 after an evening of chasing X wear by hand
