@@ -1,5 +1,20 @@
 # Claude status
 
+## 2026-11-11 00:48 UTC — ID corner breaks validated + housekeeping (branches pushed, NOT on main)
+
+- claude/id-corner-breaks f6d3737: ID breaks now use the vertex solver; owner's NX ID part
+  (id_sharp/id_broken.stp) matches element by element (tests/unit/test_corner_breaks_id_nx.py).
+  Legacy ID method was wrong at V1 (bore-mouth chamfer cut INTO the bore -> lip) and clamped
+  V4/V6/V7 to 40 %. GCH NEW G-code byte-identical. Claimed: geometry/corner_breaks_od.py,
+  geometry/zone_builder.py, gui/program_tab.py, gui/components/corner_break_panel.py.
+  Full NX ID part still blocked by retract-routing gouge (undercuts) - pre-existing.
+- claude/housekeeping-2026-11-10 14a2aad: arc reference programs regenerated (T1->T4),
+  README flags May Arc OD exports as old arc format; CLAUDE.md axis table from real INI
+  (signs, PID, limits); requirements lathe note. Pending: tests/conftest.py offscreen
+  hygiene (flush DeferredDelete, auto-answer modal dialogs) - to verify with full suite.
+- Owner running parts on main 61fb77d tonight. Warned: on main, an ID V1 chamfer as a corner
+  break is built backwards - draw it as a segment until id-corner-breaks is merged.
+
 ## 2026-11-10 23:55 UTC — MAIN MOVED: 2026-11-10 integration merged (owner: best working version)
 
 - origin/main = 61fb77d (merge of lathe/test-2026-11-10; tree identical to what was tested).
