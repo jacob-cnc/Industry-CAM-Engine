@@ -296,6 +296,14 @@ complex features one block at a time.
   - Anything still out of reach afterwards is an ERROR (a safety net).
   - A contour the tool can fully reach is untouched; it's the same object.
 - **The Program tab** lists the warnings in the status notes (hover).
+- **The graph after Generate shows both contours.** The drawn profile is the white
+  overlay (it was already drawn from the segment rows), and the toolpath follows
+  the reachable contour. Each uncut region is shaded in the warning colour,
+  bounded by the drawn contour and the line the tool follows.
+  - The shading shows and hides with "Hide Profile".
+  - Its outline travels with the warning (`ValidationResult.outline`).
+  - `tests/unit/test_uncut_overlay_ui.py`.
+  - Not yet shown in the live preview before Generate.
 - **The G-code header** gets an `=== UNCUT: THIS TOOL CAN'T REACH ===` section, and
   the PROFILE listing shows the contour actually followed.
 - **Results on the test parts:**

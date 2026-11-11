@@ -96,6 +96,7 @@ def execute(
                 message=reg.message,
                 recommendation="Cut the uncut region in its own block with a tool that reaches it.",
                 location=reg.line_from,
+                outline=reg.outline,
             ))
         for msg in reach_messages(profile, rt):
             pre_results.append(ValidationResult(

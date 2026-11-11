@@ -442,6 +442,7 @@ class UncutRegion:
     line_from: Tuple[float, float]     # bridge line, (X dia, Z)
     line_to: Tuple[float, float]
     message: str
+    outline: Tuple[Tuple[float, float], ...] = ()   # drawn contour + bridge, closed, (X dia, Z)
 
 
 def make_reachable(profile, tool, tol_deg: float = REACH_TOL_DEG):
@@ -542,6 +543,8 @@ def make_reachable(profile, tool, tol_deg: float = REACH_TOL_DEG):
                f"Z{min(P[1], Q[1]):.4f} - {why}. The tool follows a straight line from "
                f"X{2 * P[0]:.4f} Z{P[1]:.4f} to X{2 * Q[0]:.4f} Z{Q[1]:.4f} instead, leaving up "
                f"to {depth:.4f} of material. {fix}")
+        outline = tuple((2 * p[0], p[1]) for p in stretch) + ((2 * P[0], P[1]),)
         regions.append(UncutRegion(min(xs), max(xs), min(P[1], Q[1]), max(P[1], Q[1]), depth,
-                                   worst, limit, kind, (2 * P[0], P[1]), (2 * Q[0], Q[1]), msg))
+                                   worst, limit, kind, (2 * P[0], P[1]), (2 * Q[0], Q[1]), msg,
+                                   outline))
     return new_profile, regions

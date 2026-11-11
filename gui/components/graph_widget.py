@@ -338,9 +338,50 @@ class MachiningGraphWidget(pg.PlotWidget):
             item.setZValue(5)  # Above zones, below tool dot
             self._profile_overlay_items.append(item)
 
+    def set_uncut_overlay(self, outlines: list):
+        """Shade material the tool can't reach (geometry/tool_reach.py) between
+        the drawn profile and the contour the tool follows.
+
+        Args:
+            outlines: closed outlines, each a list of (X dia, Z) points.
+        """
+        import pyqtgraph as pg
+        from PyQt5.QtGui import QColor
+        from pyqtgraph.Qt import QtCore as _QtCore
+        from PyQt5.QtGui import QPainterPath
+        from PyQt5.QtWidgets import QGraphicsPathItem
+
+        for item in getattr(self, '_uncut_overlay_items', []):
+            self.removeItem(item)
+        self._uncut_overlay_items = []
+        edge = QColor(COLORS['status_warning'])
+        fill = QColor(COLORS['status_warning'])
+        fill.setAlpha(70)
+        for outline in outlines or []:
+            pts = list(outline)
+            if len(pts) < 3:
+                continue
+            if pts[0] != pts[-1]:
+                pts.append(pts[0])
+            zs = [p[1] for p in pts]
+            xs = [p[0] / 2.0 for p in pts]          # graph X is radius
+            item = self.plot(zs, xs, pen=pg.mkPen(edge, width=1.5, style=_QtCore.Qt.DashLine))
+            path = QPainterPath()
+            path.moveTo(zs[0], xs[0])
+            for z, x in zip(zs[1:], xs[1:]):
+                path.lineTo(z, x)
+            shade = QGraphicsPathItem(path)
+            shade.setBrush(pg.mkBrush(fill))
+            shade.setPen(pg.mkPen(None))
+            self.addItem(shade)
+            for it in (shade, item):
+                it.setZValue(4)                     # under the profile line and tool dot
+                it.setToolTip("Left uncut: this tool can't reach it (see the status notes)")
+                self._uncut_overlay_items.append(it)
+
     def set_profile_visible(self, visible: bool):
-        """Show or hide the profile contour overlay."""
-        for item in getattr(self, '_profile_overlay_items', []):
+        """Show or hide the profile contour overlay (and the uncut shading)."""
+        for item in getattr(self, '_profile_overlay_items', []) + getattr(self, '_uncut_overlay_items', []):
             item.setVisible(visible)
 
     def clear_toolpath(self):

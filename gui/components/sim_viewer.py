@@ -717,6 +717,12 @@ class SimViewerWidget(QWidget):
             self._btn_toggle_profile.setText("Hide Profile")
             self._profile_visible = True
 
+    def set_uncut_overlay(self, outlines: list):
+        """Shade material left uncut (the tool can't reach it); shown and hidden
+        with the profile overlay."""
+        self._graph.set_uncut_overlay(outlines)
+        self._graph.set_profile_visible(getattr(self, "_profile_visible", True))
+
     def set_profile_overlay(self, segments: list):
         """Set profile contour data for overlay display.
 

@@ -45,6 +45,9 @@ class ValidationResult:
     recommendation: Optional[str] = None
     consequence: Optional[str] = None
     location: Optional[Tuple[float, float]] = None
+    # Closed outline (X dia, Z) of a region the message is about - e.g. material
+    # the tool can't reach (geometry/tool_reach.py), drawn shaded on the graph.
+    outline: Optional[Tuple[Tuple[float, float], ...]] = None
     pass_index: Optional[int] = None
     move_index: Optional[int] = None
 

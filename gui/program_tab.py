@@ -1123,6 +1123,7 @@ class ProgramTab(QWidget):
             # Generate each block — collect G-code sections and the first plan_result
             all_gcode_sections = []
             self._generate_notes = []
+            self._uncut_outlines = []
             self._arc_split_notes = []
             first_plan_result = None
             prev_tool_number = None
@@ -1180,6 +1181,8 @@ class ProgramTab(QWidget):
 
             if hasattr(self, '_profile_contour_segments') and self._profile_contour_segments:
                 self._sim_viewer.set_profile_overlay(self._profile_contour_segments)
+            # Drawn profile (above) AND the contour cut: shade what's left uncut
+            self._sim_viewer.set_uncut_overlay(getattr(self, "_uncut_outlines", []))
 
             # Emit signals
             self._last_gcode_text = combined_gcode
@@ -1337,6 +1340,8 @@ class ProgramTab(QWidget):
         for v in pipeline_result.validations:
             if v.category == "tool_reach" and v.severity.value == "warning":
                 self._generate_notes.append(f"{block.display_label}: {v.message}")
+                if v.outline:
+                    self._uncut_outlines.append(v.outline)
         block_writer = GCodeWriter()
         gcode_text = block_writer.write(plan_result, unit_mode=unit_state.mode.value)
         for note in block_writer.notes:
