@@ -224,7 +224,11 @@ def _make_arc_finish_pass(pass_index=0, arc_radius=0.5, x_start=1.5, z_start=0.0
         pass_index=pass_index,
     ))
 
-    # Create 3 arc moves (G02 clockwise) tracing a quarter circle
+    # Create 3 arc moves tracing a quarter circle. In the internal (radius, Z)
+    # frame this turns counter-clockwise (angle 180 -> 270 deg about the centre),
+    # so the moves are ARC_CCW (geometry/arc_math.py: sweep > 0 -> ARC_CCW). The
+    # material sim honours the move type since arc phase 0; it used to take the
+    # short way round whatever the label said.
     # Arc center is at (x_start + arc_radius, z_start) in diameter coords
     # We split the quarter circle into 3 segments
     center_x_dia = x_start  # center_i is incremental offset in diameter
@@ -249,7 +253,7 @@ def _make_arc_finish_pass(pass_index=0, arc_radius=0.5, x_start=1.5, z_start=0.0
             ck = center_z_abs - prev_z
 
         moves.append(ToolMove(
-            move_type=MoveType.ARC_CW,
+            move_type=MoveType.ARC_CCW,
             x=end_x,
             z=end_z,
             feed=0.003,
@@ -600,7 +604,7 @@ class TestSubCondition3_ArcInstantRemoval:
         # Arc pass moves:
         # 0: rapid
         # 1: feed to start
-        # 2, 3, 4: arc cutting moves (ARC_CW)
+        # 2, 3, 4: arc cutting moves (ARC_CCW)
         # arc_move_index 0 = first arc (move_idx 2), 1 = second arc (move_idx 3)
         first_arc_idx = 2
         last_arc_idx = 4

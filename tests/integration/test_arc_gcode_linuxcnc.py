@@ -97,10 +97,16 @@ def _generate(fields):
 
 
 def _internal_arcs(plan):
+    """The arcs the writer means to emit: the planner's arc moves, with the
+    canonical <= 90 deg pieces of one circle re-joined the way the writer does
+    it (GCodeWriter._merge_arc_pieces; arc phase 0)."""
     moves = []
     for group in (plan.roughing_passes, plan.cleanup_passes, plan.finish_passes):
         for p in group or []:
-            moves.extend(m for m in p.moves
+            ms = list(p.moves)
+            if ms:
+                ms = ms[:1] + GCodeWriter._merge_arc_pieces(ms[1:], (ms[0].x, ms[0].z))
+            moves.extend(m for m in ms
                          if m.move_type in (MoveType.ARC_CW, MoveType.ARC_CCW))
     return moves
 
