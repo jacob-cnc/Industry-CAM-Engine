@@ -122,6 +122,21 @@ def validate_profile(profile: ClosedProfile, stock: StockDef) -> List[Validation
                 location=(seg.x, seg.z),
             ))
 
+        # Quadrant arc: a true circular quarter (geometry/arc_entry.py)
+        if seg.segment_type == SegmentType.ARC and seg.quadrant:
+            from geometry.arc_entry import quadrant_problem
+            problem = quadrant_problem(prev_x, prev_z, seg.x, seg.z)
+            if problem is None and abs(seg.x - prev_x) < 2e-5:
+                problem = "A same-X quadrant arc here would cross the centreline; check the end points."
+            if problem:
+                results.append(ValidationResult(
+                    severity=Severity.ERROR,
+                    category="geometry",
+                    message=f"Segment {i+1} (Q arc): {problem}",
+                    recommendation="Use end points with equal X (radius) and Z changes, or a radius.",
+                    location=(seg.x, seg.z),
+                ))
+
         # Arc validation
         if seg.segment_type == SegmentType.ARC and seg.radius != 0.0:
             # Compute chord length between previous endpoint and this endpoint

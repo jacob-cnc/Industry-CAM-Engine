@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import List, Tuple, Optional
 
 from build123d import (
-    BuildSketch, BuildLine, Line, RadiusArc, Spline, Vector, make_face, Sketch,
+    BuildSketch, BuildLine, Line, RadiusArc, Spline, ThreePointArc, Vector, make_face, Sketch,
     Axis, Mode, Kind,
 )
 from OCP.BRep import BRep_Tool
@@ -415,9 +415,8 @@ def _build_face_from_coords(coords: List[dict], profile: ClosedProfile, *, close
       Build123d RadiusArc sign = which side of chord center goes on
       These conventions align: pass target["radius"] directly (no sign flip).
 
-    Quadrant arc segments (quarter ellipse) are handled based on alignment:
-    - Axis-aligned (same X or same Z within tolerance) → RadiusArc (true circular arc)
-    - Off-axis (both X and Z differ) → Spline with tangent constraints (elliptical)
+    Quadrant arc segments (Q / -Q) are true circular quarters (ThreePointArc);
+    see geometry/arc_entry.py.
     """
     import math
     from models.constants import TOLERANCE
@@ -440,57 +439,20 @@ def _build_face_from_coords(coords: List[dict], profile: ClosedProfile, *, close
                     continue
 
                 if target.get("quadrant", False):
-                    # Tangent-bounded quadrant arc: classify as axis-aligned or off-axis
-                    # Axis-aligned: start and end share same X or same Z (within TOLERANCE)
-                    # Off-axis: both X and Z differ beyond tolerance
-                    same_x = abs(cx - tx) < TOLERANCE
-                    same_z = abs(cz - tz) < TOLERANCE
-                    is_axis_aligned = same_x or same_z
-
+                    # Circular quadrant arc (geometry/arc_entry.py): a true quarter
+                    # circle centred on the bounding-box corner, built through the
+                    # exact end points. Ellipses are retired (owner, 2026-11-11);
+                    # same-X quadrants are split into two by normalize_profile
+                    # before they get here.
+                    from geometry.arc_entry import quadrant_mid, quadrant_problem
                     quadrant_sign = target.get("quadrant_sign", 1)
-
-                    # All quadrant arcs: use polyline from parametric ellipse math.
-                    # Even axis-aligned cases use polyline to avoid OCCT offset_2d
-                    # failures with RadiusArc at certain geometries.
-                    import math as _math
-                    dx = tx - cx
-                    dz = tz - cz
-                    b = abs(dx) if abs(dx) > 1e-10 else 0.0
-                    a = abs(dz) if abs(dz) > 1e-10 else 0.0
-
-                    if b < 1e-10 or a < 1e-10:
-                        # Truly axis-aligned (one delta is zero) → straight line
-                        # (bounding box has zero width in one dimension)
-                        Line((cx, cz), (tx, tz))
-                    else:
-                        if quadrant_sign == 1:
-                            ecx = cx
-                            ecz = tz
-                            sign_x = 1.0 if dx > 0 else -1.0
-                            sign_z = -1.0 if dz > 0 else 1.0
-                        else:
-                            ecx = tx
-                            ecz = cz
-                            sign_x = -1.0 if dx > 0 else 1.0
-                            sign_z = 1.0 if dz > 0 else -1.0
-
-                        num_pts = 64
-                        points = []
-                        for j in range(num_pts + 1):
-                            t = (_math.pi / 2.0) * j / num_pts
-                            if quadrant_sign == 1:
-                                px = ecx + sign_x * b * _math.sin(t)
-                                pz = ecz + sign_z * a * _math.cos(t)
-                            else:
-                                px = ecx + sign_x * b * _math.cos(t)
-                                pz = ecz + sign_z * a * _math.sin(t)
-                            points.append((px, pz))
-
-                        for j in range(len(points) - 1):
-                            p1 = points[j]
-                            p2 = points[j + 1]
-                            if abs(p1[0] - p2[0]) > 1e-10 or abs(p1[1] - p2[1]) > 1e-10:
-                                Line((p1[0], p1[1]), (p2[0], p2[1]))
+                    problem = quadrant_problem(2 * cx, cz, 2 * tx, tz)
+                    if problem is None and abs(cx - tx) < 1e-5:
+                        problem = ("A same-X quadrant arc must be split into two quadrants "
+                                   "(geometry/arc_entry.normalize_profile).")
+                    if problem:
+                        raise ValueError(problem)
+                    ThreePointArc((cx, cz), quadrant_mid((cx, cz), (tx, tz), quadrant_sign), (tx, tz))
 
                 elif target["type"] == SegmentType.ARC and target.get("radius", 0.0) != 0.0:
                     # Arc segment: pass signed radius directly to Build123d.

@@ -99,7 +99,7 @@ class TestQuadrantArcKernelPoints:
         """Points should form a smooth curve (no large jumps between consecutive points)."""
         points = _quadrant_arc_kernel_points(
             x_start_r=0.25, z_start=0.0,
-            x_end_r=0.5, z_end=-0.75,
+            x_end_r=0.5, z_end=-0.25,
             quadrant_sign=1, num_points=48,
         )
         max_step = 0
@@ -117,7 +117,7 @@ class TestQuadrantArcKernelPoints:
         # Standard convex Q going from face (small X, Z=0) to OD
         points = _quadrant_arc_kernel_points(
             x_start_r=0.25, z_start=0.0,
-            x_end_r=0.5, z_end=-0.5,
+            x_end_r=0.5, z_end=-0.25,
             quadrant_sign=1, num_points=32,
         )
         # X should be monotonically non-decreasing

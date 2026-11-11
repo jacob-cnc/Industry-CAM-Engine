@@ -44,144 +44,33 @@ def _quadrant_arc_kernel_points(
     x_end_r: float, z_end: float,
     quadrant_sign: int = 1,
     num_points: int = 48,
+    mode_od: bool = True,
 ) -> list:
-    """Construct a quadrant arc as display points using parametric ellipse math.
+    """Display points for a Q / -Q arc: a true circular quarter (ellipses are
+    retired, owner 2026-11-11; geometry/arc_entry.py is the single definition).
 
-    The quadrant arc is a quarter ellipse inscribed in the bounding box defined
-    by the start and end points. ALL points on the curve must lie within this
-    bounding box — this is the defining constraint of a tangent-bounded arc.
-
-    For +Q (convex):
-        Center at (x_start_r, z_end) — the bounding box corner where
-        the start's X column meets the end's Z row.
-        x(t) = center_x + sign_x * b * sin(t)   [b = |dx|]
-        z(t) = center_z + sign_z * a * cos(t)   [a = |dz|]
-        At t=0: point = start (tangent purely in X direction)
-        At t=π/2: point = end (tangent purely in Z direction)
-
-    For -Q (concave):
-        Center at (x_end_r, z_start) — the opposite bounding box corner.
-        Same parametric form with swapped center and adjusted signs.
-
-    Args:
-        x_start_r: Start X in radius units
-        z_start: Start Z in inches
-        x_end_r: End X in radius units
-        z_end: End Z in inches
-        quadrant_sign: +1 for convex (Q), -1 for concave (-Q)
-        num_points: Number of display points to sample
-
-    Returns:
-        List of (x_r, z) tuples from start to end along the quarter ellipse.
+    +Q: centre (x_start_r, z_end), leaves radially, arrives along Z.
+    -Q: centre (x_end_r, z_start), leaves along Z, arrives radially.
+    Same X: drawn as the two quadrants it will be cut as (+Q bulges toward the
+    tool: OD outward, ID into the bore). Same Z or unequal legs are invalid (the
+    row is flagged); they are drawn through the end points as a guide only.
+    Points are (x_r, z) from start to end; the end points are exact.
     """
-    import math
-    from models.constants import TOLERANCE
+    from geometry.arc_entry import SAME_TOL, quadrant_points
 
-    dx = x_end_r - x_start_r
-    dz = z_end - z_start
-
-    # Degenerate case: both deltas near zero → straight line
-    if abs(dx) < TOLERANCE and abs(dz) < TOLERANCE:
-        return [(x_start_r, z_start), (x_end_r, z_end)]
-
-    # Axis-aligned degenerate: one delta is zero → straight line
-    if abs(dx) < TOLERANCE or abs(dz) < TOLERANCE:
-        # For truly axis-aligned, the "ellipse" collapses to a line along one axis.
-        # Use a circular arc via RadiusArc for proper curvature.
-        axis_aligned_x = abs(dx) < TOLERANCE
-        try:
-            from build123d import RadiusArc
-            from OCP.BRepAdaptor import BRepAdaptor_Curve
-
-            arc_radius = abs(dz) if axis_aligned_x else abs(dx)
-            # For +Q convex axis-aligned: arc curves INTO the bounding box
-            # For -Q concave: arc curves AWAY (but stays in bounds for quarter-arc)
-            # The RadiusArc sign must produce an arc that stays within bounds.
-            # Negative radius = arc center on one side, positive = other side.
-            # We need the arc to bulge toward the bounding box interior.
-            #
-            # For same-X (vertical chord): bounding box extends in X on one side.
-            #   +Q wants the arc to NOT extend beyond [x_start, x_end] in X.
-            #   Since x_start == x_end, the arc can only go left or right.
-            #   +Q (convex on a lathe profile): arc should NOT extend outward.
-            #   Actually for axis-aligned same-X, this is just a straight line
-            #   since the bounding box has zero width in X.
-            # Wait — if same X, the bounding box has zero X extent, so ANY
-            # curvature would violate bounds. Return a straight line.
-            if axis_aligned_x:
-                return [(x_start_r, z_start + dz * i / num_points)
-                        for i in range(num_points + 1)]
-            else:
-                return [(x_start_r + dx * i / num_points, z_start)
-                        for i in range(num_points + 1)]
-        except Exception:
-            if axis_aligned_x:
-                return [(x_start_r, z_start + dz * i / num_points)
-                        for i in range(num_points + 1)]
-            else:
-                return [(x_start_r + dx * i / num_points, z_start)
-                        for i in range(num_points + 1)]
-
-    # Off-axis: true quarter ellipse using parametric math
-    # This is the proven approach from interpolate_quadrant_arc — always in bounds.
-    b = abs(dx)  # semi-axis along X
-    a = abs(dz)  # semi-axis along Z
-
-    if quadrant_sign == 1:
-        # Convex (+Q): center at (x_start_r, z_end)
-        # At t=0: x = cx, z = cz + sign_z*a = z_start → sign_z = (z_start - z_end) / a
-        # At t=π/2: x = cx + sign_x*b = x_end_r → sign_x = (x_end_r - x_start_r) / b
-        cx = x_start_r
-        cz = z_end
-        sign_x = 1.0 if dx > 0 else -1.0
-        sign_z = -1.0 if dz > 0 else 1.0
-    else:
-        # Concave (-Q): center at (x_end_r, z_start)
-        # At t=0: x = cx + sign_x*b*sin(0) = cx, z = cz + sign_z*a*cos(0) = z_start
-        # → cz + sign_z*a = z_start → sign_z*a = z_start - z_start = 0???
-        # No — for concave, the parametrization is different.
-        # At t=0: point = start → x_start = cx + sign_x*b*sin(0) = cx → cx = x_start??? 
-        # That doesn't work either. Let me think about this differently.
-        #
-        # For -Q: same endpoints, but the arc curves the other way.
-        # The center is at the OPPOSITE bounding box corner: (x_end_r, z_start)
-        # At t=0: (x_start_r, z_start) — tangent is along Z
-        # At t=π/2: (x_end_r, z_end) — tangent is along X
-        #
-        # x(t) = cx + sign_x * b * cos(t)  [note: cos not sin — tangent at start is Z]
-        # z(t) = cz + sign_z * a * sin(t)
-        # At t=0: x = cx + sign_x*b = x_start → sign_x = (x_start - x_end) / b
-        # At t=π/2: z = cz + sign_z*a = z_end → sign_z = (z_end - z_start) / a
-        cx = x_end_r
-        cz = z_start
-        sign_x = -1.0 if dx > 0 else 1.0  # opposite of dx direction
-        sign_z = 1.0 if dz < 0 else -1.0  # opposite of what +Q does... 
-
-        # Actually let me just use a clean formulation:
-        # For -Q, swap start/end tangent behavior:
-        # x(t) = cx + sign_x * b * cos(t)
-        # z(t) = cz + sign_z * a * sin(t)
-        # At t=0: x(0) = cx + sign_x*b should = x_start
-        #   sign_x*b = x_start - cx = x_start - x_end = -dx
-        #   sign_x = -dx / b = -dx / |dx|
-        sign_x = -1.0 if dx > 0 else 1.0
-        # At t=π/2: z(π/2) = cz + sign_z*a should = z_end
-        #   sign_z*a = z_end - cz = z_end - z_start = dz
-        #   sign_z = dz / a = dz / |dz|
-        sign_z = 1.0 if dz > 0 else -1.0
-
-    points = []
-    for i in range(num_points + 1):
-        t = (math.pi / 2.0) * i / num_points
-        if quadrant_sign == 1:
-            x = cx + sign_x * b * math.sin(t)
-            z = cz + sign_z * a * math.cos(t)
-        else:
-            x = cx + sign_x * b * math.cos(t)
-            z = cz + sign_z * a * math.sin(t)
-        points.append((x, z))
-
-    return points
+    p0, p1 = (x_start_r, z_start), (x_end_r, z_end)
+    dx, dz = x_end_r - x_start_r, z_end - z_start
+    if abs(dx) < SAME_TOL and abs(dz) < SAME_TOL:
+        return [p0, p1]
+    if abs(dz) < SAME_TOL:
+        return [(x_start_r + dx * i / num_points, z_start) for i in range(num_points + 1)]
+    if abs(dx) < SAME_TOL:
+        R = abs(dz) / 2.0
+        out = 1.0 if (quadrant_sign > 0) == mode_od else -1.0
+        apex = (x_start_r + out * R, z_start + dz / 2.0)
+        half = max(2, num_points // 2)
+        return quadrant_points(p0, apex, 1, half) + quadrant_points(apex, p1, -1, half)[1:]
+    return quadrant_points(p0, p1, quadrant_sign, num_points)
 
 
 class ProgramState(Enum):
@@ -1142,9 +1031,52 @@ class ProgramTab(QWidget):
             self._finish_doc.setToolTip(str(exc))
 
     def _on_segment_selection_changed(self, seg_index: int):
-        """Segment selection changed in the builder — highlight on graph."""
+        """Segment selection changed in the builder — highlight on graph.
+
+        Leaving an arc row that is two pieces (same X start and end, or bulging
+        past its end diameters) splits it into two rows, so the list shows what
+        will be cut (geometry/arc_entry.py; owner decision 2026-11-11). Done on
+        leaving the row, never while typing in it. Generation splits anyway."""
+        left = self._selected_segment_index
         self._selected_segment_index = seg_index
+        if left >= 0 and left != seg_index and self._split_arc_row(left, seg_index):
+            return
         self._update_preview()
+
+    def _with_split_note(self, text: str, state) -> str:
+        """Status text plus the last arc-split note while editing (cleared by
+        Generate), so the operator sees why a row became two."""
+        notes = getattr(self, "_arc_split_notes", [])
+        if notes and state in (ProgramState.BUILDING, ProgramState.READY):
+            n = len(notes)
+            return f"{text} — arc{'s' if n > 1 else ''} split into two (hover for details)"
+        return text
+
+    def _split_arc_row(self, row_index: int, then_select: int) -> bool:
+        """Split segment row `row_index` if it is a two-piece arc. Deferred to
+        the event loop (we are inside the table's selection signal)."""
+        from geometry.arc_entry import split_rows
+        segs = self._segment_list.get_segments()
+        if not (0 < row_index < len(segs)):
+            return False
+        new_segs, new_breaks, notes = split_rows(
+            segs, self._segment_list.get_corner_breaks(), self._get_machining_mode(),
+            only=row_index)
+        if not notes:
+            return False
+        target = then_select + 1 if then_select > row_index else then_select
+
+        def apply():
+            self._selected_segment_index = target
+            self._segment_list.set_segments(new_segs, new_breaks)
+            if target >= 0:
+                self._segment_list.select_segment(target)
+            self._arc_split_notes = list(notes)
+            self._status_label.setText(self._with_split_note(self._status_label.text(), self._state))
+            self._status_label.setToolTip("\n\n".join(notes))
+            self._update_preview()
+        QTimer.singleShot(0, apply)
+        return True
 
     def _on_peck_toggled(self, checked: bool):
         """Enable/disable peck length field based on checkbox."""
@@ -1184,6 +1116,7 @@ class ProgramTab(QWidget):
             # Generate each block — collect G-code sections and the first plan_result
             all_gcode_sections = []
             self._generate_notes = []
+            self._arc_split_notes = []
             first_plan_result = None
             prev_tool_number = None
             writer = GCodeWriter()
@@ -1630,7 +1563,7 @@ class ProgramTab(QWidget):
             ProgramState.DISPLAYING: "Toolpath ready — use playback controls",
             ProgramState.PLAYING: "Playing...",
         }
-        self._status_label.setText(status_messages.get(state, ""))
+        self._status_label.setText(self._with_split_note(status_messages.get(state, ""), state))
 
         # Generate button text during generation
         if state == ProgramState.GENERATING:
@@ -2460,11 +2393,11 @@ class ProgramTab(QWidget):
                         # else: angle too small, skip fillet
 
             if seg_type == "arc" and radius in ("Q", "-Q"):
-                # Tangent-bounded quadrant arc — use Build123d kernel geometry
-                # and parametric sampling for display points (single source of truth).
+                # Circular quadrant arc (geometry/arc_entry.py).
                 quadrant_sign = -1 if radius == "-Q" else 1
                 points = _quadrant_arc_kernel_points(
-                    trim_start_x, trim_start_z, x_r, z, quadrant_sign
+                    trim_start_x, trim_start_z, x_r, z, quadrant_sign,
+                    mode_od=(self._get_machining_mode().lower() != "id"),
                 )
                 if not current_z:
                     current_x.append(points[0][0])
@@ -2790,7 +2723,7 @@ class ProgramTab(QWidget):
 
         # All fields valid — clear error display
         if self._state == ProgramState.BUILDING:
-            self._status_label.setText("Editing parameters...")
+            self._status_label.setText(self._with_split_note("Editing parameters...", self._state))
             self._status_label.setStyleSheet(
                 f"color: {COLORS['text_secondary']}; font-size: {FONTS['small_size']}pt;"
             )

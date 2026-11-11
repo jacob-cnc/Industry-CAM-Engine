@@ -72,6 +72,12 @@ def execute(
     start_time = time.time()
     all_validations: List[ValidationResult] = []
 
+    # Arcs that are two pieces (same-X arcs, arcs past their own X extreme) are
+    # split here, so every later step sees <= one-quadrant entry arcs
+    # (geometry/arc_entry.py). Idempotent: profile_from_fields already did it.
+    from geometry.arc_entry import normalize_profile
+    profile = normalize_profile(profile)
+
     # Step 1: Pre-planning validation
     pre_results = validate_profile(profile, stock)
     all_validations.extend(pre_results)

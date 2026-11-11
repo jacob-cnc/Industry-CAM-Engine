@@ -282,4 +282,7 @@ def profile_from_fields(segments: List[dict], mode: str, corner_breaks=None) -> 
         z_end=min(float(seg.get("z", 0.0)) for seg in segments),
     )
 
-    return profile
+    # Same-X arcs and arcs past their own X extreme are two pieces
+    # (geometry/arc_entry.py, owner decision 2026-11-11).
+    from geometry.arc_entry import normalize_profile
+    return normalize_profile(profile)

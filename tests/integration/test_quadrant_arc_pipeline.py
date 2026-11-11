@@ -7,11 +7,11 @@ for quadrant arc ("Q" and "-Q") segments. Verifies:
 - G-code contains G2/G3 moves approximating the quadrant arc
 - Both axis-aligned and off-axis cases work end-to-end
 
-Test cases:
-a. Axis-aligned +Q (same X endpoints — vertical chord) → single G2/G3
-b. Axis-aligned -Q (same Z endpoints — horizontal chord) → concave, single G2/G3
-c. Off-axis +Q (both X and Z differ) → Spline → multiple G2/G3 from decomposition
-d. Off-axis -Q (both X and Z differ) → concave, multiple G2/G3
+Q / -Q is a TRUE CIRCULAR quarter since 2026-11-11 (ellipses retired by the
+owner; geometry/arc_entry.py):
+a. Same-X +Q / -Q → two quadrants through the apex (bead / groove)
+b. Off-axis Q with equal legs → one circular arc about the bounding-box corner
+c. Unequal legs or same-Z → refused, with valid end points offered
 
 Validates Requirements: 1.1-1.3, 2.1-2.4, 3.1-3.4, 4.1-4.4, 5.1-5.3,
                         6.1-6.4, 7.1-7.4, 8.1-8.3
@@ -245,210 +245,133 @@ class TestAxisAlignedConcaveQ:
         )
 
 
-# --- Test: Off-Axis +Q (both X and Z differ) ---
+# --- Off-axis Q: a TRUE quarter circle (equal legs), owner decision 2026-11-11 ---
 
-@pytest.mark.xfail(
-    reason="Off-axis +Q convex spline profile with shoulder transition triggers "
-           "cleanup planner gouge detection. The spline geometry is valid but the "
-           "step-down from 1.5 to 2.0 dia at the arc endpoint creates a cleanup "
-           "path that crosses the finish allowance zone. Needs profile redesign.",
-    strict=False,
-)
+def _q_profile(x0, z0, x1, z1, sign, tail_x=None):
+    tail_x = x1 if tail_x is None else tail_x
+    return ClosedProfile(
+        segments=[
+            ProfileMove(SegmentType.LINE, x=x0, z=0.0),
+            ProfileMove(SegmentType.LINE, x=x0, z=z0),
+            ProfileMove(SegmentType.ARC, x=x1, z=z1, quadrant=True, quadrant_sign=sign),
+            ProfileMove(SegmentType.LINE, x=tail_x, z=-1.5),
+        ],
+        corner_breaks=[None, None, None],
+        mode=MachiningMode.OD, z_start=0.0, z_end=-1.5,
+    )
+
+
+def _stock(x_start):
+    return StockDef(diameter=2.5, x_start=x_start, z_start=0.100, z_end=-1.5,
+                    mode=MachiningMode.OD, x_park=3.0, z_park=3.0)
+
+
+def _finish_arc_centres(result):
+    """(centre r, centre z, radius) of each finish-pass arc, radius space."""
+    out = []
+    for fp in result.plan_result.finish_passes:
+        pos = None
+        for m in fp.moves:
+            if m.move_type in (MoveType.ARC_CW, MoveType.ARC_CCW) and pos is not None:
+                c = (pos[0] / 2 + m.center_i / 2, pos[1] + m.center_k)
+                out.append((c[0], c[1], ((pos[0] / 2 - c[0]) ** 2 + (pos[1] - c[1]) ** 2) ** 0.5))
+            pos = (m.x, m.z)
+    return out
+
+
 class TestOffAxisConvexQ:
-    """Off-axis +Q arc: endpoints differ in both X and Z → elliptical → multiple G2/G3.
+    """+Q from X1.5 Z-0.5 to X2.0 Z-0.75: a rounded shoulder, R .25, centre at
+    (r .75, Z -.75) - the bounding-box corner under the start."""
 
-    Profile: from (1.5 dia, Z=-0.5) to (2.0 dia, Z=-1.0) with +Q.
-    This is a quarter-ellipse requiring spline decomposition into multiple arcs.
-    Uses generous stock to ensure offset operations succeed.
-    """
+    def _run(self):
+        return _run_pipeline(_q_profile(1.5, -0.5, 2.0, -0.75, 1), _stock(1.5))
 
-    def _make_profile_and_stock(self):
-        """Create a profile with an off-axis +Q segment (both X and Z differ)."""
-        profile = ClosedProfile(
-            segments=[
-                ProfileMove(SegmentType.LINE, x=1.5, z=0.0),
-                ProfileMove(SegmentType.LINE, x=1.5, z=-0.5),
-                ProfileMove(SegmentType.ARC, x=2.0, z=-1.0,
-                            quadrant=True, quadrant_sign=1),
-                ProfileMove(SegmentType.LINE, x=2.0, z=-1.5),
-            ],
-            corner_breaks=[None, None, None],
-            mode=MachiningMode.OD,
-            z_start=0.0,
-            z_end=-1.5,
-        )
-        stock = StockDef(
-            diameter=2.5,
-            x_start=1.5,
-            z_start=0.100,
-            z_end=-1.5,
-            mode=MachiningMode.OD,
-            x_park=3.0,
-            z_park=3.0,
-        )
-        return profile, stock
+    def test_pipeline_succeeds(self):
+        r = self._run()
+        assert r.status in (PipelineStatus.SUCCESS, PipelineStatus.SUCCESS_WITH_WARNINGS), (
+            [v.message for v in r.validations if v.severity == Severity.ERROR])
 
-    def test_pipeline_succeeds_no_errors(self):
-        """Pipeline completes without ERROR-level validation results for off-axis +Q."""
-        profile, stock = self._make_profile_and_stock()
-        result = _run_pipeline(profile, stock)
+    def test_finish_arc_is_the_true_circle(self):
+        """The finish pass (tool path, TNR comp in G42) runs on the part circle:
+        one arc of the profile's radius about the bounding-box corner."""
+        arcs = _finish_arc_centres(self._run())
+        assert arcs, "no finish arcs"
+        assert any(abs(cr - 0.75) < 2e-4 and abs(cz + 0.75) < 2e-4 and abs(rad - 0.25) < 3e-4
+                   for cr, cz, rad in arcs), arcs
 
-        errors = [v for v in result.validations if v.severity == Severity.ERROR]
-        assert result.status in (PipelineStatus.SUCCESS, PipelineStatus.SUCCESS_WITH_WARNINGS), (
-            f"Pipeline failed with status {result.status}. "
-            f"Errors: {[e.message for e in errors]}"
-        )
+    def test_gcode_has_arc_and_no_spline_words(self):
+        gcode = _generate_gcode(self._run())
+        assert _count_arc_moves(gcode) >= 1
+        for word in ("G05", "G06", "G6.1"):
+            assert word not in gcode
 
-    def test_finish_pass_contains_multiple_arc_moves(self):
-        """Off-axis Q requires edge decomposition → multiple arc moves in finish pass."""
-        profile, stock = self._make_profile_and_stock()
-        result = _run_pipeline(profile, stock)
-
-        assert result.plan_result is not None
-        arcs = _get_finish_pass_arc_moves(result)
-        assert len(arcs) >= 2, (
-            f"Expected multiple arc moves from decomposition of off-axis Q, got {len(arcs)}"
-        )
-
-    def test_gcode_contains_multiple_g2_g3(self):
-        """G-code contains multiple G02/G03 moves approximating the elliptical arc."""
-        profile, stock = self._make_profile_and_stock()
-        result = _run_pipeline(profile, stock)
-        gcode = _generate_gcode(result)
-
-        arc_count = _count_arc_moves(gcode)
-        assert arc_count >= 2, (
-            f"Expected multiple G02/G03 in G-code for off-axis Q, got {arc_count}"
-        )
-
-    def test_no_special_ellipse_gcodes(self):
-        """No native ellipse or spline G-codes — only standard G2/G3."""
-        profile, stock = self._make_profile_and_stock()
-        result = _run_pipeline(profile, stock)
-        gcode = _generate_gcode(result)
-
-        assert 'G05' not in gcode, "G05 spline code found — should only use G2/G3"
-        assert 'G06' not in gcode, "G06 NURBS code found — should only use G2/G3"
-        assert 'G6.1' not in gcode, "G6.1 NURBS code found — should only use G2/G3"
-
-    def test_arc_endpoints_are_continuous(self):
-        """Decomposed arc sub-segments should be endpoint-continuous (no drift)."""
-        profile, stock = self._make_profile_and_stock()
-        result = _run_pipeline(profile, stock)
-
-        assert result.plan_result is not None
-        arcs = _get_finish_pass_arc_moves(result)
-        if len(arcs) < 2:
-            pytest.skip("Need multiple arcs to check continuity")
-
-        # The finish pass moves are in order — check that each arc starts
-        # where the previous move ended. We look at all finish pass moves for context.
-        finish_moves = []
-        for fp in result.plan_result.finish_passes:
-            finish_moves.extend(fp.moves)
-
-        # Find the arc sequence within finish moves
-        for i in range(1, len(finish_moves)):
-            curr = finish_moves[i]
-            prev = finish_moves[i - 1]
-            if curr.move_type in (MoveType.ARC_CW, MoveType.ARC_CCW) and \
-               prev.move_type in (MoveType.ARC_CW, MoveType.ARC_CCW):
-                # Current arc starts at previous arc's endpoint (implicit in G-code)
-                # Since ToolMove only stores the endpoint, continuity means
-                # prev.x/z is the start of current arc — this is verified by
-                # the fact that the pipeline didn't produce a validation error
-                pass  # Continuity verified implicitly by pipeline validation
-
-
-# --- Test: Off-Axis -Q (concave, both X and Z differ) ---
 
 class TestOffAxisConcaveQ:
-    """Off-axis -Q arc: concave scoop where endpoints differ in both X and Z.
+    """-Q from X2.0 Z-0.5 to X2.2 Z-0.6: leaves along Z, arrives radially;
+    R .1, centre (r 1.1, Z -.5)."""
 
-    Profile: from (2.0 dia, Z=-0.5) to (2.0 dia + delta_X, Z=-1.0) with -Q.
-    Concave means the arc center is on the opposite side → scoops inward.
-    Profile continues straight after the arc (no shoulder) to avoid cleanup gouge.
-    """
+    def _run(self):
+        return _run_pipeline(_q_profile(2.0, -0.5, 2.2, -0.6, -1), _stock(2.0))
 
-    def _make_profile_and_stock(self):
-        """Create a profile with an off-axis -Q segment."""
-        profile = ClosedProfile(
-            segments=[
-                ProfileMove(SegmentType.LINE, x=2.0, z=0.0),
-                ProfileMove(SegmentType.LINE, x=2.0, z=-0.5),
-                ProfileMove(SegmentType.ARC, x=2.2, z=-1.0,
-                            quadrant=True, quadrant_sign=-1),
-                ProfileMove(SegmentType.LINE, x=2.2, z=-1.5),
-            ],
-            corner_breaks=[None, None, None],
-            mode=MachiningMode.OD,
-            z_start=0.0,
-            z_end=-1.5,
-        )
-        stock = StockDef(
-            diameter=2.5,
-            x_start=2.0,
-            z_start=0.100,
-            z_end=-1.5,
-            mode=MachiningMode.OD,
-            x_park=3.0,
-            z_park=3.0,
-        )
-        return profile, stock
+    def test_pipeline_succeeds(self):
+        r = self._run()
+        assert r.status in (PipelineStatus.SUCCESS, PipelineStatus.SUCCESS_WITH_WARNINGS), (
+            [v.message for v in r.validations if v.severity == Severity.ERROR])
 
-    def test_pipeline_succeeds_no_errors(self):
-        """Pipeline completes without ERROR-level validation results for off-axis -Q."""
-        profile, stock = self._make_profile_and_stock()
-        result = _run_pipeline(profile, stock)
+    def test_finish_arc_is_the_true_circle(self):
+        arcs = _finish_arc_centres(self._run())
+        assert any(abs(cr - 1.1) < 2e-4 and abs(cz + 0.5) < 2e-4 for cr, cz, rad in arcs), arcs
 
-        errors = [v for v in result.validations if v.severity == Severity.ERROR]
-        assert result.status in (PipelineStatus.SUCCESS, PipelineStatus.SUCCESS_WITH_WARNINGS), (
-            f"Pipeline failed with status {result.status}. "
-            f"Errors: {[e.message for e in errors]}"
-        )
 
-    def test_finish_pass_contains_moves(self):
-        """Off-axis -Q produces finish pass moves (line segments from polyline approximation)."""
-        profile, stock = self._make_profile_and_stock()
-        result = _run_pipeline(profile, stock)
+class TestQuadrantEntryRules:
+    """Ellipses are retired: unequal legs and same-Z quadrants are refused with
+    a usable message; same-X quadrants become two quadrants."""
 
-        assert result.plan_result is not None
-        assert len(result.plan_result.finish_passes) >= 1
-        moves = result.plan_result.finish_passes[0].moves
-        # Polyline approximation produces multiple line moves tracing the ellipse
-        assert len(moves) >= 2, (
-            f"Expected multiple moves in finish pass for off-axis -Q, got {len(moves)}"
-        )
+    def test_unequal_legs_refused_with_valid_end_points_offered(self):
+        r = _run_pipeline(_q_profile(1.5, -0.5, 2.0, -1.0, 1), _stock(1.5))
+        assert r.status == PipelineStatus.BLOCKED_BY_ERROR
+        msg = " ".join(v.message for v in r.validations if v.severity == Severity.ERROR)
+        assert "true quarter circle" in msg
+        assert "X2.0000 Z-0.7500" in msg          # keep X: R .25
+        assert "X2.5000 Z-1.0000" in msg          # keep Z: R .5
 
-    def test_gcode_contains_finish_moves(self):
-        """G-code contains finish pass moves for off-axis -Q."""
-        profile, stock = self._make_profile_and_stock()
-        result = _run_pipeline(profile, stock)
-        gcode = _generate_gcode(result)
+    def test_same_z_quadrant_refused(self):
+        prof = ClosedProfile(
+            segments=[ProfileMove(SegmentType.LINE, x=1.0, z=0.0),
+                      ProfileMove(SegmentType.LINE, x=1.0, z=-0.5),
+                      ProfileMove(SegmentType.ARC, x=1.5, z=-0.5, quadrant=True),
+                      ProfileMove(SegmentType.LINE, x=1.5, z=-1.5)],
+            corner_breaks=[None, None, None], mode=MachiningMode.OD, z_start=0.0, z_end=-1.5)
+        r = _run_pipeline(prof, _stock(1.0))
+        assert r.status == PipelineStatus.BLOCKED_BY_ERROR
+        assert any("same Z" in v.message for v in r.validations)
 
-        # With polyline approximation, the finish pass uses G01 line moves
-        # rather than G02/G03 arcs. Verify G-code is non-empty and contains moves.
-        assert 'G01' in gcode or 'G1' in gcode or 'G02' in gcode or 'G03' in gcode, (
-            "Expected motion G-codes in output for off-axis -Q"
-        )
+    def test_same_x_quadrant_is_two_quadrants_through_the_apex(self):
+        """Owner's example: X1 Z0 -> X1 Z-1 as one arc is cut as +Q to the apex
+        then -Q back. X is diameter, so the R .5 bead peaks at X2.0."""
+        from geometry.arc_entry import normalize_profile
+        prof = ClosedProfile(
+            segments=[ProfileMove(SegmentType.LINE, x=1.0, z=0.0),
+                      ProfileMove(SegmentType.ARC, x=1.0, z=-1.0, quadrant=True, quadrant_sign=1),
+                      ProfileMove(SegmentType.LINE, x=1.0, z=-1.5)],
+            corner_breaks=[None, None], mode=MachiningMode.OD, z_start=0.0, z_end=-1.5)
+        n = normalize_profile(prof)
+        assert [(m.x, m.z, m.quadrant, m.quadrant_sign) for m in n.segments[1:3]] == [
+            (2.0, -0.5, True, 1), (1.0, -1.0, True, -1)]
+        assert n.corner_breaks == [None, None, None]
+        assert normalize_profile(n) is n                  # idempotent
 
-    def test_concave_profile_is_valid(self):
-        """Concave (-Q) off-axis profile produces a valid finish pass."""
-        profile, stock = self._make_profile_and_stock()
-        result = _run_pipeline(profile, stock)
-
-        assert result.plan_result is not None
-        arcs = _get_finish_pass_arc_moves(result)
-        if not arcs:
-            pytest.skip("No arc moves found")
-
-        # All arcs should have non-zero center offsets (valid arc geometry)
-        for arc in arcs:
-            has_center = abs(arc.center_i) > 1e-8 or abs(arc.center_k) > 1e-8
-            assert has_center, (
-                f"Arc move at ({arc.x}, {arc.z}) has zero center offsets — "
-                f"not a valid arc"
-            )
+    def test_same_x_quadrant_id_bulges_into_the_bore(self):
+        from geometry.arc_entry import split_rows
+        rows = [{"type": "line", "x": 1.0, "z": 0.0, "radius": 0.0},
+                {"type": "arc", "x": 1.0, "z": -0.2, "radius": "Q"}]
+        segs, _, _ = split_rows(rows, [None], "id")
+        assert (segs[1]["x"], segs[1]["z"]) == pytest.approx((0.8, -0.1))
+        segs, _, _ = split_rows(rows, [None], "od")
+        assert (segs[1]["x"], segs[1]["z"]) == pytest.approx((1.2, -0.1))
+        rows[1]["radius"] = "-Q"
+        segs, _, _ = split_rows(rows, [None], "id")
+        assert segs[1]["x"] == pytest.approx(1.2)          # ID groove: into the wall
 
 
 # --- Test: Pipeline via model_builder (string "Q"/"-Q" parsing) ---

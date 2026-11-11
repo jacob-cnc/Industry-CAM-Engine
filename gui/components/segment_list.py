@@ -200,7 +200,9 @@ class SegmentListWidget(QWidget):
             header.setSectionResizeMode(col, QHeaderView.Fixed)
         header.setMinimumSectionSize(10)
         r_header = QTableWidgetItem(_radius_symbol_icon(R_ICON_PX), "r")
-        r_header.setToolTip("Radius (+R minor arc / -R major arc, Q / -Q quadrant)")
+        r_header.setToolTip("Radius (signed: +R / -R picks the side), or Q / -Q for a true quarter circle "
+                            "(equal X-radius and Z change). An arc that starts and ends at the same X, or "
+                            "bulges past its end diameters, is split into two arcs when you leave the row.")
         self._table.setHorizontalHeaderItem(COL_RADIUS, r_header)
         self._table.setIconSize(QSize(R_ICON_PX, R_ICON_PX))
         self._r_expanded = False
@@ -526,7 +528,10 @@ class SegmentListWidget(QWidget):
             self._table.setItem(row, COL_Z, z_item)
 
             # Radius column (signed: +R = minor arc, -R = major arc)
-            r_item = QTableWidgetItem(self._format_value(radius))
+            # "Q" / "-Q" (quadrant arc) is stored as text, not a number
+            r_text = (radius.strip().upper() if isinstance(radius, str)
+                      and radius.strip().upper() in ("Q", "-Q") else self._format_value(radius))
+            r_item = QTableWidgetItem(r_text)
             r_item.setFont(self._mono_font)
             r_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self._table.setItem(row, COL_RADIUS, r_item)
@@ -626,6 +631,12 @@ class SegmentListWidget(QWidget):
     def _on_insert(self):
         """Insert button: insert before the number in the '#' box."""
         self.insert_segment_before(self._insert_before.value())
+
+    def select_segment(self, seg_index: int) -> None:
+        """Make logical segment `seg_index` (0-based) the current row."""
+        row = self._segment_index_to_row(seg_index)
+        if row is not None:
+            self._table.setCurrentCell(row, COL_X)
 
     def _segment_index_to_row(self, seg_index: int) -> Optional[int]:
         """Table row of logical segment `seg_index` (0-based), or None."""
@@ -1263,11 +1274,14 @@ class SegmentListWidget(QWidget):
                             f"  Tangent (smooth blend): {tangent_r_disp:.{decimals}f}"
                         )
 
-                # Quadrant arc suggestion (tangent-bounded)
+                # Quadrant arc suggestion: only when it is a true quarter circle
                 delta_x = abs(x_end_r - x_start_r)
                 delta_z = abs(z_val - z_start)
-                if delta_x > 1e-9 and delta_z > 1e-9:
-                    lines.append(f"  Quadrant blend: enter Q (convex) or -Q (concave)")
+                if delta_x > 1e-9 and abs(delta_x - delta_z) <= 2e-4:
+                    lines.append(f"  Quarter circle: enter Q (convex) or -Q (concave)")
+                elif delta_x < 1e-9 and delta_z > 1e-9:
+                    lines.append(f"  Half round: enter Q (bead) or -Q (groove); "
+                                 f"it becomes two quadrants")
 
                 r_item.setToolTip("\n".join(lines))
                 if abs(r_val or 0) < 1e-9:
@@ -1378,9 +1392,18 @@ class SegmentListWidget(QWidget):
 
         r_text = r_item.text().strip().upper()
 
-        # "Q" and "-Q" are always valid (tangent-bounded quadrant arc)
+        # "Q" / "-Q": a true circular quarter, equal X-radius and Z legs
+        # (geometry/arc_entry.py). Same-X is fine: it is cut as two quadrants.
         if r_text in ("Q", "-Q"):
-            return (True, "")
+            try:
+                x_end = self._parse_display_value(self._table.item(row, COL_X).text())
+                z_end = self._parse_display_value(self._table.item(row, COL_Z).text())
+            except (ValueError, AttributeError):
+                return (False, "X and Z must be valid numbers")
+            from geometry.arc_entry import quadrant_problem
+            x_start, z_start = self._get_prev_segment_endpoint(row)
+            problem = quadrant_problem(x_start, z_start, x_end, z_end)
+            return (False, problem) if problem else (True, "")
 
         try:
             radius = self._parse_display_value(r_text)

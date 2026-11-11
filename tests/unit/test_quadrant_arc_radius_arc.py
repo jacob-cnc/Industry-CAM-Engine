@@ -116,110 +116,41 @@ class TestAxisAlignedRadiusArcConstruction:
 
 
 class TestRadiusArcIntegration:
-    """Integration test: verify that _build_face_from_coords actually calls RadiusArc
-    for axis-aligned quadrant arcs and produces a valid face.
-    """
+    """Circular quadrants in _build_face_from_coords (ellipses retired 2026-11-11,
+    geometry/arc_entry.py): an equal-leg Q builds a face; a same-X Q must have
+    been split into two quadrants first, and a same-Z Q is refused."""
 
-    def test_axis_aligned_quadrant_produces_face(self):
-        """An axis-aligned quadrant arc in a closed profile produces a valid Build123d face."""
-        from geometry.zone_builder import _build_face_from_coords
-        from models.profile import ClosedProfile, ProfileMove, SegmentType, MachiningMode
-
-        profile = ClosedProfile(
-            segments=[
-                ProfileMove(segment_type=SegmentType.LINE, x=1.0, z=0.0),
-                ProfileMove(segment_type=SegmentType.LINE, x=1.0, z=-0.5,
-                            quadrant=True, quadrant_sign=1),
-                ProfileMove(segment_type=SegmentType.LINE, x=1.0, z=-1.0),
-            ],
-            corner_breaks=[],
-            mode=MachiningMode.OD,
-        )
-
-        # Build coords that form a closed shape:
-        # (0.5, 0.0) → (0.5, -0.5) [quadrant arc, same X] → (0.5, -1.0) [line]
-        # → (0.0, -1.0) [closure] → (0.0, 0.0) [closure] → back to start
-        coords = [
-            {"type": SegmentType.LINE, "x_radius": 0.5, "z": 0.0, "radius": 0.0,
-             "quadrant": False, "quadrant_sign": 1},
-            {"type": SegmentType.LINE, "x_radius": 0.5, "z": -0.5, "radius": 0.0,
-             "quadrant": True, "quadrant_sign": 1},
-            {"type": SegmentType.LINE, "x_radius": 0.5, "z": -1.0, "radius": 0.0,
-             "quadrant": False, "quadrant_sign": 1},
-            {"type": SegmentType.LINE, "x_radius": 0.0, "z": -1.0, "radius": 0.0,
-             "quadrant": False, "quadrant_sign": 1},
-            {"type": SegmentType.LINE, "x_radius": 0.0, "z": 0.0, "radius": 0.0,
-             "quadrant": False, "quadrant_sign": 1},
+    @staticmethod
+    def _coords(q_end, sign, start=(0.25, 0.0), mid=(0.25, -0.5)):
+        from models.profile import SegmentType
+        L = dict(type=SegmentType.LINE, radius=0.0, quadrant=False, quadrant_sign=1)
+        return [
+            dict(L, x_radius=start[0], z=start[1]),
+            dict(L, x_radius=mid[0], z=mid[1]),
+            dict(L, x_radius=q_end[0], z=q_end[1], quadrant=True, quadrant_sign=sign),
+            dict(L, x_radius=q_end[0], z=-1.5),
+            dict(L, x_radius=0.0, z=-1.5),
+            dict(L, x_radius=0.0, z=0.0),
         ]
 
-        # This should NOT raise — the RadiusArc must produce a valid edge
-        face = _build_face_from_coords(coords, profile)
-        assert face is not None
-
-    def test_axis_aligned_concave_produces_face(self):
-        """A -Q axis-aligned quadrant arc produces a valid face."""
-        from geometry.zone_builder import _build_face_from_coords
+    @staticmethod
+    def _profile():
         from models.profile import ClosedProfile, ProfileMove, SegmentType, MachiningMode
+        return ClosedProfile(segments=[ProfileMove(SegmentType.LINE, x=0.5, z=0.0)],
+                             corner_breaks=[], mode=MachiningMode.OD)
 
-        profile = ClosedProfile(
-            segments=[
-                ProfileMove(segment_type=SegmentType.LINE, x=1.0, z=0.0),
-                ProfileMove(segment_type=SegmentType.LINE, x=1.0, z=-0.5,
-                            quadrant=True, quadrant_sign=-1),
-                ProfileMove(segment_type=SegmentType.LINE, x=1.0, z=-1.0),
-            ],
-            corner_breaks=[],
-            mode=MachiningMode.OD,
-        )
-
-        coords = [
-            {"type": SegmentType.LINE, "x_radius": 0.5, "z": 0.0, "radius": 0.0,
-             "quadrant": False, "quadrant_sign": 1},
-            {"type": SegmentType.LINE, "x_radius": 0.5, "z": -0.5, "radius": 0.0,
-             "quadrant": True, "quadrant_sign": -1},
-            {"type": SegmentType.LINE, "x_radius": 0.5, "z": -1.0, "radius": 0.0,
-             "quadrant": False, "quadrant_sign": 1},
-            {"type": SegmentType.LINE, "x_radius": 0.0, "z": -1.0, "radius": 0.0,
-             "quadrant": False, "quadrant_sign": 1},
-            {"type": SegmentType.LINE, "x_radius": 0.0, "z": 0.0, "radius": 0.0,
-             "quadrant": False, "quadrant_sign": 1},
-        ]
-
-        face = _build_face_from_coords(coords, profile)
-        assert face is not None
-
-    def test_axis_aligned_same_z_produces_face(self):
-        """Same Z (horizontal chord) quadrant arc produces a valid face."""
+    @pytest.mark.parametrize("sign", [1, -1])
+    def test_equal_leg_quadrant_produces_face(self, sign):
         from geometry.zone_builder import _build_face_from_coords
-        from models.profile import ClosedProfile, ProfileMove, SegmentType, MachiningMode
+        face = _build_face_from_coords(self._coords((0.5, -0.75), sign), self._profile())
+        assert face is not None and face.area > 0
 
-        profile = ClosedProfile(
-            segments=[
-                ProfileMove(segment_type=SegmentType.LINE, x=0.5, z=-0.5),
-                ProfileMove(segment_type=SegmentType.LINE, x=1.0, z=-0.5,
-                            quadrant=True, quadrant_sign=1),
-                ProfileMove(segment_type=SegmentType.LINE, x=1.0, z=-1.0),
-            ],
-            corner_breaks=[],
-            mode=MachiningMode.OD,
-        )
+    def test_same_x_quadrant_must_be_split_first(self):
+        from geometry.zone_builder import _build_face_from_coords
+        with pytest.raises(ValueError, match="split into two quadrants"):
+            _build_face_from_coords(self._coords((0.25, -1.0), 1), self._profile())
 
-        # (0.25, 0.0) start → (0.25, -0.5) line → (0.5, -0.5) quadrant arc same Z
-        # → (0.5, -1.0) line → closure
-        coords = [
-            {"type": SegmentType.LINE, "x_radius": 0.25, "z": 0.0, "radius": 0.0,
-             "quadrant": False, "quadrant_sign": 1},
-            {"type": SegmentType.LINE, "x_radius": 0.25, "z": -0.5, "radius": 0.0,
-             "quadrant": False, "quadrant_sign": 1},
-            {"type": SegmentType.LINE, "x_radius": 0.5, "z": -0.5, "radius": 0.0,
-             "quadrant": True, "quadrant_sign": 1},
-            {"type": SegmentType.LINE, "x_radius": 0.5, "z": -1.0, "radius": 0.0,
-             "quadrant": False, "quadrant_sign": 1},
-            {"type": SegmentType.LINE, "x_radius": 0.0, "z": -1.0, "radius": 0.0,
-             "quadrant": False, "quadrant_sign": 1},
-            {"type": SegmentType.LINE, "x_radius": 0.0, "z": 0.0, "radius": 0.0,
-             "quadrant": False, "quadrant_sign": 1},
-        ]
-
-        face = _build_face_from_coords(coords, profile)
-        assert face is not None
+    def test_same_z_quadrant_is_refused(self):
+        from geometry.zone_builder import _build_face_from_coords
+        with pytest.raises(ValueError, match="same Z"):
+            _build_face_from_coords(self._coords((0.5, -0.5), 1), self._profile())

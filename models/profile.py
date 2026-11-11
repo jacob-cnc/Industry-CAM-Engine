@@ -67,7 +67,8 @@ class ProfileMove:
                 Always the minor arc (< 180 deg). Not "+R minor / -R major" and not
                 "+R = G02" (both stale, 2026-11-10). Phase 1 of the arc strategy replaces
                 this sign with an explicit centre + direction. 0 for lines.
-        quadrant: If True, this is a tangent-bounded quadrant arc (quarter ellipse).
+        quadrant: If True, this is a circular quadrant arc (a true quarter circle,
+                  equal X-radius and Z legs; geometry/arc_entry.py).
                   The radius field is ignored and the arc is computed from endpoints.
     """
     segment_type: SegmentType

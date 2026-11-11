@@ -6,6 +6,15 @@ the distinction between the owner's verbatim request and later design advice.
 
 ## Proposed
 
+- [Arc Segments: Strategy + Phase 0/1 Status](2026-11-10-arc-segment-strategy.md)
+  - Status: branch `claude/arc-phase0`, pushed, NOT merged (needs owner OK).
+    Phase 0 done; Phase 1 part 1 done 2026-11-11: true circular Q / -Q (ellipses
+    retired), same-X arcs auto-split into two quadrants, R arcs past their X
+    extreme split instead of refused (geometry/arc_entry.py). Section 7 of the doc.
+  - Known limit until Phase 2: a part ending behind a bead is blocked (closing
+    rapid would cross it), never cut.
+  - Next: explicit arc identity + migration, picker graphic, tangent entry.
+
 - [Corner-Break Tool, OD Engine, GUI Tuning - lathe integration](2026-11-10-corner-break-tool-and-gui.md)
   - Status: INTEGRATED 2026-11-10, merged to main, owner-verified on the lathe
     (tag `lathe-2026-11-10-working`). Outcome and the fixes found during the
