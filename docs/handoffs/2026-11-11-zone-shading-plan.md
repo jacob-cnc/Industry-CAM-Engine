@@ -266,3 +266,42 @@ discuss):
 - An OD profile that starts with a chamfer *at the face* is refused by the writer's
   existing comp guard on the cleanup pass (a .003 sliver before a concave corner).
   This happened before these changes; it fails safe.
+
+## 8. Defect 3 and the face-chamfer refusal, measured (2026-11-11, for the owner)
+
+**How the face is cut today.** The face passes step down from Z start to
+Z = fin_allowance/2. On OD they cut from the stock OD in to X start; on ID, from
+the pilot out to X start. They deliberately leave the allowance for the finish
+pass. Whether anything finishes the face depends on how the profile starts:
+
+| How the profile starts | What happens to the face | Example |
+|---|---|---|
+| X0, then a **face segment** along Z0 | The finish faces it flat through the centre (OD face entry: one nose radius before centre). **Clean.** | Corner Break Test, GUI Conv Test, Test Cut, Test Program Tab |
+| Above X0 (no face segment), X start 0 | The finish crosses the face on a lead from X0 at **Z+.0010** down to the first point at Z0. The face comes out **slightly conical**: .0008 proud at X.05, tapering to 0 at the first point. A **centre pip** .005–.0058 tall inside about X.02 remains, because the OD face entry needs an exactly level first move and this one is .001 off. | NX OD part (first point X.2362) |
+| X0, then an **arc** (dome) | The finish comes straight down X0 onto the dome and follows it. Comp can't cross the centre, so a **pip** about the nose radius tall is left: .0155 tall, about .025 across. | Hemisphere Test |
+| ID block | The end face outside the bore (first point → stock OD) is never touched. It stays at stock Z start (+.025 on Bearing Sleeves, +.100 on the NX ID part). | Bearing Sleeves, NX ID |
+| X start = stock OD (no facing) | Nothing in front of Z0 is cut. | operator choice |
+
+The graph check judges only Z0 and back, so none of these are flagged. They show
+as finished-part material in front of Z0.
+
+**The face-chamfer refusal (cleanup pass, writer guard).**
+- **When it happens:** the profile starts at the chamfer's top (e.g. X.6 Z0 →
+  X.8 Z-.1) with no face segment before it, or the same chamfer is drawn as a V1
+  corner break.
+- **What the cleanup pass does:** it runs across the face at Z+allowance from the
+  centre to above the chamfer start, then steps straight down .0029 (fin .020) or
+  .0007 (fin .005), then turns onto the chamfer's offset line. The true offset
+  corner would be the intersection, at X.6083 Z.010, with no step.
+- **Why it's refused:** that step followed by the 45° turn is an inside corner
+  for the compensated nose. LinuxCNC needs R·tan(22.5°) = .0066 of straight move
+  before it, otherwise it stops with "straight feed in concave corner cannot be
+  reached". The writer refuses in advance; the GUI shows it as a generation error.
+- **The working form:** drawn as X0 → face to X.6 → chamfer, it generates and
+  checks clean at both allowances.
+
+**Also found while measuring:** with a .010–.020 finish allowance, the Hemisphere
+cleanup pass doesn't run to the end in LinuxCNC (its first G03 out of the centre;
+the writer's guard doesn't catch it). At the saved .005 it runs. The graph says
+"not shown: interpreter did not run the program to the end", and the machine
+would stop at the same line.
