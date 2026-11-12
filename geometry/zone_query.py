@@ -148,52 +148,6 @@ class ZoneQueryAPI:
 
         return intervals
 
-    def line_zone_intersection(
-        self, start: Tuple[float, float], end: Tuple[float, float], zone_name: str
-    ) -> bool:
-        """Check if a line segment intersects a zone boundary.
-
-        Args:
-            start: (x_dia, z) start point
-            end: (x_dia, z) end point
-            zone_name: Which zone to check against
-
-        Returns:
-            True if the line segment intersects the zone boundary.
-        """
-        face = self._get_face(zone_name)
-        if face is None:
-            return False
-
-        # Convert to radius
-        p1 = gp_Pnt(start[0] / 2.0, start[1], 0.0)
-        p2 = gp_Pnt(end[0] / 2.0, end[1], 0.0)
-
-        try:
-            line_edge = BRepBuilderAPI_MakeEdge(p1, p2).Edge()
-        except Exception:
-            return False
-
-        ocp_face = self._get_ocp_face(face)
-        if ocp_face is None:
-            return False
-
-        try:
-            section = BRepAlgoAPI_Section(ocp_face, line_edge)
-            section.Build()
-            if not section.IsDone():
-                return False
-        except Exception:
-            return False
-
-        # If section produced any geometry, there's an intersection
-        explorer = TopExp_Explorer(section.Shape(), TopAbs_VERTEX)
-        if explorer.More():
-            return True
-
-        edge_explorer = TopExp_Explorer(section.Shape(), TopAbs_EDGE)
-        return edge_explorer.More()
-
     def boundary_wire_extraction(self, zone_name: str) -> List[EdgeData]:
         """Extract boundary edges from a zone Face for Shapely polygon construction.
 

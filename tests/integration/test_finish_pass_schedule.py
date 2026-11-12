@@ -129,11 +129,12 @@ def test_missing_finish_link_cannot_be_written_as_a_return_cut():
         GCodeWriter().write(broken)
 
 
-def test_single_id_finish_uses_kernel_edges_without_hidden_coordinate_fallback(monkeypatch):
+def test_single_id_finish_uses_kernel_edges_without_hidden_coordinate_fallback():
+    # Since 2026-11-12 the coordinate fallback does not exist: the finish contour is
+    # always the kernel's open profile wire, and a failure raises instead.
     from planners.finish_planner import FinishPlanner
-    def no_fallback(*args):
-        raise AssertionError("Unexpected coordinate fallback instead of kernel edges")
-    monkeypatch.setattr(FinishPlanner, "_moves_from_segments", no_fallback)
+    for gone in ("_moves_from_segments", "_moves_from_expanded_coords", "_find_arc_center"):
+        assert not hasattr(FinishPlanner, gone), gone
     fields = bore_fields()
     p, s, r, f = build_from_fields(**fields)
     assert execute(p, s, fields["tool_def"], r, f).plan_result is not None
@@ -185,3 +186,24 @@ def test_kernel_offsets_preserve_steps_arcs_and_spring_geometry(mode, segments):
     parsed_final = [m for m in parse(_split_links(final_cut)[0]) if m.move_type in cutting_types]
     parsed_spring = [m for m in parse(_split_links(spring_cut)[0]) if m.move_type in cutting_types]
     assert shape(parsed_final) == shape(parsed_spring)
+
+
+def test_profile_along_the_closure_line_gets_kernel_finish_edges():
+    """2026-11-12 (hand-math inquiry, "Hemisphere Test"): a dome from the centreline
+    with a back shoulder ON the operation end. The finish planner used to walk the
+    closed finished-part outline for the profile's end points; the shoulder lies on
+    the engine's closure line, the walk failed and the finish pass silently came
+    from hand-math arcs. Now it is the kernel's open profile wire."""
+    from models.tool import ToolDef, ToolDirection, ToolOrientation, ToolType
+    cnmg = ToolDef(4, 0.016, 80, 0.5, ToolOrientation(2), ToolDirection.RIGHT, ToolType.TURNING,
+                   front_angle=95.0, back_angle=175.0)
+    segments = [dict(type="line", x=0.0, z=0.0), dict(type="arc", x=0.25, z=-0.4665, radius=0.25),
+                dict(type="line", x=0.25, z=-0.75), dict(type="line", x=1.0, z=-0.75)]
+    fields = bore_fields(mode="od", segments=segments, stock_dia=2.0, x_start=0.0, z_start=0.1,
+                         z_end=-0.75, stock_back_z=-0.75, pilot_hole_dia=0.0, fin_allowance=0.005,
+                         doc_dia=0.05, feed=0.008, tool_def=cnmg)
+    p, s, r, f = build_from_fields(**fields)
+    plan = execute(p, s, cnmg, r, f).plan_result
+    assert plan is not None
+    final = plan.finish_passes[-1].moves[-1]
+    assert (final.x, final.z) == pytest.approx((1.0, -0.75))     # ends on the back shoulder

@@ -16,6 +16,10 @@ how often each path ran:
                              ("triggers fallback to zone boundary")
   offset.rounded_fallback    kernel_offset fell back from sharp to rounded joins
 
+History (2026-11-12): the finish segments fallback (with _find_arc_center) and
+the cleanup offset route were removed on the hand-math branch; the probe then
+reports them as "no longer in the code".
+
 usage: fallback_probe.py --tool-table TBL prog.json [...]   (from the repo root)
 """
 from __future__ import annotations
@@ -31,6 +35,7 @@ REPO = os.getcwd()
 sys.path.insert(0, REPO)
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 COUNTS: Counter = Counter()
+REMOVED: list = []
 
 
 def _install_spies():
@@ -39,6 +44,9 @@ def _install_spies():
     from validation.pre_planning_validator import _compute_arc_center
 
     def wrap(cls, name, on_result):
+        if not hasattr(cls, name):                 # path removed since the probe was written
+            REMOVED.append(f"{cls.__name__}.{name}")
+            return
         orig = getattr(cls, name)
 
         def spy(self, *a, **k):
@@ -81,6 +89,8 @@ def main() -> int:
     app = QApplication.instance() or QApplication([])           # noqa: F841
     regen._record_dialogs()
     _install_spies()
+    if REMOVED:
+        print("paths no longer in the code (nothing to probe):", ", ".join(REMOVED))
     resolver = regen._tool_resolver(os.path.abspath(a.tool_table))
     import tempfile
     out = tempfile.mkdtemp(prefix="fallback_probe_")          # regen's .ngc/.result.json, not needed

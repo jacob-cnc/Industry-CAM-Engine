@@ -18,10 +18,7 @@ from geometry.kernel_offset import KernelOffsetError, offset_face
 from geometry.zone_builder import profile_to_radius_coords
 from geometry.zone_query import EdgeData
 from geometry.curve_fit import circumcenter, curve_arc_spans
-from geometry.face_ops import (
-    clip_to_box, face_from_coords_polyline_quadrants, first_ocp_face, offset_face_sharp_only,
-    translate_face, wire_edges,
-)
+from geometry.face_ops import clip_to_box, first_ocp_face, translate_face, wire_edges
 
 __all__ = [
     # arc identity (geometry/arc_math, arc_helpers)
@@ -32,9 +29,8 @@ __all__ = [
     "EdgeData",
     # offsets with sharp joins and an explicit, logged rounded-join fallback
     "offset_face", "KernelOffsetError",
-    # face operations: build, offset, move, clip, walk (geometry/face_ops)
-    "face_from_coords_polyline_quadrants", "offset_face_sharp_only", "first_ocp_face",
-    "translate_face", "clip_to_box", "wire_edges",
+    # face operations: first face, move, clip, walk (geometry/face_ops)
+    "first_ocp_face", "translate_face", "clip_to_box", "wire_edges",
     # arcs fitted to non-circular edges (geometry/curve_fit)
     "curve_arc_spans", "circumcenter",
 ]
