@@ -222,7 +222,9 @@ def parse_canon(canon: str) -> List[CanonMove]:
             ccw = (a1 - a0) % (2 * math.pi)
             sweep = ccw if rot > 0 else ccw - 2 * math.pi
             if ccw == 0.0:
-                sweep = 0.0
+                # start == end: LinuxCNC runs a FULL circle (2026-11-12: tiny
+                # roughing arcs rounded to this; treating it as no move hid it)
+                sweep = 2 * math.pi if rot > 0 else -2 * math.pi
             R = math.hypot(pos[0] - xc, pos[1] - zc)
             n = 1
             if R > 1e-9 and abs(sweep) > 1e-12:

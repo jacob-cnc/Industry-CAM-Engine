@@ -206,6 +206,11 @@ def _execute(
             zone_query, zone_set, tool, roughing_params, stock, profile.mode, profile,
         )
 
+    # Arcs whose ends coincide at output precision would be FULL circles in
+    # LinuxCNC (2026-11-12): kernel offsets leave such slivers in roughing passes.
+    face_passes = _no_degenerate_arcs(face_passes)
+    roughing_passes = _no_degenerate_arcs(roughing_passes)
+
     # Step 5b: Roughing retracts / approaches (owner rule 2026-11-12,
     # planners/rough_links.py): what the writer emits and the validator checks.
     from planners.rough_links import plan_rough_links
@@ -225,6 +230,8 @@ def _execute(
     # Step 7: Plan finish pass
     finish_planner = FinishPlanner()
     finish_passes = finish_planner.plan(zone_query, finish_tool or tool, finishing_params, stock, profile.mode, profile, roughing_params.fin_allowance)
+    cleanup_passes = _no_degenerate_arcs(cleanup_passes)
+    finish_passes = _no_degenerate_arcs(finish_passes)
 
     # Step 8: Plan transitions
     all_passes = face_passes + roughing_passes + cleanup_passes + finish_passes
@@ -368,6 +375,29 @@ def _extract_zone_boundary(zone_query, zone_name):
             f"Zone construction may have failed. Do NOT create a hand-math fallback."
         )
     return boundary_polyline(edges)
+
+
+# An arc whose end is within this of its start (X diameter / Z, inches) prints
+# as the same point at 4 decimals - LinuxCNC would cut a full circle.
+DEGENERATE_ARC = 0.00015
+
+
+def _no_degenerate_arcs(passes):
+    """Every pass with its near-zero arcs (kernel slivers) replaced by a straight
+    feed to the same end point. A pass's moves start at (x_level, z_start)."""
+    out = []
+    for p in passes:
+        pos = (p.x_level, p.z_start)
+        moves, changed = [], False
+        for m in p.moves:
+            if (m.move_type in (MoveType.ARC_CW, MoveType.ARC_CCW)
+                    and abs(m.x - pos[0]) < DEGENERATE_ARC and abs(m.z - pos[1]) < DEGENERATE_ARC):
+                m = replace(m, move_type=MoveType.FEED, center_i=0.0, center_k=0.0, radius=0.0)
+                changed = True
+            moves.append(m)
+            pos = (m.x, m.z)
+        out.append(replace(p, moves=moves) if changed else p)
+    return out
 
 
 def _with_rough_links(all_passes, transitions):

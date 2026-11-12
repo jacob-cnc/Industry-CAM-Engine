@@ -505,6 +505,12 @@ class GCodeWriter:
         from outputs.gcode_dialect import gcode_for_arc, i_word_from_center_i
         g_code = gcode_for_arc(move.move_type)
         parts = f"{g_code} X{move.x * conv:{fmt}} Z{move.z * conv:{fmt}}"
+        if (f"{move.x * conv:{fmt}}", f"{move.z * conv:{fmt}}") == \
+                (f"{self._x * conv:{fmt}}", f"{self._z * conv:{fmt}}"):
+            raise ValueError(
+                f"{comment}: an arc from X{self._x * conv:{fmt}} Z{self._z * conv:{fmt}} ends at "
+                "its own start at output precision - LinuxCNC would cut a FULL circle there. "
+                "Generation stopped; this is an engine fault, please report it.")
 
         if self._arc_format == "ijk":
             i_word = i_word_from_center_i(move.center_i)
