@@ -15,7 +15,9 @@ Owner rule:
     off at 45 deg: away from the wall in Z by the same radial distance it
     retracts in X (never back past the pass's own start), else straight in X;
   * the next pass: rapid along Z at that X to its start, rapid in to the
-    level already cut there, feed the rest.
+    level already cut there, feed the rest;
+  * the LAST pass retracts to the pass-1 target (outside the stock / in the
+    pilot hole), so whatever comes next starts clear of all material.
 
 Pockets (owner: "most of the time you'd want to fully exit"): a retract or a
 Z traverse at the rule's X is only used inside the CORRIDOR already cleared
@@ -163,7 +165,12 @@ def plan_rough_links(passes, stock, is_id: bool, feed: float,
         back = 1.0 if travel_up else -1.0                # Z direction away from the end wall
         wall = material_beyond((end[0], end[1] - back * 0.001))
         clear = (ID_CLEAR if is_id else OD_CLEAR) if wall else FREE_END_CLEAR
-        target = first_target if i == 0 else (
+        last = i == len(passes) - 1
+        # The LAST pass always exits fully: what follows (the cleanup / finish
+        # contour approach) rises along Z at the X it is given and knows nothing
+        # of the material still standing - from a pocket's X it ran .0225 into
+        # the cleanup band of a neck part (2026-11-12, found by the rapid check).
+        target = first_target if (i == 0 or last) else (
             extents[i - 1][0] - clear if is_id else extents[i - 1][1] + clear)
         if is_id:
             target = max(0.0, target)
