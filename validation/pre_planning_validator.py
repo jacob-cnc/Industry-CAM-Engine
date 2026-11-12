@@ -9,7 +9,7 @@ Imports from: models/
 import math
 from typing import List
 
-from models.profile import ClosedProfile, ProfileMove, SegmentType, MachiningMode
+from models.profile import ClosedProfile, SegmentType, MachiningMode
 from models.stock import StockDef
 from models.validation import ValidationResult, Severity
 from models.constants import TOLERANCE

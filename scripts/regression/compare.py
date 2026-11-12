@@ -57,6 +57,12 @@ def _motion(line: str) -> str:
     return line.split(";")[0].strip()
 
 
+def _refusal(res):
+    """The refusal as the operator reads it: dialog text without the traceback
+    (file paths and line numbers differ between checkouts)."""
+    return [d.split("Traceback")[0].strip() for d in (res.get("dialogs") or [])]
+
+
 def _load(d, name):
     ngc = os.path.join(d, name + ".ngc")
     res = os.path.join(d, name + ".result.json")
@@ -92,7 +98,7 @@ def compare(base_dir, new_dir, tol, show):
         bc, br = _load(base_dir, name)
         nc, nr = _load(new_dir, name)
         if (bc is not None and nc is not None and not br.get("generated") and not nr.get("generated")
-                and br.get("dialogs") == nr.get("dialogs")):
+                and _refusal(br) == _refusal(nr)):
             print(f"BOTH-REFUSE     {name}: same refusal on both sides: {(br.get('dialogs') or ['?'])[0][:160]}")
             continue
         if bc is None or nc is None or not br.get("generated") or not nr.get("generated"):

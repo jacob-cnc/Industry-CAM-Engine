@@ -15,7 +15,7 @@ from models.results import TurningPass
 from models.moves import ToolMove, MoveType, PassType
 from models.transitions import Transition, TransitionType
 from models.stock import StockDef
-from models.params import RoughingParams, RoughingStrategy
+from models.params import RoughingStrategy
 from models.profile import MachiningMode
 from models.constants import TOLERANCE, CONTOUR_FEED_IN_DIA
 

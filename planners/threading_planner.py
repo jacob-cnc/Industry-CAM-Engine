@@ -9,12 +9,11 @@ Imports from: models/
 """
 
 import math
-from typing import List, Tuple
+from typing import List
 
 from models.program import ThreadingParams
 from models.stock import StockDef
 from models.moves import ToolMove, MoveType, PassType
-from models.constants import TOLERANCE
 
 
 class ThreadingPlanner:

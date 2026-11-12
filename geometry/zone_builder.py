@@ -8,18 +8,9 @@ Imports from: models/, tools/
 """
 
 from dataclasses import dataclass
-from typing import List, Tuple, Optional
+from typing import List
 
-from build123d import (
-    BuildSketch, BuildLine, Line, RadiusArc, Spline, ThreePointArc, Vector, make_face, Sketch,
-    Axis, Mode, Kind,
-)
-from OCP.BRep import BRep_Tool
-from OCP.TopExp import TopExp_Explorer
-from OCP.TopAbs import TopAbs_EDGE, TopAbs_WIRE
-from OCP.TopoDS import TopoDS
-from OCP.BRepAdaptor import BRepAdaptor_Curve
-from OCP.GeomAbs import GeomAbs_Line, GeomAbs_Circle
+from build123d import BuildSketch, BuildLine, Line, RadiusArc, ThreePointArc, make_face, Mode, Kind
 
 from models.profile import ClosedProfile, ProfileMove, SegmentType, MachiningMode
 from models.stock import StockDef
@@ -419,7 +410,6 @@ def _build_face_from_coords(coords: List[dict], profile: ClosedProfile, *, close
     see geometry/arc_entry.py.
     """
     import math
-    from models.constants import TOLERANCE
 
     with BuildSketch() as sketch:
         with BuildLine() as contour:

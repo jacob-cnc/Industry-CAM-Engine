@@ -77,3 +77,40 @@ bottom of each section. Times are PST.
   program has gouge or left material).
 - Architecture ratchet: `tests/architecture/test_architecture_ratchet.py` +
   `validation/architecture_baseline.json` (dependency 62, fallback 4, hand_math 22).
+
+### Step 2 — dead code (2026-11-12 00:40 → 01:15)
+
+Each candidate checked by searching the whole repo (gui, tests, scripts) for any use outside
+its own definition / package re-export, not trusting the checker's list alone (it puts
+`build_state_section` in pipeline/ — it is in gui/manual/sections.py — and counts
+`from __future__ import annotations` as unused).
+
+Removed:
+- `planners/offset_contour_planner.py` (OffsetContourPlanner) — unused since the initial
+  commit; the pipeline uses ContourRoughingPlanner. Note: it was the one written the
+  intended way (kernel answers injected via ZoneQueryAPI) — the live one uses raw OCP. Step 4
+  moves the live one's kernel work behind geometry.kernel instead.
+- `planners/protocols.py` (RoughingPlanner protocol, nothing implemented or used it).
+- `tools/tool_shape.py` (ToolShape, ToolReachError — only re-exported). tools/ kept as the
+  home for tool data in step 3.
+- `outputs/sim_adapter.py` (the GUI's simulator parses G-code instead).
+- `pipeline/file_io.py` + `test_public_file_io_uses_same_radius_serializer`: a second public
+  tool-table API nobody called (the GUI uses pipeline/tool_table_io directly); the test only
+  guarded that the duplicate delegated to the real serializer.
+- `geometry/arc_helpers.interpolate_quadrant_arc`, `outputs/svg_exporter._boundary_to_radius_coords`.
+- 57 unused imports in non-GUI packages (names that appear nowhere else in their file,
+  strings and quoted annotations included; `__future__` kept). One emptied
+  `if TYPE_CHECKING:` block removed with them (contour_roughing_planner).
+- Package `__init__.py` re-exports (geometry, intervals, outputs, pipeline, planners, tools,
+  transitions, validation) → docstring only. Nothing used package-level names; the eager
+  imports meant e.g. the Tools tab's `pipeline.tool_table_io` import loaded the whole
+  pipeline and OCP. Kept: `hal/` (public `get_backend` facade) and `models/` (light
+  dataclasses; old scripts use `from models import *`).
+
+Not removed (GUI, no owner check tonight): `gui/manual/sections.build_state_section` and the
+other gui/ dead-code warnings.
+
+Verification: suite 1310 passed (1309 + ratchet); regression vs base_v2: 16 SAME, 5
+BOTH-REFUSE (compare now ignores tracebacks in refusal dialogs — paths differ between
+checkouts). Architecture: dependency errors 62 → 60 (unused OCP/build123d imports gone
+from contour_roughing_planner) — ratchet lowered.

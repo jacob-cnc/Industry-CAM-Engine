@@ -9,7 +9,7 @@ Imports from: models/, geometry/ only (no GUI dependencies)
 import logging
 import math
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Tuple, Optional
 import numpy as np
 from shapely.geometry import Polygon, MultiPolygon, GeometryCollection, box

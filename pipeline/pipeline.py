@@ -19,11 +19,10 @@ from models.results import PlanResult, TurningPass
 from models.validation import ValidationResult, PipelineResult, PipelineStatus, Severity
 from models.constants import TOLERANCE
 
-from geometry.zone_builder import build_zones, ZoneSet
+from geometry.zone_builder import build_zones
 from geometry.zone_query import ZoneQueryAPI
 from geometry.contour_intersect import ContourIntersect
 
-from intervals.fiber import Fiber
 
 from planners.face_planner import FacePlanner
 from planners.staircase_planner import StaircasePlanner

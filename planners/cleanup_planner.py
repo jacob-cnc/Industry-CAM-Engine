@@ -13,7 +13,7 @@ Only used with staircase strategy — offset-contour's last pass IS the cleanup.
 Imports from: models/, geometry/ (for offset computation)
 """
 
-from typing import List, Tuple, TYPE_CHECKING
+from typing import List, TYPE_CHECKING
 
 from models.results import TurningPass
 from models.moves import ToolMove, MoveType, PassType
@@ -241,7 +241,7 @@ class CleanupPlanner:
             offset as b3d_offset, Kind,
         )
         from OCP.TopExp import TopExp_Explorer
-        from OCP.TopAbs import TopAbs_EDGE, TopAbs_WIRE, TopAbs_FACE
+        from OCP.TopAbs import TopAbs_FACE
         from OCP.TopoDS import TopoDS
         from OCP.BRepAdaptor import BRepAdaptor_Curve
         from OCP.GeomAbs import GeomAbs_Line, GeomAbs_Circle

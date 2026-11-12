@@ -397,7 +397,6 @@ class FinishPlanner:
         """
         import math
         from OCP.BRepAdaptor import BRepAdaptor_Curve
-        from OCP.gp import gp_Pnt
 
         moves = []
         ocp_edge = edge.ocp_edge

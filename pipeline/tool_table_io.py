@@ -22,7 +22,7 @@ import shutil
 import math
 import tempfile
 from urllib.parse import quote, unquote
-from typing import List, Optional
+from typing import List
 
 from pipeline.tool_card_data import ToolCardData
 

@@ -7,7 +7,7 @@ The ONLY place where Shapely is used for polygon construction.
 Imports from: models/, geometry/
 """
 
-from typing import List, Tuple, TYPE_CHECKING
+from typing import List, TYPE_CHECKING
 
 from shapely.geometry import Polygon
 
@@ -16,7 +16,6 @@ from geometry.adaptive_sampling import adaptive_densify_arc
 
 if TYPE_CHECKING:
     from geometry.zone_query import ZoneQueryAPI, EdgeData
-    from geometry.zone_builder import ZoneSet
 
 
 class ValidationPolygons:

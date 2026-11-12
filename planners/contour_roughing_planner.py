@@ -1,8 +1,6 @@
 """Offset-contour roughing planner for Industry CAM Engine (OD mode)."""
 import math
-from typing import List, TYPE_CHECKING
 from build123d import BuildSketch, BuildLine, Line, RadiusArc, make_face
-from build123d import offset as b3d_offset, Kind
 from OCP.TopExp import TopExp_Explorer
 from OCP.TopAbs import TopAbs_FACE
 from OCP.TopoDS import TopoDS
@@ -12,13 +10,8 @@ from OCP.BRepTools import BRepTools
 from OCP.BRepAlgoAPI import BRepAlgoAPI_Common
 from models.results import TurningPass
 from models.moves import ToolMove, MoveType, PassType
-from models.params import RoughingParams
-from models.stock import StockDef
-from models.profile import ClosedProfile, ProfileMove, SegmentType, MachiningMode
+from models.profile import SegmentType, MachiningMode
 from models.constants import TOLERANCE
-if TYPE_CHECKING:
-    from geometry.zone_query import ZoneQueryAPI
-    from geometry.zone_builder import ZoneSet
 
 
 class ContourRoughingPlanner:

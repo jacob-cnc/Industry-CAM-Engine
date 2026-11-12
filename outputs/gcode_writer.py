@@ -11,11 +11,11 @@ import textwrap
 from typing import List, Optional
 
 from models.results import PlanResult
-from models.moves import ToolMove, MoveType, PassType
+from models.moves import ToolMove, MoveType
 from models.profile import SegmentType, CornerBreakType
 from models.tool import ToolDef, ToolDirection
 from models.program import ThreadingParams, GroovingParams
-from models.constants import TOLERANCE, CENTER_ARC_RADIUS_TOLERANCE_INCH, CONTOUR_FEED_IN_DIA
+from models.constants import TOLERANCE, CONTOUR_FEED_IN_DIA
 
 
 def _piece_sweep(p, q, centre_dia):
@@ -1311,8 +1311,6 @@ class GCodeWriter:
             List of G-code lines (strings).
         """
         from planners.grooving_planner import GroovingPlanner
-        from models.stock import StockDef
-        from models.profile import MachiningMode
 
         conv = 25.4 if unit_mode == "metric" else 1.0
         fmt = ".3f" if unit_mode == "metric" else ".4f"

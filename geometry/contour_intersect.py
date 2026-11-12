@@ -16,7 +16,7 @@ All outputs: INCHES for Z values.
 Imports from: models/, geometry/zone_builder (ZoneSet only)
 """
 
-from typing import List, Tuple, Optional
+from typing import List, Tuple
 
 from OCP.BRepAlgoAPI import BRepAlgoAPI_Section
 from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeEdge
@@ -26,9 +26,8 @@ from OCP.TopAbs import TopAbs_EDGE, TopAbs_VERTEX, TopAbs_WIRE, TopAbs_FACE
 from OCP.TopoDS import TopoDS
 from OCP.gp import gp_Pnt
 from OCP.BRepAdaptor import BRepAdaptor_Curve
-from OCP.BRepTools import BRepTools
 from OCP.BRepClass import BRepClass_FaceClassifier
-from OCP.TopAbs import TopAbs_IN, TopAbs_ON, TopAbs_OUT
+from OCP.TopAbs import TopAbs_IN, TopAbs_ON
 
 from build123d import Face, Sketch
 

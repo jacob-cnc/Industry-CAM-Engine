@@ -5,6 +5,7 @@ ZoneQueryAPI is received as a parameter from pipeline/ (dependency injection).
 This maintains the strict dependency chain: transitions/ imports only models/ and intervals/.
 
 Imports from: models/, intervals/
-"""
 
-from transitions.transition_planner import TransitionPlanner
+Import submodules directly (e.g. `from transitions.<module> import X`); this
+package re-exports nothing, so importing one light module never loads the rest.
+"""
