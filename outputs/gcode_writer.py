@@ -46,7 +46,7 @@ class GCodeWriter:
         self._n: int = 10
         self._metric: bool = False
         self._conv: float = 1.0
-        self._fmt: str = ".4f"
+        self._fmt: str = "z.4f"   # z: never print -0.0000 (signed zero after rounding)
 
     def write(self, plan_result: PlanResult, unit_mode: str = "inch") -> str:
         """Generate complete G-code program from PlanResult.
@@ -77,7 +77,7 @@ class GCodeWriter:
         self._ocode = 9000
         self._metric = unit_mode == "metric"
         self._conv = 25.4 if self._metric else 1.0
-        self._fmt = ".3f" if self._metric else ".4f"
+        self._fmt = "z.3f" if self._metric else "z.4f"
         lines = []
 
         pr = plan_result
@@ -1204,7 +1204,7 @@ class GCodeWriter:
             List of G-code lines (strings).
         """
         conv = 25.4 if unit_mode == "metric" else 1.0
-        fmt = ".3f" if unit_mode == "metric" else ".4f"
+        fmt = "z.3f" if unit_mode == "metric" else "z.4f"
 
         lines = []
         is_id = params.is_internal
@@ -1310,7 +1310,7 @@ class GCodeWriter:
             List of G-code lines (strings).
         """
         conv = 25.4 if unit_mode == "metric" else 1.0
-        fmt = ".3f" if unit_mode == "metric" else ".4f"
+        fmt = "z.3f" if unit_mode == "metric" else "z.4f"
 
         lines = []
         is_id = params.is_internal
