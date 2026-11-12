@@ -270,3 +270,42 @@ Findings while reading the planners' kernel code (for 4b and the hand-math branc
   gui/program_tab Shapely (union of shaded sections). See "Open decisions" below.
 - Verification: suite 1300 passed; regression 16 SAME, 5 BOTH-REFUSE (most corpus programs are
   staircase: identical nose trimming).
+
+## Result of branch claude/structure-cleanup (2026-11-12 ~05:30)
+
+| | main 01f6cf3 | this branch |
+|---|---|---|
+| Suite (lathe runtime) | 1310 passed | 1300 passed (−13 material_sim property tests, −1 file_io guard, +1 ratchet, +3 facade-rule tests) |
+| Architecture errors: dependency | 62 | **4** (planners: 0) |
+| fallback (import) | 4 | 4 |
+| hand math | 22 | 24 (+1 visibility: cut_regions now scanned; +1 per-function count split — no new math) |
+| Regenerated corpus (21 programs) | baseline | 16 SAME, 5 BOTH-REFUSE — every step |
+
+Nothing merged to main; the live checkout was not touched. Branch pushed to origin.
+
+### Open decisions for the owner
+
+1. **outputs/ → geometry.arc_math / adaptive_sampling (2 errors).** The writer needs the arc
+   sweep, the graph adapter densifies arcs for display. Options: (a) allow `outputs` →
+   `geometry.arc_math` + `geometry.adaptive_sampling` explicitly (like rule (a) for planners);
+   (b) move the pure arc math to models/ — NOT recommended: models/ is not scanned for hand math,
+   so it would hide arc math from the check you care about. Recommendation: (a).
+2. **gcode_writer Shapely: the comp lead-out material probe.** `_comp_lead_out` decides whether
+   material lies beyond a contour end (point-in-polygon) before adding a lead-out. That is a
+   planning decision inside the writer. Recommendation: the finish/cleanup planners decide it
+   and put it in the plan; the writer only emits. Touches cutter-comp output → owner-reviewed.
+3. **gui/program_tab Shapely (union of shaded sections)** — move the union into
+   validation/cut_regions (one function), a 2-line GUI change. Low risk, needs a GUI look.
+4. **Dormant GUI code** — graph_widget / sim_viewer material_states rendering (data source
+   removed), gui/manual/sections.build_state_section and the other 69 gui/ dead-code warnings:
+   prune in a GUI session with the owner.
+5. **Large files** — gui/program_tab.py (2821 lines) would split naturally into block
+   generation / file I/O / corner-break dialogs; outputs/gcode_writer.py (1487) into preamble,
+   roughing, contour (comp entry/lead-out), threading, grooving. Not done tonight: GUI needs the
+   owner, and the writer split is cosmetic next to the risk.
+6. **Grooving question** (existing behaviour): zero-width groove at Z−.200, .094 blade, plunges
+   at Z−.153 — depends on which blade corner the tool's Z offset refers to.
+7. **Old scripts** — scripts/_*.py (debug/export scripts, `from models import *`): not
+   checked; likely stale.
+
+Next: branch `claude/hand-math-kernel` (from this branch) for the hand-math inquiry.
