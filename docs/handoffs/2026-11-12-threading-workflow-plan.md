@@ -1,6 +1,7 @@
 # Plan: threading as a field-driven operation (straight and tapered, standard thread lists, hints)
 
-Status: PLAN ONLY (nothing implemented). Written 2026-11-12 by Claude at the owner's request.
+Status: PLAN ONLY (nothing implemented). Written 2026-11-12 by Claude at the owner's request; owner
+decisions recorded the same day (section 8).
 Change classification when implemented: **Motion-affecting** (new tapered-thread motion, new ID retract).
 Companion to `2026-11-12-part-model-and-import-plan.md` (threads do NOT use profile segments).
 
@@ -19,107 +20,155 @@ Companion to `2026-11-12-part-model-and-import-plan.md` (threads do NOT use prof
 > for ID threads. OD retractions can be nominal OD + .020" dia, ID threads will need to be a bit
 > tighter, pilot hole dia - .005" dia.
 
+Follow-up (verbatim, 2026-11-12):
+
+> Yes, add OD/ID signifier and tool # fields. Thread depth should be calculated from ASME standards and
+> fit class not user entered. Yes on pilot dia for ID. Z end should be used at where the tool pulls
+> out. Good call on the hints. For ID threads just pick the tap drill size, don't worry about boring.
+> Yes there needs to be a custom thread option as well. I agree with your list of fit classes. Include
+> NPT as a preset just like the other thread types which auto populate. No LH threads at this time.
+
 ## 1. Fields
 
-Owner's list, then the additions this plan proposes. Additions are marked **(new)**, with the reason.
-
-| Field | Notes |
-|---|---|
-| OD / ID | **(new)** Which side. It sets the direction of the cut, the retract rule and which hint is shown. |
-| Tool | **(new)** As on every block. The tool's included angle is checked against the thread form (60 / 29 / 30 deg). |
-| Thread list + class | Optional drop-down list (section 2). Choosing a thread fills X start, X end and pitch. "Custom" leaves them all editable. |
-| X start, X end | The **major** diameter at Z start and at Z end. Equal values give a straight thread; different values give a taper. |
-| Z start, Z end | Z start includes the lead-in (see the check in section 5). |
-| Pitch | In TPI or mm, depending on the list. Stored as inches per thread. |
-| Thread depth | **(new)** Radial depth, filled in from the thread form and pitch (e.g. UN = .61343 x P; Acme 2G = .5P + allowance) and editable. X alone can't give it, because X is the major diameter only. |
-| Pilot / bore dia (ID only) | **(new)** The bore the thread is cut in. It is the crest for the cycle and the base for the retract rule. It is filled in from the hint (section 3). |
-| RPM | Checked against Z speed (section 5). |
-| Number of passes, # of spring passes | As today. |
-| # of starts | As today: P = lead, and each start is shifted one pitch in Z. |
-| Entry angle | The compound infeed angle (G76 Q). Defaults by form: 29.5 for 60 deg threads, 14.5 for Acme (29 deg), 15 for Trapezoidal (30 deg). 0 is a straight plunge. |
-| Pull-out (chamfer) | **(new, today's field kept)** How far the tool exits at the thread end, in threads. It becomes G76 E/L for straight threads. Use 0 when the thread runs out into a groove. |
-| Hand (RH / LH) | **(new, owner to decide)** LH means cutting away from the chuck (Z start behind the thread, cutting toward +Z), still with M3. If LH isn't needed, leave it out. |
-
-Kept in the background, with defaults shown under "Advanced": depth degression (G76 R, default 1.0 = constant area per pass) and the first-pass depth. Both are derived from the number of passes, as they are today.
-
-## 2. Thread lists and classes
-
-| List | Owner's request | Note for the owner |
+| Field | Entered / derived | Notes |
 |---|---|---|
-| UNC, UNF | 2A / 2B, 3A / 3B | As requested. ASME B1.1 has class formulas for pitch diameter tolerance and allowance. |
-| Metric Coarse, Metric Fine | "2A/B, 3A/B" | **Metric doesn't use A/B classes.** The usual classes are **6g / 6H** (medium, the default) and **4h / 5H** (close); 4g6g also exists. Offer 6g/6H and 4h/5H? (ISO 965-1) |
-| Metric Trapezoidal (Tr) | same | Classes are **7e / 7H** (medium) and **8e / 8H** (coarse). Offer 7e/7H only? (ISO 2903) |
-| Acme | same | General-purpose classes are **2G / 3G / 4G** (internal and external share the class name). Centralizing 2C–6C is left out. Offer 2G and 3G? (ASME B1.5) |
-| NPT | (in today's list) | Today's panel has NPT. It is tapered (1:16), and its gauging is different. Drop it, or keep it as a taper preset with no tolerance hint? |
+| OD / ID | entered | Sets the infeed direction, the retract rule and which hint is shown. |
+| Tool # | entered | Tool angle checked against the thread form (60 / 29 / 30 deg) at Generate. |
+| Thread type + class | entered (drop-down) | Section 2. Choosing a size fills X start, X end and pitch; "Custom" is the first entry. |
+| X start, X end | filled, editable | **Major** diameter at Z start and at Z end. Equal = straight; different = taper. |
+| Z start | entered | Includes the lead-in (checked, section 5). |
+| Z end | entered | **Where the tool pulls out** (owner). Each pass cuts to Z end and retracts straight out in X there - no separate pull-out / chamfer field (G76 E = 0, L = 0). |
+| Pitch | filled, editable | TPI or mm per the list; stored as inches per thread. |
+| Thread depth | **derived, read-only** | Calculated from the standard and the fit class (owner: not user entered) - section 3. Shown with its source, e.g. "depth .0307 (UN 2A)". |
+| Pilot dia (ID only) | filled, editable | Filled with the tap drill diameter (section 4). The crest for the cycle and the base of the ID retract. |
+| RPM | entered | Checked against Z speed (section 5). |
+| Number of passes, # of spring passes | entered | As today. |
+| # of starts | entered | As today: P = lead; each start shifted one pitch in Z. |
+| Entry angle | filled by form, editable | Compound infeed angle (G76 Q): 29.5 for 60 deg forms, 14.5 for Acme (29 deg), 15 for Tr (30 deg), 0 = straight plunge. |
 
-**Where the numbers come from.** The data lives in a data file in `models/` or `data/`. It is built from the published standard formulas, and the tests check it against tabulated values in the standards / Machinery's Handbook: at least three sizes per list, to .0001". Today's panel computes UN tolerances inline and uses a "simplified" metric 6g. That code is replaced, so the panel only looks values up. No tolerance values will be made up or estimated; any size the data doesn't cover is shown as "Custom".
+Kept in the background (defaults, shown under "Advanced"): depth degression (G76 R, default 1.0 = constant
+area per pass); the first-pass depth is derived from the depth, passes and degression as today.
 
-## 3. Hints (read-only, under the fields)
+No LH threads (owner, at this time): Z end is always behind Z start (cutting toward the chuck, M3).
 
-- **OD:** the pitch diameter window for the chosen class (max / min, e.g. 1/4-20 2A: PD .2164 – .2127, values taken from the data file). Also the major diameter range, because that is what a micrometer reads before the wires go on.
-- **ID:**
-  - the nominal pilot / bore diameter and the nearest standard drill (e.g. 1/4-20: #7, .201);
-  - also the class's **minor diameter window**. A single-point ID thread is normally cut in a **bored** hole, so the drill is the roughing size and the minor window is the size to bore to;
-  - the internal pitch diameter window for a gauge or wire check.
-- Changing X, pitch or depth by hand after picking a size drops the hint to "Custom (no tolerance data)". The hint never describes a thread other than the one being cut.
+## 2. Thread types and classes (owner-agreed)
 
-## 4. Motion
+| Type | Classes offered | Standard |
+|---|---|---|
+| UNC, UNF | 2A / 2B, 3A / 3B | ASME B1.1 |
+| Metric Coarse, Metric Fine | 6g / 6H (medium), 4h / 5H (close) | ISO 965-1 |
+| Metric Trapezoidal (Tr) | 7e / 7H | ISO 2903 |
+| Acme | 2G / 3G | ASME B1.5 |
+| NPT | (none - gauged, see below) | ASME B1.20.1 |
+| Custom | none | - |
 
-**Retracts (owner rule):**
-- OD threads retract to the larger of X start / X end + .020" (dia).
-- ID threads retract to pilot dia − .005" (dia).
-- Retracts are always outside the material, between passes and at the end.
+The OD / ID field picks the external (A, g, e, G) or internal (B, H, G) class of the pair automatically.
 
-Today's ID drive line is crest − .020; under this plan it becomes pilot − .005.
+**NPT preset** (owner: auto-populates like the others). Pitch from the size; the taper is fixed at 1:16
+on diameter, so **X end is derived from X start and the Z length** (X end = X start + |Z end - Z start| / 16,
+growing toward the larger end). X start is the major diameter at the small end (the pipe end / mouth of
+the tapped hole) from the standard's E0 and thread height. Cut as a tapered thread (section 6).
 
-**Straight threads:** G76, as merged today (verified with rs274: full depth, approach stays clear). Only the drive line changes, to the retract rule above. OD stays the same: major + .020.
+**Custom**: every X / pitch field editable; the user also picks the **form** (60 deg / Acme 29 deg /
+Tr 30 deg / NPT 60 deg taper) so the depth can still be calculated - depth is never typed. No class, no
+tolerance hint.
 
-**Tapered threads:** LinuxCNC's G76 can't cut a taper (its E/L only shapes the exit). Tapers are cut as a series of **G33 passes** generated by the planner, one per depth:
-1. Rapid to the retract X at Z start.
-2. Rapid to the pass start X.
-3. G33 to (X end at this depth, Z end).
-4. Rapid out in X to the retract.
-5. Rapid back in Z.
+**Where the numbers come from.** A data file (`models/` or `data/`) generated from the published
+standard formulas, with tests that check it against tabulated values in the standards / Machinery's
+Handbook (at least three sizes per type, to .0001"). Today's panel computes UN tolerances inline and a
+"simplified" metric 6g; that code is replaced, the panel only looks values up. No tolerance value is
+invented or estimated; a size the data doesn't cover is not offered (use Custom).
 
-- The infeed per pass follows the entry angle (each pass's Z start shifts by depth × tan(angle)). The depth per pass follows the same degression as G76. Spring passes and multi-start use the same rules.
-- I could use G33 for straight threads too, so both work the same way. But G76 is verified and familiar in the code, so I'd keep it.
+## 3. Thread depth (derived)
 
-**Verification:**
-- rs274 canon on straight and tapered OD/ID threads: the deepest pass reaches the root along the whole taper; every retract is above major + .020 (OD) / below pilot − .005 (ID); the spindle sync covers every cutting move.
-- The rapid-collision check against the stock.
-- Air-cut it once with the owner before first metal.
+Depth = the radial distance the tool feeds from the crest to the root, for the chosen standard and class:
+
+- **External** (OD): from the class's **major diameter (max)** down to the **minor diameter for the
+  class** (UN: the max minor of the 2A / 3A external thread; metric: d3 from ISO 965 for g / h; Tr / Acme:
+  the standard's external minor for the class). X start / X end are populated with the nominal major as
+  the owner asked; the depth is measured from there, and the hint shows the major range for the class.
+- **Internal** (ID): from the **pilot (tap drill)** out to the class's **major diameter (min)** (UN 2B /
+  3B: min major = basic major; metric H: D basic; Tr / Acme per standard), so the tool reaches full form
+  even with a tap-drill-sized bore.
+- **NPT**: thread height 0.8P (ASME B1.20.1, truncation per the standard).
+- **Custom**: the form's basic depth (60 deg: .61343P external / .54127P internal; Acme: .5P + the 2G
+  allowance; Tr: .5P + ac) - stated as "basic depth, no class".
+
+The data file stores these per size / class; the planner gets the depth, never a formula in the GUI.
+If the pilot is edited, the ID depth updates (it is pilot -> major).
+
+## 4. Hints (read-only, under the fields)
+
+- **OD**: pitch-diameter window for the class (max / min - e.g. 1/4-20 2A: PD .2164 / .2127) and the
+  major range. NPT: no PD window (it is gauged) - the hint shows the L1 hand-tight length and "check with
+  an L1 ring gauge".
+- **ID**: the **tap drill** (owner: drill only, no boring advice) - e.g. 1/4-20: #7 (.2010); M6x1: 5.0 mm;
+  1/4 NPT: 7/16. The pilot field is filled with its diameter.
+- Editing X or pitch by hand after choosing a size turns the hint into "Custom (no tolerance data)" -
+  the hint never describes a thread other than the one being cut.
 
 ## 5. Checks at Generate (same red / amber reporting as the other checks)
 
-- **Spindle sync:** pitch × starts × RPM must be within the Z MAX_VELOCITY in the INI, with margin for spindle-speed variation. If not, show an error that gives the highest usable RPM.
-- **Lead-in:** Z start must be far enough in front of the material for Z to reach sync speed (from Z MAX_ACCELERATION). If not, show a warning that gives the minimum.
-- **Tool:** a warning if the tool's angle doesn't suit the form (e.g. 60 deg insert on an Acme thread).
-- **ID:** pilot − .005 must stay above the boring bar's minimum bore, if the tool has one recorded.
-- **Taper:** "any size and pitch" means anything the machine can sync. Steep tapers (above 45 deg) are refused, because G33 lead along X is a different mode.
+- **Spindle sync**: pitch x starts x RPM <= the Z MAX_VELOCITY in the INI with margin for spindle-speed
+  variation; error with the highest usable RPM.
+- **Lead-in**: Z start far enough in front of the material for Z to reach sync speed (from Z
+  MAX_ACCELERATION); warning with the minimum.
+- **Tool**: angle vs form (e.g. 60 deg insert on an Acme thread) - warning.
+- **ID**: pilot - .005 above the boring bar's minimum bore when the tool has one recorded.
+- **Taper**: steeper than 45 deg is refused (G33 with the lead along X is a different mode).
+- **Z end behind Z start** (no LH) - error otherwise.
 
-## 6. Program file and migration
+## 6. Motion
 
-- New fields: x_start, x_end, depth, pilot_dia, thread_list, thread_class, entry_angle, hand.
-- They replace major_diameter, taper_amount and infeed_method.
-- Old v2 threading blocks convert as follows:
-  - X start = X end = major (taper_amount, which is refused today, is carried over as X end);
-  - entry angle comes from infeed_method;
-  - an ID block's pilot comes from the stock's pilot hole.
-- The corpus gate: every saved program with a straight thread regenerates text-identical G-code, **except** ID threads. Their drive line moves from crest − .020 to pilot − .005, and that difference is listed for the owner to review.
+**Retracts (owner rule)**: OD -> the larger of X start / X end + .020" (dia); ID -> pilot - .005" (dia).
+Always outside the material, between passes and at the end; the retract happens **at Z end**, straight
+in X (owner: Z end is where the tool pulls out). Today's ID drive line is crest - .020; it becomes
+pilot - .005.
 
-## 7. Phases
+**Straight threads**: G76 as merged today (verified with rs274: full depth, clear approach), with the
+drive line set by the retract rule and E = 0, L = 0 (straight pull-out at Z end).
+
+**Tapered threads (incl. NPT)**: LinuxCNC's G76 cannot cut a taper. The planner writes a series of G33
+passes, one per depth: rapid to the retract X at Z start -> rapid to the pass start X -> G33 to (X end at
+that depth, Z end) -> rapid out in X to the retract -> rapid back in Z. Infeed per pass follows the entry
+angle (the pass's Z start shifts by depth x tan(angle)); depth per pass follows the same degression as
+G76; spring passes and multi-start the same rules.
+
+**Verification**: rs274 canon on straight and tapered OD / ID threads (incl. an NPT): the deepest pass
+reaches the root along the whole taper; every retract is above major + .020 (OD) / below pilot - .005
+(ID); spindle sync covers every cutting move; the rapid-collision check against the stock; an air cut
+with the owner before first metal.
+
+## 7. Program file and migration
+
+New fields: side (OD / ID), x_start, x_end, pilot_dia, thread_type, size, thread_class, form (Custom),
+entry_angle; depth becomes derived (stored for the record, recomputed on load). They replace
+major_diameter, taper_amount, infeed_method, thread_depth, chamfer_threads. Old v2 threading blocks
+convert: X start = X end = major, entry angle from infeed_method, ID pilot from the stock's pilot hole,
+designation matched to the new data where it exists (else Custom with the form from the old standard).
+
+Corpus gate: saved programs with threads will **not** regenerate identical G-code - the depth now comes
+from the class (today it is the typed value), the ID drive line moves, and the pull-out chamfer goes.
+Each difference is listed per program for the owner to review before merge.
+
+## 8. Owner decisions (2026-11-12)
+
+- OD / ID and tool # fields: **yes**.
+- Thread depth: **calculated from the standard and fit class, not entered**.
+- Pilot dia for ID: **yes**. ID hint: **tap drill only**.
+- Z end = **where the tool pulls out** (no separate pull-out field).
+- Custom thread option: **yes**.
+- Classes: **6g/6H + 4h/5H (metric), 7e/7H (Tr), 2G/3G (Acme)**, 2A/2B + 3A/3B (UN).
+- NPT: **a preset that auto-populates like the others**.
+- LH threads: **not at this time**.
+- Implementation: **not yet** - plan only.
+
+## 9. Phases
 
 | # | Delivers | Verification |
 |---|---|---|
-| T1 | Thread data file and tests against the published tables. | Spot values from the standards / handbook, to .0001". |
-| T2 | Panel: new fields, list + class, hints, Custom. | Offscreen GUI tests; check by eye with the owner. |
-| T3 | Planner/writer: X start/end, depth, pilot, owner retract rule, G33 tapers, Generate checks. | rs274 canon tests in section 4, corpus, air cut. |
+| T1 | Thread data file (sizes, pitches, class majors / minors / PD windows, depths, tap drills, NPT E0 / L1) + tests against the published tables | spot values from the standards / handbook, to .0001" |
+| T2 | Panel: fields, type + class, Custom (with form), NPT preset, hints | offscreen GUI tests; eyeball with owner |
+| T3 | Planner / writer: X start / end, derived depth, pilot, owner retract at Z end, G33 tapers, Generate checks | rs274 canon tests (section 6), corpus diff review, air cut |
 
-These are independent of the part-model phases. Threads stay their own operation (owner, 2026-11-12).
-
-## 8. To decide (owner)
-
-1. Classes for metric (6g/6H, 4h/5H?), Tr (7e/7H?) and Acme (2G/3G?), since A/B classes are UN only.
-2. Keep NPT as a taper preset, or drop it?
-3. Is LH needed?
-4. ID hint: show both the drill and the bore-to minor window (as proposed), or the drill only?
+Independent of the part-model phases; threads stay their own operation (owner 2026-11-12).
