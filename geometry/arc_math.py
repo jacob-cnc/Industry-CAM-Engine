@@ -165,3 +165,12 @@ def radius_arc_centre(p0, p1, radius: float) -> Optional[Tuple[float, float]]:
         return c1 if cr1 < 0 else c2
     return c1 if cr1 > 0 else c2
 
+
+def r_extent(arc: Arc) -> Tuple[float, float]:
+    """(min, max) radius coordinate an arc reaches along its own sweep (the
+    end points of its quadrant pieces: an extreme lies on a quadrant line)."""
+    rs = [arc.start[0], arc.end[0]]
+    for piece in split_at_quadrants(arc, min_len=0.0):
+        rs += [piece.start[0], piece.end[0]]
+    return min(rs), max(rs)
+

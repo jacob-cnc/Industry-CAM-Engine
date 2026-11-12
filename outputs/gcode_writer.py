@@ -244,85 +244,23 @@ class GCodeWriter:
             lines.append("")
 
         # === ROUGHING PASSES ===
+        # Approach and retract of every pass are planned (planners/rough_links.py,
+        # owner rule 2026-11-12) and validated by the pipeline; emitted as planned.
         if pr.roughing_passes:
             lines.append(f"; === ROUGHING PASSES ({len(pr.roughing_passes)} passes) ===")
-            # Build set of shoulder Z values from profile segments for diagonal retract detection
-            shoulder_z_values = self._get_shoulder_z_values(pr)
-
-            prev_retract_x = safe_x  # First pass retracts to safe boundary
-
-            # Determine the "normal" Z start for roughing (fin_allowance for OD).
-            # Passes with z_start significantly below this are "valley passes" in
-            # a pocket/concavity. They need wider retract to clear pocket walls.
-            fin_allowance_r = pr.roughing_params.fin_allowance / 2.0
-            normal_z_start = fin_allowance_r if not is_id else pr.stock.z_start
-
-            # Compute valley retract X: the widest X level of the normal passes
-            # that terminate at the same shoulder as the valley passes, plus one
-            # DOC clearance. This is the "pocket mouth" — just wide enough to
-            # clear the pocket walls without wasting time retracting to stock OD.
-            valley_retract_x = self._compute_valley_retract_x(
-                pr.roughing_passes, normal_z_start, pr.roughing_params.doc_dia, safe_x
-            )
-
-            prev_valley_x = None  # Track previous valley pass X level
-
             for i, p in enumerate(pr.roughing_passes):
-                # Detect valley pass: z_start is below the normal roughing start.
-                # This means the pass is inside a pocket/concavity where the profile
-                # dips inward then steps back out. The tool must approach from
-                # outside the pocket to avoid rapid-ing through uncut taper material.
-                is_valley_pass = p.z_start < normal_z_start - TOLERANCE * 10
-
-                # For valley passes, use valley_retract_x (pocket mouth + clearance).
-                # For normal passes, use prev_retract_x (one step back — faster cycle time).
-                approach_x = valley_retract_x if is_valley_pass else prev_retract_x
-
-                # Approach sequence:
-                # 1. Traverse Z at approach_x to this pass's Z start (rapid, safe X)
-                lines.append(self._rapid(approach_x, p.z_start, f"Rough pass {i+1}: traverse Z to {p.z_start:.4f} at X{approach_x:.4f}"))
-                # 2. Rapid X to previous pass's X level (already cleared — safe to rapid)
-                #    Then feed X only the last DOC into material.
-                if is_valley_pass and prev_valley_x is not None:
-                    # Rapid from approach_x to previous valley pass X (already cleared)
-                    lines.append(self._rapid(prev_valley_x, p.z_start, f"Rough pass {i+1}: rapid X to prev level {prev_valley_x:.4f}"))
-                    # Feed only the last DOC into material
-                    lines.append(self._feed_line(p.x_level, p.z_start, pr.roughing_params.feed, f"Rough pass {i+1}: feed X to DOC level {p.x_level:.4f}"))
-                else:
-                    # Normal pass: rapid X to previous cleared level, then feed last DOC
-                    # Previous cleared level = current DOC level + one DOC (already cut)
-                    prev_cleared_x = p.x_level + pr.roughing_params.doc_dia
-                    # Only add the rapid step if there's meaningful distance to cover
-                    if abs(approach_x - prev_cleared_x) > TOLERANCE and approach_x > prev_cleared_x + TOLERANCE:
-                        lines.append(self._rapid(prev_cleared_x, p.z_start, f"Rough pass {i+1}: rapid X to prev cleared {prev_cleared_x:.4f}"))
-                    lines.append(self._feed_line(p.x_level, p.z_start, pr.roughing_params.feed, f"Rough pass {i+1}: feed X to DOC level {p.x_level:.4f}"))
-                # 3. Cut along Z
+                if p.retract_moves is None:
+                    raise ValueError(f"Rough pass {i+1} is missing its planned retract.")
+                for move in p.approach_moves:
+                    kind = "feed X to DOC level" if move.move_type == MoveType.FEED else "approach"
+                    lines.append(self._emit_move(move, f"Rough pass {i+1}: {kind}"))
                 for move in p.moves:
                     lines.append(self._emit_move(move, f"Rough pass {i+1} cut"))
-
-                # Retract logic
-                pass_end_z = self._z
-                at_shoulder = self._is_at_shoulder(pass_end_z, shoulder_z_values)
-
-                # For valley passes, retract to valley_retract_x (pocket mouth).
-                # For normal passes at a shoulder, diagonal retract to prev_retract_x.
-                # For normal passes not at shoulder, straight X retract.
-                retract_x = valley_retract_x if is_valley_pass else prev_retract_x
-
-                if at_shoulder or is_valley_pass:
-                    # Diagonal rapid to retract X at pass z_start (clears shoulder/pocket wall)
-                    lines.append(self._rapid(retract_x, p.z_start, f"Diagonal retract to X{retract_x:.4f} (clears {'pocket wall' if is_valley_pass else 'shoulder'})"))
-                else:
-                    # Normal retract: straight X to previous pass X level
-                    lines.append(self._rapid(retract_x, self._z, f"Retract X to prev pass level {retract_x:.4f}"))
-                # Track: next pass retracts to the MAX X this pass reached.
-                # Cap at safe_x — no need to retract beyond stock boundary + clearance.
-                prev_retract_x = min(self._compute_pass_max_x(p), safe_x)
-
-                # Track valley pass X level for next valley pass approach
-                if is_valley_pass:
-                    prev_valley_x = p.x_level
-
+                for move in p.retract_moves:
+                    diagonal = abs(move.z - self._z) > 1e-9 and abs(move.x - self._x) > 1e-9
+                    lines.append(self._emit_move(
+                        move, f"Rough pass {i+1}: {'45 deg pull-off' if diagonal else 'retract X'} "
+                              f"to X{move.x:.4f}"))
             lines.append("")
 
         # === CLEANUP PASS ===
@@ -584,97 +522,6 @@ class GCodeWriter:
         self._z = move.z
         return self._line(parts, comment)
 
-    def _get_shoulder_z_values(self, pr: PlanResult) -> set:
-        """Extract Z values where profile has horizontal-to-vertical transitions (shoulders).
-
-        A shoulder exists where a horizontal segment (constant Z feed) meets a vertical
-        segment (constant X step). These are the Z values where the tool would drag
-        on the wall if it retracts straight up in X.
-
-        We detect shoulders by looking at profile segment endpoints — any Z value
-        that appears as the end of a horizontal segment AND the start of a vertical
-        segment is a shoulder.
-        """
-        shoulder_z = set()
-        segments = pr.profile.segments
-
-        # Walk profile segments looking for Z values at step transitions
-        for i, seg in enumerate(segments):
-            # A shoulder is where a Z-direction segment ends and an X-direction segment begins
-            # In a stepped OD profile: horizontal cut (constant X, varying Z) → vertical step (constant Z, varying X)
-            # The shoulder Z is the Z endpoint of the horizontal segment
-            if i > 0:
-                prev_seg = segments[i - 1]
-                # Previous segment moved in Z (horizontal cut), this segment moves in X (vertical step)
-                prev_dz = abs(seg.z - prev_seg.z) if i > 1 else abs(seg.z - segments[i-1].z)
-                # Check if current segment is primarily an X move (step down)
-                # and previous was primarily a Z move (horizontal cut)
-                if i >= 2:
-                    prev_prev = segments[i - 2]
-                    prev_dx = abs(prev_seg.x - prev_prev.x)
-                    prev_dz_actual = abs(prev_seg.z - prev_prev.z)
-                    curr_dx = abs(seg.x - prev_seg.x)
-                    curr_dz = abs(seg.z - prev_seg.z)
-                    # Shoulder: previous was mostly Z travel, current is mostly X travel
-                    if prev_dz_actual > TOLERANCE and prev_dx < TOLERANCE and curr_dx > TOLERANCE and curr_dz < TOLERANCE:
-                        shoulder_z.add(round(prev_seg.z, 6))
-
-        # Also check roughing pass z_end values that don't match stock z_end
-        # If a pass ends before the stock Z boundary, it's hitting a shoulder
-        for p in pr.roughing_passes:
-            if p.z_end > pr.stock.z_end + TOLERANCE:
-                shoulder_z.add(round(p.z_end, 6))
-
-        return shoulder_z
-
-    def _is_at_shoulder(self, z: float, shoulder_z_values: set) -> bool:
-        """Check if a Z position is at a shoulder (within tolerance)."""
-        for sz in shoulder_z_values:
-            if abs(z - sz) < TOLERANCE * 10:  # Slightly relaxed tolerance for matching
-                return True
-        return False
-
-    def _compute_valley_retract_x(
-        self, passes: list, normal_z_start: float, doc_dia: float, safe_x: float
-    ) -> float:
-        """Compute the retract X for valley passes — the pocket mouth + one DOC clearance.
-
-        Valley passes are inside a concavity where the profile dips inward then
-        steps back out. The tool needs to retract just far enough to clear the
-        pocket walls, not all the way to stock OD.
-
-        The pocket mouth X is the widest X level among the normal passes (those
-        starting at the normal z_start) that terminate at the same shoulder Z as
-        the valley passes. Add one DOC for clearance.
-
-        If no normal passes share the shoulder, falls back to safe_x.
-        """
-        # Find the shoulder Z that valley passes end at
-        valley_end_z = None
-        for p in passes:
-            if p.z_start < normal_z_start - TOLERANCE * 10:
-                valley_end_z = p.z_end
-                break
-
-        if valley_end_z is None:
-            return safe_x  # No valley passes — doesn't matter
-
-        # Find the widest X level among normal passes that end at the same shoulder
-        pocket_mouth_x = 0.0
-        for p in passes:
-            if p.z_start >= normal_z_start - TOLERANCE * 10:
-                # Normal pass — check if it ends at the same shoulder as valley passes
-                if abs(p.z_end - valley_end_z) < TOLERANCE * 10:
-                    pocket_mouth_x = max(pocket_mouth_x, p.x_level)
-
-        if pocket_mouth_x < TOLERANCE:
-            return safe_x  # No matching normal passes — fall back to safe_x
-
-        # Add one DOC clearance beyond the pocket mouth
-        retract_x = pocket_mouth_x + doc_dia
-        # Cap at safe_x — never retract beyond stock boundary
-        return min(retract_x, safe_x)
-
     def _safe_retract_to_park(
         self, park_x: float, park_z: float, is_id: bool,
         stock_boundary: list, comment: str = "Return to park",
@@ -807,43 +654,6 @@ class GCodeWriter:
             return "G40"
         right_code, left_code = ("G41", "G42") if is_id else ("G42", "G41")
         return right_code if direction == ToolDirection.RIGHT else left_code
-
-    def _compute_pass_max_x(self, turning_pass) -> float:
-        """Compute the true maximum X reached by a pass, including arc peaks.
-
-        For linear moves: max X is the endpoint X.
-        For arc moves: compute the actual peak X of the arc sweep.
-        Result is capped at stock OD (no retract beyond stock needed).
-        """
-        max_x = 0.0
-        prev_x = None
-        prev_z = None
-
-        for move in turning_pass.moves:
-            max_x = max(max_x, move.x)
-
-            if move.move_type in (MoveType.ARC_CW, MoveType.ARC_CCW) and prev_x is not None:
-                if abs(move.center_i) > 0.0001 or abs(move.center_k) > 0.0001:
-                    # Center in diameter coords
-                    center_x = prev_x + move.center_i
-                    # Radius in radius coords (for geometry)
-                    center_x_r = center_x / 2.0
-                    start_x_r = prev_x / 2.0
-                    radius_r = math.sqrt(
-                        (start_x_r - center_x_r)**2 + (prev_z - (prev_z + move.center_k))**2
-                    )
-                    # Arc peak X (diameter) = (center_x_r + radius_r) * 2
-                    arc_peak_x_dia = (center_x_r + radius_r) * 2.0
-
-                    # Only use peak if it's actually reached by the arc
-                    # Simple check: peak X > both endpoint X values means arc bulges outward
-                    if arc_peak_x_dia > prev_x and arc_peak_x_dia > move.x:
-                        max_x = max(max_x, arc_peak_x_dia)
-
-            prev_x = move.x
-            prev_z = move.z
-
-        return max_x
 
     def _line(self, content: str, comment: str = "") -> str:
         """Format a G-code line with N-number and semicolon comment."""

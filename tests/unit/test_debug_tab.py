@@ -90,6 +90,9 @@ def _make_plan_result() -> PlanResult:
         moves=moves[1:],
         swept_region=SweptRegion(x_min=2.45, x_max=2.5, z_start=0.0, z_end=-1.0),
     )
+    # The writer emits roughing links only as planned (planners/rough_links.py).
+    from planners.rough_links import plan_rough_links
+    roughing_pass = plan_rough_links([roughing_pass], stock, False, 0.008, lambda pt: False)[0]
 
     return PlanResult(
         profile=profile,

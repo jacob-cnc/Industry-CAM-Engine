@@ -13,7 +13,7 @@ otherwise; planners convert to diameter for ToolMoves.
 """
 
 from geometry.arc_helpers import is_arc_within_x_bounds
-from geometry.arc_math import Arc, arc_from_kernel, short_sweep, split_at_quadrants
+from geometry.arc_math import Arc, arc_from_kernel, r_extent, short_sweep, split_at_quadrants, sweep_piece
 from geometry.kernel_offset import KernelOffsetError, offset_face
 from geometry.zone_builder import profile_to_radius_coords
 from geometry.zone_query import EdgeData
@@ -24,6 +24,7 @@ from geometry.face_ops import (clip_to_box, first_ocp_face, line_intersection, t
 __all__ = [
     # arc identity (geometry/arc_math, arc_helpers)
     "Arc", "arc_from_kernel", "short_sweep", "split_at_quadrants", "is_arc_within_x_bounds",
+    "sweep_piece", "r_extent",
     # profile outline with corner breaks applied (geometry/zone_builder)
     "profile_to_radius_coords",
     # edge record handed to planners by ZoneQueryAPI (geometry/zone_query)
