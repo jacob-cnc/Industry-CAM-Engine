@@ -209,3 +209,28 @@ Findings while reading the planners' kernel code (for 4b and the hand-math branc
   `kernel_offset.offset_face` (sharp, then logged rounded-join fallback, readable error).
 - Every kernel step in cleanup is wrapped in `except Exception: return []` ("triggers
   fallback to zone boundary") — a silent fallback; keep for now (behaviour), hand-math branch.
+
+### Step 4b — raw kernel code out of cleanup + contour roughing planners (03:30 → 04:15)
+
+- New `geometry/face_ops.py` (exported via geometry.kernel), each function moved VERBATIM
+  from the planners with its origin and debts in the docstring:
+  `face_from_coords_polyline_quadrants` (cleanup's face builder, ellipse polyline kept),
+  `offset_face_sharp_only` (cleanup's raw INTERSECTION offset), `first_ocp_face`,
+  `translate_face`, `clip_to_box` (outer wires of every clipped face),
+  `wire_edges(wire, split_arcs=...)` (True = contour roughing's canonical ≤90° arc pieces,
+  False = cleanup's whole arcs). Planners hold kernel shapes as opaque handles.
+- cleanup_planner: six blocks replaced by those calls inside the SAME try/except structure;
+  clip-edge filtering and the ID same-X rule stay in the planner (CAM context). The unused
+  `BRepTools.OuterWire_s(ocp_face)` after the offset was dropped (its result was never used).
+- contour_roughing_planner: `_translate`, `_do_offset`, the clip and the wire walk call the
+  kernel; filtering/ordering stay. REMOVED the fallback `_build_face` (RadiusArc(-radius): the
+  documented wrong-way arcs). It could only run without `zone_set.finished_part` — the
+  pipeline always provides it, no test omits it — so now a clear ValueError instead of a
+  silent gouge. No reachable behaviour changed.
+- Dependency errors 32 → 8 (ratchet lowered). Hand math unchanged (23): code moved, not changed.
+- Verification: suite 1300 passed; regression 16 SAME, 5 BOTH-REFUSE. The corpus exercises
+  both planners: the NX "_offset" programs use contour roughing; every staircase program runs
+  the cleanup planner.
+- Noted: both wire walks drop edges that are neither lines nor circles without a word
+  (documented on wire_edges) — not triggered by line/arc offsets, but a silent missing cut if
+  it ever were.

@@ -17,6 +17,10 @@ from geometry.arc_math import Arc, arc_from_kernel, short_sweep, split_at_quadra
 from geometry.kernel_offset import KernelOffsetError, offset_face
 from geometry.zone_builder import profile_to_radius_coords
 from geometry.zone_query import EdgeData
+from geometry.face_ops import (
+    clip_to_box, face_from_coords_polyline_quadrants, first_ocp_face, offset_face_sharp_only,
+    translate_face, wire_edges,
+)
 
 __all__ = [
     # arc identity (geometry/arc_math, arc_helpers)
@@ -27,4 +31,7 @@ __all__ = [
     "EdgeData",
     # offsets with sharp joins and an explicit, logged rounded-join fallback
     "offset_face", "KernelOffsetError",
+    # face operations: build, offset, move, clip, walk (geometry/face_ops)
+    "face_from_coords_polyline_quadrants", "offset_face_sharp_only", "first_ocp_face",
+    "translate_face", "clip_to_box", "wire_edges",
 ]
