@@ -1,5 +1,12 @@
 # Claude status
 
+## 2026-11-12 — MAIN at 28665c6 (last-retract hotfix + Generate checks merged); REVIEW-READY: cycle time, run controls
+
+- claude/cycle-time cd8bd7f: cycle-time estimate (validation/cycle_time.py; Program tab + Run tab). Merges cleanly with run-overrides.
+- claude/run-overrides ff65ea5: still awaiting the owner's LIVE test (HAL change).
+- FOUND: threading blocks emit G76 with I0 -> LinuxCNC rejects ('In G76, I must not be 0'). Not fixed (owner input on drive-line clearance).
+- No active claims.
+
 ## 2026-11-12 — REVIEW-READY (claims released): HOTFIX last retract, run controls, Generate checks
 
 - claude/hotfix-last-retract f3bc794 (from main 1be0bd5): last roughing pass exits fully - the cleanup approach rapided
