@@ -1,5 +1,12 @@
 # Claude status
 
+## 2026-11-12 — MAIN at 0a75821 (plan docs merged); no active claims; claude/run-overrides awaits live test
+
+- Merged docs only: docs/handoffs/2026-11-12-part-model-and-import-plan.md and
+  2026-11-12-threading-workflow-plan.md. PLAN ONLY - owner: no implementation yet.
+- Upcoming threading rework will touch threading_panel / threading_planner / gcode_writer threading block
+  (not started; will claim first).
+
 ## 2026-11-12 — MAIN at G76 merge (tag lathe-2026-11-12-g76); claude/run-overrides awaits live test; no active claims
 
 ## 2026-11-12 — MAIN at ee4331b (cycle time merged); REVIEW-READY: claude/g76-fix, claude/run-overrides (live test)
