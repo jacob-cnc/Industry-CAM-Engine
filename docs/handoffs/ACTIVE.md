@@ -6,6 +6,15 @@ the distinction between the owner's verbatim request and later design advice.
 
 ## Proposed
 
+- [Plan: one part model, operations on segment groups, STEP / DXF import](2026-11-12-part-model-and-import-plan.md)
+  - Status: PLAN ONLY (owner request 2026-11-12, owner answers recorded). Profile segments move out of
+    blocks into one Part (OD / ID chains, may meet at the face); operations target segment runs; thread /
+    groove parameters come from the geometry; STEP import from faces of revolution (a boolean section gives
+    B-splines - probed on the NX fixture); DXF = the radial revolve sketch; recognised fillets / chamfers
+    become corner breaks when the solver reproduces them exactly. Phases 1 (import into today's builder)
+    -> 2 (v3 model + converter, corpus identical) -> 3 (Program tab) -> 4 (in-process stock, rest machining).
+  - Next (owner): phase order; thread-suggestion tolerance; whether import sets the stock.
+
 - [Hand-math inquiry: findings, walls, next steps](2026-11-12-hand-math-inquiry.md)
   - Status: branch `claude/hand-math-kernel` (from `claude/structure-cleanup`) pushed, NOT merged.
     Fixed: "wires not planar" for contours ending on the back face (F1); finish contour from the
