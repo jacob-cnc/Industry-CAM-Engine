@@ -353,6 +353,17 @@ class MockBackend(HALBackend):
     def program_stop(self) -> bool:
         return True
 
+    def program_step(self) -> bool:
+        return True
+
+    def set_optional_stop(self, enabled: bool) -> bool:
+        self._optional_stop = bool(enabled)
+        return True
+
+    def set_single_block(self, enabled: bool) -> bool:
+        self._single_block = bool(enabled)
+        return True
+
     # ------------------------------------------------------------------
     # Tool
     # ------------------------------------------------------------------
@@ -486,6 +497,7 @@ class MockBackend(HALBackend):
             spindle=spindle,
             feed_override=self._feed_override,
             rapid_override=self._rapid_override,
+            optional_stop=getattr(self, "_optional_stop", False),
             tool_in_spindle=self._tool_in_spindle,
             estop_active=(self._task_state == TaskState.ESTOP),
             machine_on=self._machine_on,

@@ -371,6 +371,21 @@ class HALBackend(ABC):
         """Resume paused program. Returns True on success."""
         ...
 
+    def program_step(self) -> bool:
+        """Single block: from idle start the program and stop after its first
+        block; when paused run the next block; while running stop after the
+        current block (LinuxCNC AUTO_STEP)."""
+        return False
+
+    def set_optional_stop(self, enabled: bool) -> bool:
+        """Stop at M1 (optional stop) or not."""
+        return False
+
+    def set_single_block(self, enabled: bool) -> bool:
+        """Tell HAL that single block is on, so the green button steps instead
+        of resuming (industry-cam.hal section 10)."""
+        return False
+
     @abstractmethod
     def program_stop(self) -> bool:
         """Stop program execution. Returns True on success."""

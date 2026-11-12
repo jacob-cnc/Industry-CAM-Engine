@@ -40,15 +40,15 @@ loadrt near names=near-spindle
 loadrt mux8 names=mux8.jogscale-x,mux8.jogscale-z
 
 # OR gate for jog-vel-mode: velocity mode when sel1 OR sel2 is HIGH
-loadrt or2 names=or2.jog-vel-mode
+loadrt or2 names=or2.jog-vel-mode,or2.program-active
 
 # Compound-slide jog routing (see section 11 below)
 #   mux-gen.00 = X jog-counts mux, mux-gen.01 = Z jog-counts mux (s32 in -> s32 out)
 #   and2/not gate jog-enable so the GUI can switch mux inputs without a count jump
 loadrt mux_generic config="ss2,ss2"
-loadrt and2 names=and2.mpg-jog-gate,and2.cycle-resume
+loadrt and2 names=and2.mpg-jog-gate,and2.mpg-jog-idle,and2.cycle-paused-go,and2.cycle-resume,and2.cycle-step
 loadrt estop_latch count=1
-loadrt not names=not.compound-jog-inhibit
+loadrt not names=not.compound-jog-inhibit,not.program-active,not.single-block
 
 # Debounce for switches and buttons
 loadrt debounce cfg=12
@@ -64,8 +64,14 @@ addf estop-latch.0                  servo-thread   # right after the read: E-sto
 addf mux-gen.00                     servo-thread
 addf mux-gen.01                     servo-thread
 addf not.compound-jog-inhibit       servo-thread
+addf or2.program-active             servo-thread
+addf not.program-active             servo-thread
 addf and2.mpg-jog-gate              servo-thread
+addf and2.mpg-jog-idle              servo-thread
+addf not.single-block               servo-thread
+addf and2.cycle-paused-go           servo-thread
 addf and2.cycle-resume              servo-thread
+addf and2.cycle-step                servo-thread
 addf motion-command-handler         servo-thread
 addf motion-controller              servo-thread
 addf debounce.0                     servo-thread
@@ -254,6 +260,7 @@ net estop-loop         estop-latch.0.ok-out             =>  iocontrol.0.emc-enab
 #    (P11), both normally open, TRUE while pressed, clean edges.
 #
 #    GREEN  paused (red pause, M0 tool check, M0/M1) -> resume   [HAL, below]
+#           paused in SINGLE BLOCK                  -> next block [HAL, below]
 #           nothing running or queued              -> start at line 1 [GUI]
 #           running                                -> ignored
 #    RED    -> pause / feed hold                    [HAL, GUI-independent]
@@ -267,9 +274,17 @@ net estop-loop         estop-latch.0.ok-out             =>  iocontrol.0.emc-enab
 #    red drove halui.program.stop (abort).
 net cycle-go-raw     hm2_7i96s.0.gpio.009.in => debounce.0.8.in
 net cycle-stop-raw   hm2_7i96s.0.gpio.010.in => debounce.0.9.in
-net cycle-go-btn     debounce.0.8.out => and2.cycle-resume.in0
-net program-paused   halui.program.is-paused => and2.cycle-resume.in1
+net cycle-go-btn     debounce.0.8.out => and2.cycle-paused-go.in0
+net program-paused   halui.program.is-paused => and2.cycle-paused-go.in1
+net cycle-paused-go  and2.cycle-paused-go.out => and2.cycle-resume.in0 and2.cycle-step.in0
+#    Single block (GUI Run tab, 2026-11-12): the GUI drives single-block-mode via
+#    compound-slide.single-block (netted at GUI startup). While it is TRUE a
+#    green press when paused steps one block instead of resuming the whole run.
+#    No GUI -> the net has no writer and reads FALSE -> green resumes as before.
+net single-block-mode => not.single-block.in and2.cycle-step.in1
+net not-single-block not.single-block.out => and2.cycle-resume.in1
 net cycle-resume     and2.cycle-resume.out => halui.program.resume
+net cycle-step       and2.cycle-step.out => halui.program.step
 net cycle-pause-btn  debounce.0.9.out => halui.program.pause
 
 # ============================================================================
@@ -341,7 +356,26 @@ net mpg-z-scale    mux8.jogscale-z.out            =>  joint.1.jog-scale   axis.z
 net machine-is-on        halui.machine.is-on => and2.mpg-jog-gate.in0
 net compound-jog-inhibit => not.compound-jog-inhibit.in
 net jog-not-inhibited    not.compound-jog-inhibit.out => and2.mpg-jog-gate.in1
-net mpg-jog-enable       and2.mpg-jog-gate.out => joint.0.jog-enable joint.1.jog-enable axis.x.jog-enable axis.z.jog-enable
+net mpg-jog-gated       and2.mpg-jog-gate.out => and2.mpg-jog-idle.in0
+net mpg-jog-enable       and2.mpg-jog-idle.out => joint.0.jog-enable joint.1.jog-enable axis.x.jog-enable axis.z.jog-enable
+
+# MPGs as override knobs while a program runs or is paused (owner 2026-11-12;
+# dedicated override knobs to come later). X MPG = feed override, Z MPG = rapid
+# override, 1 % per detent (4 counts per detent x .0025). Jogging is disabled
+# for that time (and2.mpg-jog-idle), so a turn never moves an axis mid-program.
+# halui absorbs count changes while count-enable is FALSE (halui.cc keeps its
+# old count either way), so enabling at cycle start causes no jump. Limits:
+# feed 0 .. [DISPLAY]MAX_FEED_OVERRIDE (2.0), rapid 0 .. 1.0 (halui, fixed).
+net program-running      halui.program.is-running => or2.program-active.in0
+net program-paused       => or2.program-active.in1
+net program-active       or2.program-active.out => not.program-active.in halui.feed-override.count-enable halui.rapid-override.count-enable
+net program-not-active   not.program-active.out => and2.mpg-jog-idle.in1
+net mpg-x-counts         => halui.feed-override.counts
+net mpg-z-counts         => halui.rapid-override.counts
+setp halui.feed-override.scale  0.0025
+setp halui.rapid-override.scale 0.0025
+setp halui.feed-override.direct-value  FALSE
+setp halui.rapid-override.direct-value FALSE
 
 # jog-vel-mode driven by or2 (set dynamically from postgui.hal)
 

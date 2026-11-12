@@ -17,11 +17,11 @@ import tempfile
 import logging
 from typing import Optional, List
 
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QSettings
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QFileDialog, QSpinBox,
-    QFrame, QMessageBox,
+    QFrame, QMessageBox, QSlider,
 )
 
 from gui.components.elided_label import ElidedLabel
@@ -70,6 +70,7 @@ class RunTab(QWidget):
         # line mapping. Until busy is seen, wait up to _START_GRACE polls.
         self._seen_busy = False
         self._polls_since_start = 0
+        self._syncing_overrides = False
 
         self._build_ui()
         self._connect_signals()
@@ -92,9 +93,145 @@ class RunTab(QWidget):
         self._sim_viewer = SimViewerWidget(show_gcode_panel=True)
         layout.addWidget(self._sim_viewer, stretch=1)
 
+        # --- Overrides, single block, optional stop ---
+        layout.addWidget(self._build_override_bar())
+
         # --- Bottom control bar: machine execution controls ---
         bar = self._build_control_bar()
         layout.addWidget(bar)
+
+    # Feed override 1-200 % ([DISPLAY] MAX_FEED_OVERRIDE = 2.0); rapid 1-100 %
+    # (LinuxCNC caps rapid override at 100 %: rapids already run at the axes'
+    # maximum velocity). The X / Z MPGs change the same overrides while a
+    # program runs (industry-cam.hal section 11); the sliders follow them.
+    FEED_RANGE = (1, 200)
+    RAPID_RANGE = (1, 100)
+
+    def _build_override_bar(self) -> QWidget:
+        """Feed / rapid override sliders and the single block / optional stop
+        toggles (owner 2026-11-12, first-article prove-out)."""
+        bar = QFrame()
+        bar.setStyleSheet(f"QFrame {{ background-color: {COLORS['bg_panel']};"
+                          f" border-top: 1px solid {COLORS['border_normal']}; }}")
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(10, 6, 10, 6)
+        row.setSpacing(10)
+        label_style = (f"color: {COLORS['text_primary']}; font-weight: bold;"
+                       f" font-family: {FONTS['mono_family']}, {FONTS['fallback_mono']};")
+
+        def slider(name, rng, tip):
+            title = QLabel(name)
+            title.setStyleSheet(f"color: {COLORS['text_secondary']};")
+            sl = QSlider(Qt.Horizontal)
+            sl.setRange(*rng)
+            sl.setValue(100)
+            sl.setSingleStep(1)
+            sl.setPageStep(10)
+            sl.setMinimumWidth(220)
+            sl.setFixedHeight(36)
+            sl.setToolTip(tip)
+            value = QLabel("100%")
+            value.setMinimumWidth(52)
+            value.setStyleSheet(label_style)
+            reset = QPushButton("100%")
+            reset.setFixedHeight(32)
+            reset.setToolTip(f"{name} override back to 100%")
+            for w in (title, sl, value, reset):
+                row.addWidget(w)
+            return sl, value, reset
+
+        self._feed_slider, self._feed_value, feed_reset = slider(
+            "Feed", self.FEED_RANGE,
+            "Feed override 1-200%. While a program runs, the X handwheel changes it too "
+            "(1% per detent).")
+        sep = QFrame()
+        sep.setFrameShape(QFrame.VLine)
+        sep.setStyleSheet(f"color: {COLORS['border_normal']};")
+        row.addWidget(sep)
+        self._rapid_slider, self._rapid_value, rapid_reset = slider(
+            "Rapid", self.RAPID_RANGE,
+            "Rapid override 1-100% (LinuxCNC can't go above 100%: rapids already run at "
+            "full axis speed). While a program runs, the Z handwheel changes it too.")
+        self._feed_slider.valueChanged.connect(self._on_feed_slider)
+        self._rapid_slider.valueChanged.connect(self._on_rapid_slider)
+        feed_reset.clicked.connect(lambda: self._feed_slider.setValue(100))
+        rapid_reset.clicked.connect(lambda: self._rapid_slider.setValue(100))
+
+        row.addStretch()
+        toggle_style = (
+            f"QPushButton {{ background-color: {COLORS['bg_surface']}; color: {COLORS['text_primary']};"
+            f" border: 1px solid {COLORS['border_normal']}; border-radius: 4px; padding: 4px 12px; }}"
+            f"QPushButton:checked {{ background-color: {COLORS['status_warning']};"
+            f" color: #1A1A1A; font-weight: bold; }}")
+        settings = QSettings("IndustryCAM", "run")
+        self._btn_single = QPushButton("Single Block")
+        self._btn_single.setCheckable(True)
+        self._btn_single.setFixedHeight(36)
+        self._btn_single.setStyleSheet(toggle_style)
+        self._btn_single.setToolTip(
+            "On: Cycle Start (screen or green button) runs ONE block at a time. Turning it on "
+            "while running stops after the current block. Resume runs on normally.")
+        self._btn_optional = QPushButton("Optional Stop (M1)")
+        self._btn_optional.setCheckable(True)
+        self._btn_optional.setFixedHeight(36)
+        self._btn_optional.setStyleSheet(toggle_style)
+        self._btn_optional.setToolTip(
+            "On: the program stops at each M1 - before each block's first cut and before the "
+            "finish pass (measure, adjust wear). Cycle Start continues.")
+        self._btn_single.setChecked(settings.value("single_block", False, type=bool))
+        self._btn_optional.setChecked(settings.value("optional_stop", False, type=bool))
+        self._btn_single.toggled.connect(self._on_single_block_toggled)
+        self._btn_optional.toggled.connect(self._on_optional_stop_toggled)
+        row.addWidget(self._btn_single)
+        row.addWidget(self._btn_optional)
+        # tell HAL / LinuxCNC the remembered state now
+        self._backend.set_single_block(self._btn_single.isChecked())
+        self._backend.set_optional_stop(self._btn_optional.isChecked())
+        return bar
+
+    # --- overrides -----------------------------------------------------
+
+    def _on_feed_slider(self, v: int):
+        self._feed_value.setText(f"{v}%")
+        if not self._syncing_overrides:
+            self._backend.set_feed_override(v / 100.0)
+
+    def _on_rapid_slider(self, v: int):
+        self._rapid_value.setText(f"{v}%")
+        if not self._syncing_overrides:
+            self._backend.set_rapid_override(v / 100.0)
+
+    def _sync_overrides(self, state):
+        """Follow LinuxCNC's overrides (the MPGs change them during a run),
+        unless the operator is dragging that slider."""
+        self._syncing_overrides = True
+        try:
+            for sl, value, rng in ((self._feed_slider, state.feed_override, self.FEED_RANGE),
+                                   (self._rapid_slider, state.rapid_override, self.RAPID_RANGE)):
+                if sl.isSliderDown():
+                    continue
+                pct = int(round(value * 100.0))
+                if pct != sl.value():
+                    sl.setValue(max(rng[0], min(rng[1], pct)))
+                    # a MPG can take an override below the slider's 1 %: show it
+                    if pct < rng[0]:
+                        (self._feed_value if sl is self._feed_slider else self._rapid_value).setText(f"{pct}%")
+        finally:
+            self._syncing_overrides = False
+
+    # --- single block / optional stop ------------------------------------
+
+    def _on_single_block_toggled(self, on: bool):
+        QSettings("IndustryCAM", "run").setValue("single_block", on)
+        self._backend.set_single_block(on)
+        state = self._backend.state
+        if on and state.program_busy and state.interp_state != InterpState.PAUSED:
+            self._backend.program_step()          # stop after the current block
+            logger.info("Single block on mid-run: stopping after the current block")
+
+    def _on_optional_stop_toggled(self, on: bool):
+        QSettings("IndustryCAM", "run").setValue("optional_stop", on)
+        self._backend.set_optional_stop(on)
 
     def _build_control_bar(self) -> QWidget:
         """Build the machine execution control bar at the bottom."""
@@ -439,6 +576,10 @@ class RunTab(QWidget):
         self._backend.poll()          # decide on fresh state, not the 5 Hz cache
         state = self._backend.state
         if state.interp_state == InterpState.PAUSED or getattr(state, "paused", False):
+            if self._btn_single.isChecked():
+                self._backend.program_step()
+                logger.info("Cycle start (%s): single block step", source)
+                return "stepped"
             self._backend.program_resume()
             self._btn_pause.setText("Pause")
             logger.info("Cycle start (%s): resume", source)
@@ -476,7 +617,12 @@ class RunTab(QWidget):
             return "cancelled"
         if not self._ensure_source_loaded():
             return "failed"
-        success = self._backend.program_run(start_line=line)
+        # Optional stop as the Run tab shows it, every start (never LinuxCNC's default).
+        self._backend.set_optional_stop(self._btn_optional.isChecked())
+        if self._btn_single.isChecked() and line == 0:
+            success = self._backend.program_step()
+        else:
+            success = self._backend.program_run(start_line=line)
         if success:
             self._set_running_state()
             logger.info("Cycle start (%s): program started at line %d", source, line + 1)
@@ -559,7 +705,10 @@ class RunTab(QWidget):
             return
         self._backend_file = path
         self._resume_plan = plan
-        if self._backend.program_run(start_line=0):
+        self._backend.set_optional_stop(self._btn_optional.isChecked())
+        started = (self._backend.program_step() if self._btn_single.isChecked()
+                   else self._backend.program_run(start_line=0))
+        if started:
             self._set_running_state()
             logger.info("Run from source line %d via %s", idx + 1, path)
         else:
@@ -657,6 +806,7 @@ class RunTab(QWidget):
     def _poll(self):
         """Timer callback — update line highlighting and status from machine state."""
         state = self._backend.state
+        self._sync_overrides(state)
 
         # Update interpreter state display. The interpreter goes IDLE once it
         # has read the whole file while motion is still executing, so show

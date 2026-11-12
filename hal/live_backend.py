@@ -101,6 +101,9 @@ class LiveBackend(HALBackend):
             self._hal_comp.newpin("spindle-at-speed", hal_module.HAL_BIT, hal_module.HAL_IN)
             # Green cycle button (debounced) — GUI starts programs from it
             self._hal_comp.newpin("cycle-start", hal_module.HAL_BIT, hal_module.HAL_IN)
+            # Single block (Run tab): read by HAL so the green button steps
+            # instead of resuming (industry-cam.hal section 10).
+            self._hal_comp.newpin("single-block", hal_module.HAL_BIT, hal_module.HAL_OUT)
             # Control pins — written by GUI
             self._hal_comp.newpin("compound-enable", hal_module.HAL_BIT, hal_module.HAL_OUT)
             self._hal_comp.newpin("compound-angle", hal_module.HAL_FLOAT, hal_module.HAL_OUT)
@@ -134,6 +137,7 @@ class LiveBackend(HALBackend):
             self._halcmd_net(["spindle-vel", "compound-slide.spindle-rps"])
             self._halcmd_net(["spindle-at-speed", "compound-slide.spindle-at-speed"])
             self._halcmd_net(["cycle-go-btn", "compound-slide.cycle-start"])
+            self._halcmd_net(["single-block-mode", "compound-slide.single-block"])
             time.sleep(self._SWITCH_SETTLE_S)
             self._hal_comp["jog-inhibit"] = False
 
@@ -681,6 +685,31 @@ class LiveBackend(HALBackend):
             self._cmd.auto(linuxcnc.AUTO_RESUME)
             return True
         except linuxcnc.error:
+            return False
+
+    def program_step(self) -> bool:
+        try:
+            if not self._ensure_mode(linuxcnc.MODE_AUTO):
+                return False
+            self._cmd.auto(linuxcnc.AUTO_STEP)
+            return True
+        except linuxcnc.error:
+            return False
+
+    def set_optional_stop(self, enabled: bool) -> bool:
+        try:
+            self._cmd.set_optional_stop(bool(enabled))
+            return True
+        except linuxcnc.error:
+            return False
+
+    def set_single_block(self, enabled: bool) -> bool:
+        if self._hal_comp is None:
+            return False
+        try:
+            self._hal_comp["single-block"] = bool(enabled)
+            return True
+        except Exception:
             return False
 
     def program_stop(self) -> bool:

@@ -222,6 +222,7 @@ class GCodeWriter:
         # step-outs shorter than TNR ("Straight feed in concave corner ...",
         # lathe 2026-11-08). Cleanup/finish contours engage G41/G42 per pass.
         lines.append(self._line("G40", "Cutter comp off - roughing is uncompensated"))
+        lines.append(self._optional_stop("before cutting (tool at park)"))
         lines.append("")
 
         # === FACE PASSES ===
@@ -324,6 +325,7 @@ class GCodeWriter:
                 lines.append(self._line(f"S{pr.roughing_params.spindle_rpm:.0f} M3", "Spindle CW - resume"))
                 lines.append("")
 
+            lines.append(self._optional_stop("before the finish pass - measure, adjust wear"))
             lines.append("; === FINISH PASS (profile contour) ===")
 
             for pass_number, p in enumerate(pr.finish_passes):
@@ -661,6 +663,12 @@ class GCodeWriter:
         right_code, left_code = ("G41", "G42") if is_id else ("G42", "G41")
         return right_code if direction == ToolDirection.RIGHT else left_code
 
+    def _optional_stop(self, where: str) -> str:
+        """M1: stops only when the Run tab's Optional Stop is on (owner
+        2026-11-12, first-article prove-out). Placed where the tool is clear of
+        the work: before each block's first cut and before the finish pass."""
+        return self._line("M1", f"Optional stop - {where}")
+
     def _line(self, content: str, comment: str = "") -> str:
         """Format a G-code line with N-number and semicolon comment."""
         line = f"N{self._n} {content}"
@@ -716,6 +724,7 @@ class GCodeWriter:
         lines.append(f"; Infeed: {params.infeed_method}")
         if params.num_starts > 1:
             lines.append(f"; Starts: {params.num_starts} (lead = {params.pitch * params.num_starts * conv:{fmt}})")
+        lines.append(self._optional_stop("before threading"))
         lines.append("")
 
         lines.append(self._line("G7", "Diameter mode"))
@@ -823,6 +832,7 @@ class GCodeWriter:
         lines.append(f"; Start Dia: {params.start_diameter * conv:{fmt}}, Bottom Dia: {params.bottom_diameter * conv:{fmt}}")
         if params.peck_enabled:
             lines.append(f"; Peck: {params.peck_depth * conv:{fmt}} depth, {params.peck_retract * conv:{fmt}} retract")
+        lines.append(self._optional_stop(f"before {op_type.lower()}"))
         lines.append("")
 
         lines.append(self._line("G7", "Diameter mode"))
