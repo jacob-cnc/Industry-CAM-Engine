@@ -1,5 +1,15 @@
 # Claude status
 
+## 2026-11-12 05:50 UTC — ACTIVE: X PID deadband .0005 -> .00025 (owner-authorized, bench-measured)
+
+- Scope (claimed): industry-cam.ini [JOINT_0] DEADBAND only. No other INI/HAL/source edits.
+- Branch claude/x-deadband-00025 from main 8e44e8a; one-line INI commit. Live machine already running .00025 via halcmd.
+- Evidence (air, 12 x +.020 dia F10 moves per run, halsampler captures): deadband .0005 parks +.0002..+.0008 dia short every move;
+  .0003 parks -.0003..+.0003; .00025 parks on the nearest scale count (-.0004..+.0001, pattern = scale quantization), no hunting
+  (1 correction step in 82 s parked). Scale count = .000197 radius; .00025 sits between 1 count and the 2-count acceptance edge.
+- Also found (no change made): outward-only slip ~+.0002..+.0010 dia per move, grows with accel; inward ~0; not the coupling.
+- Codex: no overlap expected (your claims released since 2026-11-08).
+
 ## 2026-11-11 05:27 UTC — MAIN MOVED to 9e904b4 (owner: merge what passes)
 
 - Merged after full suites (baseline failures only; merged main: 1105 pass / 5 known):
