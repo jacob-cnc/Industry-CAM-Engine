@@ -31,7 +31,6 @@ from pipeline.model_builder import build_from_fields
 from outputs.gcode_writer import GCodeWriter
 from outputs.graph_adapter import convert as graph_convert
 from outputs.gcode_parser import parse as parse_gcode
-from outputs import material_sim
 from models.tool import ToolDef, ToolOrientation, ToolDirection, ToolType
 from models.validation import PipelineStatus
 from geometry.arc_helpers import is_arc_within_x_bounds

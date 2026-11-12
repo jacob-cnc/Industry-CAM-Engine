@@ -114,3 +114,18 @@ Verification: suite 1310 passed (1309 + ratchet); regression vs base_v2: 16 SAME
 BOTH-REFUSE (compare now ignores tracebacks in refusal dialogs — paths differ between
 checkouts). Architecture: dependency errors 62 → 60 (unused OCP/build123d imports gone
 from contour_roughing_planner) — ratchet lowered.
+
+### Step 2b — remove the dormant material simulator (2026-11-12 01:15 → 01:35)
+
+- `outputs/material_sim.py` (1055 lines) was an earlier material-removal simulator. Nothing
+  in production called `material_sim.compute()`: program_tab imported the module but never
+  used it, and `graph_adapter.convert()` only serialized material states when given
+  `material_sim_data`, which no caller passed (`graph_convert(first_plan_result)`). Zone
+  shading now comes from `outputs/cut_regions` (rs274-based), so it was a second, dead
+  simulator. Removed with its two property-test files (13 tests), the adapter's
+  `_convert_material_sim` + parameter, and program_tab's unused import (the only gui/ edit).
+- Kept: `MaterialStateData` and `GraphData.material_states` (always None now) — gui/
+  graph_widget and sim_viewer still read them (their code returns early when None).
+  Pruning that dormant GUI rendering is a GUI change for an owner-checked session.
+- Verification: suite 1297 passed (1310 − 13 removed); regression 16 SAME, 5 BOTH-REFUSE.
+  Dependency errors 60 → 56 (Shapely gone from outputs/ x4) — ratchet lowered.
