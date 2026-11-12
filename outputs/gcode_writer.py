@@ -465,6 +465,10 @@ class GCodeWriter:
             f"{o} endif",
         ]
 
+    # How far past the centreline the nose goes when a contour starts at X0, on
+    # top of the nose radius (owner 2026-11-11).
+    _CENTRE_OVERSHOOT = 0.002
+
     # Extra length of the comp entry move beyond 2 x TNR (inches).
     _COMP_ENTRY_MARGIN = 0.010
 
@@ -501,6 +505,8 @@ class GCodeWriter:
         k, px, pz = 0, sx, sz
         while k < len(moves) and moves[k].move_type in (MoveType.FEED, MoveType.RAPID):
             mv = moves[k]
+            if abs(mv.x - px) < 1e-9 and abs(mv.z - pz) < 1e-9:   # zero length
+                k += 1; continue
             radial = abs(mv.z - pz) < 1e-9 and abs(mv.x - px) > 1e-9
             # ID lead across the mouth from the approach height (Z0+.001) down
             # to the contour start is air too, though not exactly radial. Kept,
@@ -537,9 +543,20 @@ class GCodeWriter:
         face_first = (first is not None and first.move_type == MoveType.FEED
                       and abs(first.z - pz) < 1e-9 and abs(first.x - px) > 1e-9)
         od_face_entry = (not is_id) and face_first and comp_code == "G42"
-        if od_face_entry:
+        # A contour that starts AT THE CENTRE (X start 0 / segment 1 at X0) with
+        # something other than a face - a dome, a cone point - is entered the same
+        # way: across the centreline, then straight into the first cut.
+        at_centre = abs(px) < 1e-6
+        centre_entry = ((not is_id) and comp_code == "G42" and at_centre and not od_face_entry
+                        and first is not None and first.x > px + 1e-9)
+        if od_face_entry or centre_entry:
             outward = 1.0 if first.x > px else -1.0
-            entry_x = px - outward * 2.0 * r       # one nose radius before (diameter)
+            # one nose radius before the start (diameter) puts the nose centre on
+            # it after LinuxCNC's inside-corner clip; at the centre go a further
+            # .002 past, so no nib is left (owner 2026-11-11: nose radius + .002)
+            past = r + (self._CENTRE_OVERSHOOT if at_centre else 0.0)
+            entry_x = px - outward * 2.0 * past
+            od_face_entry = True
         else:
             entry_x = px
         # Contour starting with a SLOPED line toward the chuck (a bore-mouth
@@ -547,17 +564,22 @@ class GCodeWriter:
         # air behind its start. A vertical entry made a corner there that comp
         # treats as inside, stopping the nose short of the top of the chamfer.
         entry_z = pz
-        collinear = (comp_code != "G40" and not od_face_entry and first is not None
-                     and first.move_type == MoveType.FEED
-                     and abs(first.x - px) > 1e-9 and first.z < pz - 1e-9)
-        if collinear:
+        # Only a genuinely sloped first cut (>= 15 deg off radial): a near-radial
+        # lead (a face move .001 off level) would be extended almost flat and
+        # far out - that sent an entry to X18.2 (caught 2026-11-11, never released).
+        collinear = False
+        if (comp_code != "G40" and not od_face_entry and first is not None
+                and first.move_type == MoveType.FEED
+                and abs(first.x - px) > 1e-9 and first.z < pz - 1e-9):
             ur, uz = (first.x - px) / 2.0, first.z - pz
             L = (ur * ur + uz * uz) ** 0.5
-            t = min_len / (abs(uz) / L)                 # back along it until min_len above the start
-            entry_x = px - 2.0 * (ur / L) * t
-            entry_z = pz - (uz / L) * t
-            if not is_id and entry_x < 0.0:             # never past the centreline
-                collinear, entry_x, entry_z = False, px, pz
+            if abs(uz) / L >= 0.2588:                   # sin 15 deg
+                t = min_len / (abs(uz) / L)             # back along it until min_len above the start
+                entry_x = px - 2.0 * (ur / L) * t
+                entry_z = pz - (uz / L) * t
+                collinear = is_id or entry_x >= 0.0     # never past the centreline on OD
+                if not collinear:
+                    entry_x, entry_z = px, pz
 
         # Safe approach: rise, traverse at clearance (comp off).
         if self._z < z_clear - 1e-9:

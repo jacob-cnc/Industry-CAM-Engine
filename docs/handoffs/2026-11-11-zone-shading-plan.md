@@ -305,3 +305,47 @@ cleanup pass doesn't run to the end in LinuxCNC (its first G03 out of the centre
 the writer's guard doesn't catch it). At the saved .005 it runs. The graph says
 "not shown: interpreter did not run the program to the end", and the machine
 would stop at the same line.
+
+## 9. Owner decisions on 1 and 2, and what was done (2026-11-11)
+
+**1 (face): no implicit facing cycle.** Users often don't want the part faced.
+The owner likes a toolpath that runs up or down the face straight into the
+profile, because that motion avoids the burr at the face/profile transition (and
+at a chamfer, unless it's cut in one smooth motion). Alternatives such as a
+facing-specific block are to be discussed.
+
+**2 (centre nib): done.** When X start is 0 or segment 1 is at X0, the finish
+nose goes **nose radius + .002 past the centreline**, for flat faces as well.
+- Planner (`finish_planner`): on OD, when X start is inside the first point
+  (facing requested) or the profile starts at the centre, the lead from X start to
+  the first point runs at exactly **Z0** (it was Z0+.001). It is a flat face cut
+  that flows straight into the profile; before, the face came out .001 conical and
+  the writer's centre entry didn't engage.
+- Writer (`_emit_contour_pass`):
+  - Zero-length leading moves are skipped.
+  - The OD face entry at the centre uses `_CENTRE_OVERSHOOT` = .002 on top of the
+    nose radius (entry X-.0360 for a .016 nose).
+  - A contour starting at X0 with a non-face cut (a dome, a cone point) gets the
+    same centre entry, then flows straight into it.
+- Result: no nib and a flat face on the NX OD part (X start 0, first point
+  X.2362), the Hemisphere dome and flat-face → chamfer. Facing off (X start = stock
+  OD) leaves the face untouched. All are tests.
+
+**Bug caught and fixed in the same round:** the "enter in line with a sloped
+first cut" rule from fix 2 also fired on a near-radial lead and extended it to
+**X18.2** (only on this unmerged branch). It now requires ≥ 15° of slope.
+`test_cut_regions` also checks that every generated program stays inside a sane
+X/Z envelope.
+
+**Robustness:** the section boolean operations now run snap-rounded on a 1e-7"
+grid and keep only polygonal results. The centre-overshoot entry produced
+near-coincident edges that made plain GEOS overlay fail.
+
+**Still open:**
+- Chamfer-first profile refusal: the cleanup's .0007–.0029 step at the face →
+  chamfer corner (§8).
+- Item 3: the graph flagging leftovers in front of Z0.
+- Item 4: the Hemisphere cleanup at larger allowances.
+- Observed, not changed: with facing off but stock in front of Z0 (Z start > 0),
+  roughing starts at Z+fin/2 as if the face were clear, and the finish and cleanup
+  leads cross the uncut stub between the first point and the stock OD.

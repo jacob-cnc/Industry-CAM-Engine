@@ -70,6 +70,15 @@ class FinishPlanner:
 
         if mode == MachiningMode.ID and abs(stock.x_start - segments[0].x) < TOLERANCE:
             approach_z = stock.z_start
+        elif mode == MachiningMode.OD and (stock.x_start < segments[0].x - TOLERANCE
+                                           or segments[0].x <= TOLERANCE):
+            # The face is being faced (X start inside the first point) or the
+            # profile starts at the centre: the lead from X start to the first
+            # point IS the face cut - run it exactly at Z0 so the face comes out
+            # flat and flows straight into the profile in one motion (owner
+            # 2026-11-11). At Z0+.001 it left the face .001 conical and kept the
+            # writer's centre entry from engaging, leaving a nib.
+            approach_z = 0.0
         else:
             approach_z = 0.001  # fin_clearance (Z0+fin)
 

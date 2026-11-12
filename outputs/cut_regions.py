@@ -53,6 +53,43 @@ NOSE_QUAD_SEGS = 64           # circle segments per quarter for the nose (TNR .0
 WEDGE_LEN = 0.25              # inches of each insert edge counted as cutting
 THIN = 1e-4                   # error regions thinner than 2*THIN are numerical noise
 AREA_EPS = 1e-7               # in^2
+GRID = 1e-7                   # inches: boolean ops run snap-rounded on this grid. Near-
+                              # coincident edges (a nose sweep along the stock edge, the
+                              # centre-overshoot entry) made plain GEOS overlay fail with
+                              # "Unable to determine overlay result geometry dimension".
+
+
+def _poly(g):
+    """Only the area of a result: snap-rounded overlay can return a collection
+    with stray lines / points, which the next overlay refuses (mixed dimension)."""
+    if g is None or g.is_empty:
+        return Polygon()
+    if g.geom_type in ("Polygon", "MultiPolygon"):
+        return g
+    parts = []
+    for p in getattr(g, "geoms", []):
+        if p.geom_type == "Polygon":
+            parts.append(p)
+        elif p.geom_type == "MultiPolygon":
+            parts.extend(p.geoms)
+    return MultiPolygon(parts) if len(parts) > 1 else (parts[0] if parts else Polygon())
+
+
+def _u(geoms):
+    import shapely
+    geoms = [_poly(g) for g in geoms if g is not None and not g.is_empty]
+    geoms = [g for g in geoms if not g.is_empty]
+    return _poly(shapely.union_all(geoms, grid_size=GRID)) if geoms else Polygon()
+
+
+def _d(a, b):
+    import shapely
+    return _poly(shapely.difference(_poly(a), _poly(b), grid_size=GRID))
+
+
+def _i(a, b):
+    import shapely
+    return _poly(shapely.intersection(_poly(a), _poly(b), grid_size=GRID))
 
 SECTION_OF_HEADER = (         # "; === <header> ===" -> section; first match wins
     ("CLEANUP", "band"), ("FINISH", "band"), ("SPRING", "band"),   # before ROUGH: the cleanup
@@ -342,24 +379,24 @@ def compute_sections(gcode: str, plan_result, uncut_outlines=()) -> CutSections:
         g = nose.get(sec, Polygon())
         w = wedge.get(sec)
         if w is not None:
-            g = unary_union([g, w.difference(part)])
-        return g.intersection(stock)
+            g = _u([g, _d(w, part)])
+        return _i(g, stock)
 
     face = removed("face")
-    rough = removed("rough").difference(face)
-    band = removed("band").difference(unary_union([face, rough]))
-    other = removed("other").difference(unary_union([face, rough, band]))
+    rough = _d(removed("rough"), face)
+    band = _d(removed("band"), _u([face, rough]))
+    other = _d(removed("other"), _u([face, rough, band]))
     if not other.is_empty:          # anything cut outside the known sections joins the band
-        band = unary_union([band, other])
-    taken = unary_union([face, rough, band])
-    as_cut = stock.difference(taken)
+        band = _u([band, other])
+    taken = _u([face, rough, band])
+    as_cut = _d(stock, taken)
 
     uncut_polys = [Polygon([(x / 2.0, z) for x, z in o]).buffer(0) for o in uncut_outlines if len(o) >= 3]
-    uncut = unary_union(uncut_polys).intersection(as_cut) if uncut_polys else Polygon()
-    finished = as_cut.difference(uncut)
+    uncut = _i(_u(uncut_polys), as_cut) if uncut_polys else Polygon()
+    finished = _d(as_cut, uncut)
 
-    nose_all = unary_union(list(nose.values())) if nose else Polygon()
-    gouge = _thick(part.intersection(stock).intersection(nose_all))
+    nose_all = _u(list(nose.values()))
+    gouge = _thick(_i(_i(part, stock), nose_all))
     tnr = max(t.nose_radius for t in tools.values())
     # Judged only over the profile's own range (Z0 and back): stock in front of Z0
     # that this block doesn't face (X start setting) is the operator's choice; it
@@ -374,7 +411,7 @@ def compute_sections(gcode: str, plan_result, uncut_outlines=()) -> CutSections:
     start = _densify(_profile_to_radius_coords(pr.profile))[0][0]
     expected = unary_union([_concave_corner_zone(pr.profile, tnr, mode_id),
                             Point(start).buffer(margin)])
-    excess = as_cut.difference(part).intersection(judged).difference(expected)
+    excess = _d(_i(_d(as_cut, part), judged), expected)
     not_removed = _thick(excess)
 
     notes = []

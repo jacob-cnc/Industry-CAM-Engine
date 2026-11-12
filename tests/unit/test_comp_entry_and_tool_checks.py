@@ -200,9 +200,11 @@ def test_contour_approach_rapids_stay_at_clearance():
 
 
 def test_od_face_entry_one_nose_radius_before_centre():
+    """Owner 2026-11-11: at the centre the nose goes nose radius + .002 past the
+    centreline so no nib is left (was exactly one nose radius: X-.0320)."""
     code = _od_face_code()
     fin = code.split("; === FINISH")[1]
     b = _blocks(fin)
     i = next(j for j, x in enumerate(b) if re.search(r"\bG42\b", x))
-    assert re.match(r"N\d+ G01 X-0\.0320 Z0\.0000", b[i + 1]), b[i + 1]
+    assert re.match(r"N\d+ G01 X-0\.0360 Z0\.0000", b[i + 1]), b[i + 1]
     assert re.match(r"N\d+ G01 X0\.0000 Z0\.0000", b[i + 2]), b[i + 2]

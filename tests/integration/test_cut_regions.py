@@ -27,10 +27,34 @@ sys.path.insert(0, os.path.dirname(__file__))
 from test_tool_reach import BAR, CNMG, NECK, VNMG, _execute, _rows  # noqa: E402
 
 
+def _envelope_ok(code, pr):
+    """Every programmed X/Z stays in a sane envelope: centre overshoot up to
+    2*(TNR + .002) below X0, nothing beyond the stock / park position. (An entry
+    to X18.2 was caught this way, 2026-11-11.)"""
+    import re
+    tnr = max(pr.tool.nose_radius, getattr(getattr(pr, "finish_tool", None), "nose_radius", 0.0) or 0.0)
+    x_hi = max(pr.stock.diameter, pr.stock.x_park) + 0.25
+    z_hi = max(pr.stock.z_start, pr.stock.z_park) + 0.25
+    z_lo = pr.stock.z_end - 0.25
+    for line in code.splitlines():
+        if line.lstrip().startswith(";") or not re.search(r"\bG0?[0123]\b", line.split(";")[0]):
+            continue
+        body = line.split(";")[0]
+        for w, v in re.findall(r"\b([XZ])(-?\d+\.?\d*)", body):
+            v = float(v)
+            if w == "X":
+                assert -2 * (tnr + 0.002) - 1e-4 <= v <= x_hi, line
+            else:
+                assert z_lo <= v <= z_hi, line
+
+
 def _sections(res, gcode=None):
     pr = res.plan_result
     outl = [v.outline for v in res.validations if v.category == "tool_reach" and v.outline]
-    return compute_sections(gcode or GCodeWriter().write(pr), pr, outl)
+    code = gcode or GCodeWriter().write(pr)
+    if gcode is None:
+        _envelope_ok(code, pr)
+    return compute_sections(code, pr, outl)
 
 
 FACED = dict(x_start=0.0)       # face to the centre so nothing is left in front of Z0
@@ -43,7 +67,7 @@ def _run(rows, tool, **kw):
         segments=rows, stock_dia=kw.get("stock_dia", 1.4), x_start=kw.get("x_start", 0.0),
         z_start=0.05, z_end=min(x["z"] for x in rows), stock_back_z=None, mode=kw.get("mode", "od"),
         pilot_hole_dia=kw.get("pilot", 0.0), doc_dia=0.08, feed=0.008, strategy="staircase",
-        fin_allowance=0.02, peck_enabled=False, peck_length=None, spindle_rpm=1000.0,
+        fin_allowance=kw.get("fin", 0.02), peck_enabled=False, peck_length=None, spindle_rpm=1000.0,
         finish_passes=1, finish_doc_dia=0.002, finish_feed=0.003, finish_spring_pass=False,
         tool_def=tool, x_park=kw.get("x_park", 3.0), z_park=1.0, corner_breaks=[])
     return execute(p, s, tool, r, f)
@@ -90,7 +114,7 @@ def _partition_ok(s):
     total = sum(getattr(s, n).area for n in names)
     assert total == pytest.approx(s.stock.area, abs=1e-7)
     for a, b in itertools.combinations(names, 2):
-        assert getattr(s, a).intersection(getattr(s, b)).area < 1e-9, (a, b)
+        assert getattr(s, a).intersection(getattr(s, b)).area < 1e-8, (a, b)   # grid noise
 
 
 @pytest.mark.parametrize("rows,tool", [(STEPPED, CNMG), (NECK, CNMG)])
@@ -282,3 +306,34 @@ def test_owner_reference_programs_check_clean(path, block):
         return
     _partition_ok(sec)
     assert sec.ok, sec.notes
+
+
+@pytest.mark.parametrize("label,rows,x_start", [
+    ("flat face from X0", _rows(0.0, (0.6, 0.0), (0.8, -0.1), (0.8, -0.5), (1.2, -0.5), (1.2, -1.0)), 0.0),
+    # .005 allowance: at .020 this dome's cleanup is refused by LinuxCNC - item 4, open
+    ("dome from X0", _rows(0.0, (0.5, -0.25, 0.25), (0.5, -0.6), (1.2, -0.6), (1.2, -1.0)), 0.0),
+    ("X start 0, profile starts at X.4", _rows(0.4, (0.4, -0.3), (1.2, -0.3), (1.2, -1.0)), 0.0),
+])
+def test_no_centre_nib_and_a_flat_face(label, rows, x_start):
+    """Owner 2026-11-11: with X start 0 or segment 1 at X0 the nose goes nose
+    radius + .002 past the centreline - no nib - and the face is cut flat at Z0
+    (it was a .001 cone from the Z0+.001 lead), flowing straight into the profile."""
+    from shapely.geometry import box
+    res = _run(rows, CNMG, x_start=x_start, fin=0.005 if label.startswith("dome") else 0.02)
+    s = _sections(res)
+    assert s.ok, s.notes
+    front = s.finished.union(s.uncut).intersection(box(-5, 1e-5, 5, 5))
+    assert front.area < 1e-8, (label, front.bounds)
+    code = GCodeWriter().write(res.plan_result)
+    fin = code[code.index("=== FINISH PASS"):]
+    assert "X-0.0360 Z0.0000" in fin          # 2 x (TNR .016 + .002) past centre, at Z0
+
+
+def test_facing_off_leaves_the_face_alone():
+    """X start at the stock OD = no facing: nothing in front of Z0 inside the
+    first point is cut (owner: users often don't want the part faced)."""
+    from shapely.geometry import box, LineString
+    res = _run(_rows(1.0, (1.0, -0.4), (1.2, -0.4), (1.2, -1.0)), CNMG, x_start=1.4)
+    s = _sections(res)
+    front = s.finished.intersection(box(-5, 1e-5, 5, 5))
+    assert LineString([(0.0, 0.0), (0.0, 1.0)]).intersection(front).length == pytest.approx(0.05, abs=1e-4)
