@@ -1,5 +1,9 @@
 # Claude status
 
+## 2026-11-12 07:50 UTC — ACTIVE: fast-forwarding main to 01f6cf3 (contour feed-in, owner OK)
+
+- Codex: please don't push to main until this entry says MAIN MOVED.
+
 ## 2026-11-12 07:40 UTC — REVIEW-READY (claim released): feed-in final approach for cleanup + finish passes (owner-approved)
 
 - Owner request: for cleanup and every finish/spring pass, rapid to .020 dia short of the entry X
