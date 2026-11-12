@@ -233,8 +233,9 @@ def estimate(gcode: str, ini_path: str, tool_table: str) -> CycleEstimate:
             feed = vals[0]
         elif name == "SET_SPINDLE_SPEED" and len(vals) >= 2:
             rpm = vals[1]
-        elif name == "START_SPEED_FEED_SYNCH" and len(vals) >= 2:
-            sync_pitch = vals[1]
+        elif name in ("START_SPEED_FEED_SYNC", "START_SPEED_FEED_SYNCH") and vals:
+            # rs274 prints START_SPEED_FEED_SYNC(pitch, velocity_mode)
+            sync_pitch = vals[0]
         elif name == "STOP_SPEED_FEED_SYNCH":
             sync_pitch = None
         elif name == "DWELL" and vals:
