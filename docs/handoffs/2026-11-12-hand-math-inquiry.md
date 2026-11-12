@@ -246,3 +246,34 @@ Suite 1310 passed (main 1310 → structure branch 1300 → this branch 1310). Re
 (23 programs) vs main's baseline: 18 SAME, 4 identical refusals, 1 newly generating program (F1,
 machinist-checked). Architecture errors: dependency 4 (main 62), hand math 20 (main 22),
 fallback 4. Nothing merged to main.
+
+## F4 follow-up — rounded-join policy implemented (owner approved 2026-11-12, branch claude/f4-rounded-joins)
+
+- `geometry/kernel_offset.py`: `offset_face` / `offset_wire` take `joins="sharp"` (default: sharp, rounded
+  fallback) or `joins="rounded"` (Kind.ARC only). Every sharp->rounded fallback inside
+  `record_join_fallbacks()` is recorded.
+- `planners/contour_roughing_planner.py`: roughing offsets ask for `joins="rounded"`. A kernel failure now
+  RAISES (KernelOffsetError) — before, `_do_offset` returned None and the pass loop silently stopped,
+  ending roughing early and leaving the rest to the cleanup pass.
+- `pipeline/pipeline.py`: `execute()` wraps the run in `record_join_fallbacks()`; any fallback (keep zone,
+  cleanup/finish contour) becomes ONE Generate WARNING (category geometry) naming the offsets.
+- Tests: `tests/unit/test_offset_join_policy.py` (13). Suite 1323 passed; architecture errors unchanged (28).
+
+Correction to the prediction above ("changes roughing geometry on these programs"): the three programs
+that fell back were already rounded at (nearly) every distance, so GUI Conv Test ×2 and Test Program Tab
+(T4 derived) come out SAME. What changes is every offset-contour program with convex corners where sharp
+joins used to work. Corpus vs main 72eeab4 (scripts/regression, 23 programs):
+
+| program | verdict | rough / cleanup band |
+|---|---|---|
+| Corner Break Test, Corner Break Test (T4) | MOTION/PART-OK (150 -> 179 motion lines) | rough +1.81e-04 in², cleanup −1.81e-04 |
+| NX_ref_breaks_nx / smooth _noV1_V10R2_offset | MOTION/PART-OK (181 -> 211) | rough +8.25e-05, cleanup −8.25e-05 |
+| Quadrant Arcs Basic (T4, offset) | MOTION/PART-OK (239 -> 239; mixed sharp/rounded passes now all rounded) | rough +1.79e-04, cleanup −1.79e-04 |
+| other 13 generating | SAME | — |
+| 5 refusing | BOTH-REFUSE (same message) | — |
+
+Machinist read: finished part identical (max deviation 0), gouge 0, nothing left, on all five. Each roughing
+pass now arcs around convex corners at exactly allowance + n·DOC (e.g. NX pass 1: X.7245 at the face, G03
+out to X.7262 at Z−.016, instead of a sharp drop at X.7262), so roughing takes the corner material the sharp
+extension used to leave and the cleanup pass sees an even DOC. No corpus program triggers the new WARNING
+(no keep-zone or cleanup/finish fallback occurs).
