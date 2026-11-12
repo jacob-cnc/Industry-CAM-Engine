@@ -18,6 +18,16 @@ def _without_comp_entries(gcode: str) -> str:
                      and "Contour approach" not in l)
 
 
+def _split_links(gcode: str):
+    """(contour text, planned-link text): finish retract/approach links and the
+    diagonal retract are planned links; since 2026-11-11 a link into a finish or
+    spring pass ends with a .020 dia FEED-in, so links are no longer all rapids."""
+    lines = _without_comp_entries(gcode).splitlines()
+    is_link = lambda l: "retract/approach" in l or "Diagonal retract" in l
+    return ("\n".join(l for l in lines if not is_link(l)),
+            "\n".join(l for l in lines if is_link(l)))
+
+
 
 def shape(moves):
     return [(m.move_type, m.x, m.z, m.feed, m.center_i, m.center_k, m.radius) for m in moves]
@@ -51,19 +61,21 @@ def test_cutting_passes_remove_allowance_and_spring_repeats_final(mode, strategy
         assert springs[0].pass_index != cuts[-1].pass_index
     code = GCodeWriter().write(plan)
     section = code.split("; === FINISH PASS")[1].split("; === PROGRAM END")[0]
-    emitted = parse(_without_comp_entries(section))
-    emitted_cuts = [m for m in emitted if m.move_type == MoveType.FEED]
+    cut_text, link_text = _split_links(section)
+    emitted_cuts = [m for m in parse(cut_text) if m.move_type == MoveType.FEED]
     expected_moves = [m for p in plan.finish_passes for m in p.moves]
     assert [m.x for m in emitted_cuts] == pytest.approx([m.x for m in expected_moves])
     assert [m.z for m in emitted_cuts] == pytest.approx([m.z for m in expected_moves])
-    # All finish-to-finish links in output are the links already validated by pipeline.
+    # All finish-to-finish links in output are the links already validated by pipeline,
+    # move type included (each ends with the .020 dia feed-in).
     links = [m for p in plan.finish_passes[1:] for m in p.approach_moves]
     links += list(plan.finish_passes[-1].retract_moves)
     # Writer approach to the first pass (rise/traverse at clearance) is filtered
     # out above as 'Contour approach'; the rest are the validated links.
-    rapid_moves = [m for m in emitted if m.move_type == MoveType.RAPID]
-    assert [m.x for m in rapid_moves] == pytest.approx([m.x for m in links])
-    assert [m.z for m in rapid_moves] == pytest.approx([m.z for m in links])
+    emitted_links = parse(link_text)
+    assert [m.move_type for m in emitted_links] == [m.move_type for m in links]
+    assert [m.x for m in emitted_links] == pytest.approx([m.x for m in links])
+    assert [m.z for m in emitted_links] == pytest.approx([m.z for m in links])
     assert "; Finish Passes: 3" in code
     assert f"; Spring Pass: {int(spring)}" in code
 
@@ -170,6 +182,6 @@ def test_kernel_offsets_preserve_steps_arcs_and_spring_geometry(mode, segments):
     final_cut = code.split("; Finish cutting pass 3\n")[1].split("; Spring pass (repeat final contour)\n")[0]
     spring_cut = code.split("; Spring pass (repeat final contour)\n")[1].split("; === PROGRAM END")[0]
     cutting_types = (MoveType.FEED, MoveType.ARC_CW, MoveType.ARC_CCW)
-    parsed_final = [m for m in parse(_without_comp_entries(final_cut)) if m.move_type in cutting_types]
-    parsed_spring = [m for m in parse(_without_comp_entries(spring_cut)) if m.move_type in cutting_types]
+    parsed_final = [m for m in parse(_split_links(final_cut)[0]) if m.move_type in cutting_types]
+    parsed_spring = [m for m in parse(_split_links(spring_cut)[0]) if m.move_type in cutting_types]
     assert shape(parsed_final) == shape(parsed_spring)

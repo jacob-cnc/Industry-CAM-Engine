@@ -15,7 +15,7 @@ from models.moves import ToolMove, MoveType, PassType
 from models.profile import SegmentType, CornerBreakType
 from models.tool import ToolDef, ToolDirection
 from models.program import ThreadingParams, GroovingParams
-from models.constants import TOLERANCE, CENTER_ARC_RADIUS_TOLERANCE_INCH
+from models.constants import TOLERANCE, CENTER_ARC_RADIUS_TOLERANCE_INCH, CONTOUR_FEED_IN_DIA
 
 
 def _piece_sweep(p, q, centre_dia):
@@ -42,6 +42,7 @@ class GCodeWriter:
         self._x: float = 0.0
         self._z: float = 0.0
         self._feed: Optional[float] = None
+        self._last_x_move: Optional[str] = None   # "rapid" / "feed" / "arc": last move that changed X
         self._n: int = 10
         self._metric: bool = False
         self._conv: float = 1.0
@@ -68,6 +69,7 @@ class GCodeWriter:
         self._x = 0.0
         self._z = 0.0
         self._feed = None
+        self._last_x_move = None
         # Operator notes from this write (e.g. concave fillets the tool nose
         # cannot follow). The Program tab shows them after Generate.
         self.notes: List[str] = []
@@ -592,8 +594,18 @@ class GCodeWriter:
         # Safe approach: rise, traverse at clearance (comp off).
         if self._z < z_clear - 1e-9:
             out.append(self._rapid(self._x, z_clear, "Contour approach: rise to clearance Z (comp off)"))
-        if abs(self._x - entry_x) > 1e-9 or abs(self._z - z_clear) > 1e-9:
-            out.append(self._rapid(entry_x, z_clear, "Contour approach: above entry point (comp off)"))
+        # Final X approach (owner 2026-11-11): rapid to CONTOUR_FEED_IN_DIA short of the
+        # entry X on the approach side, then feed the rest - every entry identical. Skipped
+        # only when the planned link already fed in to this X (finish pass 2+, spring pass).
+        side = -1.0 if is_id else 1.0
+        feed_from = entry_x + side * CONTOUR_FEED_IN_DIA
+        if is_id:
+            feed_from = max(feed_from, 0.0)          # never across the centreline on ID
+        already_fed = abs(self._x - entry_x) <= 1e-9 and self._last_x_move == "feed"
+        if not already_fed:
+            if abs(self._x - feed_from) > 1e-9 or abs(self._z - z_clear) > 1e-9:
+                out.append(self._rapid(feed_from, z_clear, "Contour approach: above entry point, feed-in start (comp off)"))
+            out.append(self._feed_line(entry_x, z_clear, feed, "Contour approach: feed in to entry X (comp off)"))
         if collinear:
             if abs(self._z - entry_z) > 1e-9:
                 out.append(self._rapid(entry_x, entry_z, "Contour approach: down to entry, in line with the first cut (comp off)"))
@@ -846,6 +858,8 @@ class GCodeWriter:
         fmt = self._fmt
         conv = self._conv
         line = f"G00 X{x * conv:{fmt}} Z{z * conv:{fmt}}"
+        if abs(x - self._x) > 1e-9:
+            self._last_x_move = "rapid"
         self._x = x
         self._z = z
         return self._line(line, comment)
@@ -862,6 +876,8 @@ class GCodeWriter:
         if feed > 0 and (self._feed is None or abs(feed - self._feed) > 0.00001):
             parts += f" F{feed * conv:{fmt}}"
             self._feed = feed
+        if abs(x - self._x) > 1e-9:
+            self._last_x_move = "feed"
         self._x = x
         self._z = z
         return self._line(parts, comment)
@@ -886,6 +902,8 @@ class GCodeWriter:
             parts += f" F{move.feed * conv:{fmt}}"
             self._feed = move.feed
 
+        if abs(move.x - self._x) > 1e-9:
+            self._last_x_move = "arc"
         self._x = move.x
         self._z = move.z
         return self._line(parts, comment)

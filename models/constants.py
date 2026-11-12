@@ -37,3 +37,11 @@ MAX_DISPLAY_DEPTH: int = 10
 # Quadrant arc edge decomposition chord error tolerance (inches)
 # Used by finish planner when decomposing elliptical/spline edges into G2/G3 arcs
 QUADRANT_CHORD_ERROR: float = 0.0001  # 0.1 thou
+
+# Final X approach to a cleanup/finish contour (owner 2026-11-11): rapid to this
+# DIAMETER distance short of the entry X on the approach side (outside for OD,
+# inside for ID), then FEED the rest at the pass feed - the same way every time.
+# X has .0156 dia backlash and ~.0005 dia start-of-move windup (bench 2026-11-11);
+# a fixed-length feed in one direction loads the nut on the same side and arrives
+# without a rapid's hard stop. Must stay longer than the X backlash.
+CONTOUR_FEED_IN_DIA: float = 0.020

@@ -53,7 +53,8 @@ def test_each_contour_pass_has_entry_in_air_and_exit():
         m = re.match(r"N\d+ G01 X([\d.]+) Z(-?[\d.]+)", entry)
         assert m, entry
         z_entry_end = float(m.group(2))
-        prev = re.match(r"N\d+ G00 X([\d.]+) Z(-?[\d.]+)", blocks[i - 1])
+        # G00 (rise at the entry X) or, since 2026-11-11, the G01 .020 dia X feed-in
+        prev = re.match(r"N\d+ G0[01] X([\d.]+) Z(-?[\d.]+)", blocks[i - 1])
         assert prev and prev.group(1) == m.group(1)          # straight down the wall line
         assert float(prev.group(2)) - z_entry_end > 2 * 0.0157  # entry longer than 2 x TNR
         assert z_entry_end >= 0.0                              # comp switches on in air

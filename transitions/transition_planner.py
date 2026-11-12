@@ -17,7 +17,7 @@ from models.transitions import Transition, TransitionType
 from models.stock import StockDef
 from models.params import RoughingParams, RoughingStrategy
 from models.profile import MachiningMode
-from models.constants import TOLERANCE
+from models.constants import TOLERANCE, CONTOUR_FEED_IN_DIA
 
 if TYPE_CHECKING:
     from geometry.zone_query import ZoneQueryAPI
@@ -104,14 +104,18 @@ class TransitionPlanner:
             end_pos = (to_pass.x_level, to_pass.z_start)
 
         safe_x = self._get_safe_x(mode, stock)
+        # Cleanup/finish entry: feed the last CONTOUR_FEED_IN_DIA of X at the pass feed.
+        feed_in = None
+        if to_pass.pass_type in (PassType.FINISH, PassType.CLEANUP) and to_pass.moves:
+            feed_in = to_pass.moves[0].feed
 
         if from_pass.pass_type in (PassType.CLEANUP, PassType.FINISH):
             moves = self.contour_retract(from_pass, mode, stock)
             clearance = (safe_x, from_pass.z_start)
-            moves.extend(self._retract_traverse_plunge(clearance, end_pos, safe_x, mode, stock))
+            moves.extend(self._retract_traverse_plunge(clearance, end_pos, safe_x, mode, stock, feed_in))
             transition_type = TransitionType.DIAGONAL_RETRACT_APPROACH
         else:
-            moves = self._retract_traverse_plunge(start_pos, end_pos, safe_x, mode, stock)
+            moves = self._retract_traverse_plunge(start_pos, end_pos, safe_x, mode, stock, feed_in)
             transition_type = TransitionType.RETRACT_TRAVERSE_PLUNGE
         return Transition(
             type=transition_type, start_position=start_pos, end_position=end_pos,
@@ -140,8 +144,13 @@ class TransitionPlanner:
         safe_x: float,
         mode: MachiningMode,
         stock: StockDef,
+        feed_in: float = None,
     ) -> List[ToolMove]:
         """Generate RETRACT_TRAVERSE_PLUNGE move sequence.
+
+        ``feed_in`` (cleanup/finish targets): step 3 becomes a rapid to
+        CONTOUR_FEED_IN_DIA short of the target X on the approach side (outside OD,
+        inside ID), then a FEED to the target at this feed - every entry identical.
 
         OD mode:
         1. Retract X to safe level (stock OD or beyond — away from part)
@@ -177,7 +186,21 @@ class TransitionPlanner:
             ))
 
         # Step 3: Rapid X to next pass X level
-        if abs(safe_x - end_x) > TOLERANCE:
+        if feed_in is not None:
+            side = -1.0 if mode == MachiningMode.ID else 1.0
+            feed_from = end_x + side * CONTOUR_FEED_IN_DIA
+            if mode == MachiningMode.ID:
+                feed_from = max(feed_from, 0.0)      # never across the centreline on ID
+            if abs(safe_x - feed_from) > TOLERANCE:
+                moves.append(ToolMove(
+                    move_type=MoveType.RAPID, x=feed_from, z=end_z,
+                    pass_type=PassType.TRANSITION,
+                ))
+            moves.append(ToolMove(
+                move_type=MoveType.FEED, x=end_x, z=end_z, feed=feed_in,
+                pass_type=PassType.TRANSITION,
+            ))
+        elif abs(safe_x - end_x) > TOLERANCE:
             moves.append(ToolMove(
                 move_type=MoveType.RAPID,
                 x=end_x,
