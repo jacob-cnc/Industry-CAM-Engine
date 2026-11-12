@@ -1,5 +1,10 @@
 # Claude status
 
+## 2026-11-12 06:40 UTC — ACTIVE: merging X tuning + replay into main (owner-requested)
+
+- Merging into main 8e44e8a: claude/x-deadband-00025 (97149b5: X DEADBAND .00025, X MAX_ACCELERATION 3; INI only) and claude/xvernier-replay (78ba45f: 2 new scripts). Rollback tag lathe-pre-x-tuning-merge-2026-11-11 = 8e44e8a.
+- Shadow vernier HALFILE stays commented (owner parked the vernier). Codex: please don't push to main until this entry says MAIN MOVED.
+
 ## 2026-11-12 06:30 UTC — REVIEW-READY (claim released): offline vernier replay tool (owner-requested)
 
 - Scope (claimed, new files only): scripts/xvernier/replay.c, scripts/xvernier/build_replay.sh. No changes to rtcomp/ or tests/.
