@@ -6,6 +6,42 @@ the distinction between the owner's verbatim request and later design advice.
 
 ## Proposed
 
+- Architecture check debt from the 2026-11-11 work (merged to main as-is, owner OK)
+  - Status: `python -m validation.architecture_check` failed on main before the
+    merge (62 errors) and fails after it (88). The 26 new ones come from the
+    2026-11-11 work. They are layering rules (Shapely only in validation/, OCP
+    only in geometry/, outputs/ may import only models/, planners/ may not import
+    validation/ or geometry/) plus the "atan2 + cos/sin = manual arc math"
+    heuristic. They are not behaviour bugs: the full suite passes (1301) on the
+    lathe runtime.
+  - First action: move outputs/cut_regions.py under validation/ (it is a
+    validation of the G-code). Give the staircase planner its nose-aware keep
+    region from the pipeline instead of importing validation.polygon_builder.
+    Move contour roughing's OCP translate into geometry/. Have tool_reach take
+    the insert table as an argument. Decide whether the arc helpers' trig is
+    legitimate (canonical arc maths, like geometry/arc_math) or should use the
+    kernel.
+  - New errors (file | rule):
+    - geometry/arc_entry.py | Function 'arc_candidates' uses atan2 + cos/sin — likely manual arc center computation. Use Build123d kernel operations instead.
+    - geometry/arc_entry.py | Function 'quadrant_points' uses atan2 + cos/sin — likely manual arc center computation. Use Build123d kernel operations instead.
+    - geometry/arc_entry.py | Function 'radius_arc_x_extreme' uses atan2 + cos/sin — likely manual arc center computation. Use Build123d kernel operations instead.
+    - geometry/tool_reach.py | Function '_densify' uses atan2 + cos/sin — likely manual arc center computation. Use Build123d kernel operations instead.
+    - geometry/tool_reach.py | Function '_piece_geom' uses atan2 + cos/sin — likely manual arc center computation. Use Build123d kernel operations instead.
+    - geometry/tool_reach.py | Function '_piece_to' uses atan2 + cos/sin — likely manual arc center computation. Use Build123d kernel operations instead.
+    - geometry/tool_reach.py | Function '_shadow_pass' uses atan2 + cos/sin — likely manual arc center computation. Use Build123d kernel operations instead.
+    - geometry/tool_reach.py | Function '_tangents_of' uses atan2 + cos/sin — likely manual arc center computation. Use Build123d kernel operations instead.
+    - geometry/tool_reach.py | Module 'geometry' imports 'pipeline.insert_geometry_lookup' but is only allowed to import from: ['models', 'tools']
+    - gui/program_tab.py | Package 'shapely' may only be imported by ['validation'], but found in 'gui'
+    - gui/program_tab.py | try/except ImportError with alternative implementation — violates 'no silent fallbacks' principle (P3)
+    - outputs/cut_regions.py | Module 'outputs' imports 'geometry.tool_reach' but is only allowed to import from: ['models']
+    - outputs/cut_regions.py | Module 'outputs' imports 'geometry.zone_builder' but is only allowed to import from: ['models']
+    - outputs/cut_regions.py | Package 'shapely' may only be imported by ['validation'], but found in 'outputs'
+    - outputs/gcode_writer.py | Module 'outputs' imports 'geometry.arc_math' but is only allowed to import from: ['models']
+    - planners/cleanup_planner.py | Module 'planners' imports 'geometry.arc_math' but is only allowed to import from: ['intervals', 'models', 'tools']
+    - planners/contour_roughing_planner.py | Package 'OCP' may only be imported by ['geometry'], but found in 'planners'
+    - planners/staircase_planner.py | Module 'planners' imports 'validation.polygon_builder' but is only allowed to import from: ['intervals', 'models', 'tools']
+    - planners/staircase_planner.py | Package 'shapely' may only be imported by ['validation'], but found in 'planners'
+
 - [Zone Shading on the Graph: Plan + Status](2026-11-11-zone-shading-plan.md)
   - Status: S0-S2 BUILT 2026-11-11 (sections from G-code via rs274, legend,
     pixel-probe tests). Found 3 real defects; 1 (roughing gouge beside falling
