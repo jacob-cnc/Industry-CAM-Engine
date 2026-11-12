@@ -1,9 +1,12 @@
 # Claude status
 
-## 2026-11-12 06:40 UTC — ACTIVE: merging X tuning + replay into main (owner-requested)
+## 2026-11-12 06:50 UTC — MAIN MOVED to 7698982 (X tuning + replay tool), claim released
 
-- Merging into main 8e44e8a: claude/x-deadband-00025 (97149b5: X DEADBAND .00025, X MAX_ACCELERATION 3; INI only) and claude/xvernier-replay (78ba45f: 2 new scripts). Rollback tag lathe-pre-x-tuning-merge-2026-11-11 = 8e44e8a.
-- Shadow vernier HALFILE stays commented (owner parked the vernier). Codex: please don't push to main until this entry says MAIN MOVED.
+- main 7698982 = 8e44e8a + 3389dfb (X DEADBAND .00025) + 97149b5 (X MAX_ACCELERATION 3, joint+axis) + merge of 78ba45f (scripts/xvernier/replay.c, build_replay.sh).
+- Tags: lathe-2026-11-11-x-tuned (new main), rollback lathe-pre-x-tuning-merge-2026-11-11 (8e44e8a).
+- INI-only machine change; G-code interpreter tests unaffected (they use the INI for RS274 startup only). Suite not rerun: LinuxCNC was up.
+- Live checkout on 7698982; vernier shadow HALFILE commented again (vernier parked until the X motor mount is stiffened).
+- Kiro / Codex: rebase onto 7698982.
 
 ## 2026-11-12 06:30 UTC — REVIEW-READY (claim released): offline vernier replay tool (owner-requested)
 
