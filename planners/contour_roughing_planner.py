@@ -104,7 +104,7 @@ class ContourRoughingPlanner:
     def _wire_to_edges(self, wire, xmin_d, xmax_d, z_top, z_bot):
         """Extract edges from wire, filter clip boundaries, order top-to-bottom."""
         try:
-            raw = wire_edges(wire, split_arcs=True)
+            raw = wire_edges(wire)
         except Exception:
             return []
         tol = 1e-4

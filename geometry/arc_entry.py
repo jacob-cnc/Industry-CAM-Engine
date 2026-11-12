@@ -38,6 +38,7 @@ from __future__ import annotations
 import math
 from dataclasses import replace
 from typing import List, Optional, Sequence, Tuple
+from geometry.arc_math import radius_arc_centre
 
 # Leg equality for a circular quadrant, radius inches. Coordinates are entered to
 # 4 decimals on the diameter (.00005 on the radius); anything within this is
@@ -117,26 +118,6 @@ def quadrant_problem(x0: float, z0: float, x1: float, z1: float) -> Optional[str
 # ----------------------------------------------------------------------
 # Radius arcs: centre, sweep, X extreme
 # ----------------------------------------------------------------------
-
-def radius_arc_centre(p0, p1, radius: float) -> Optional[Tuple[float, float]]:
-    """Centre of the minor arc for the signed-radius convention of ProfileMove
-    (+R = clockwise in (r, z) = internal ARC_CW). Same rule as
-    validation/pre_planning_validator._compute_arc_center. (r, z) in and out."""
-    dx, dz = p1[0] - p0[0], p1[1] - p0[1]
-    d = math.hypot(dx, dz)
-    R = abs(radius)
-    if d < 1e-12 or R < 1e-12:
-        return None
-    h = math.sqrt(max(R * R - (d / 2.0) ** 2, 0.0))
-    mx, mz = (p0[0] + p1[0]) / 2.0, (p0[1] + p1[1]) / 2.0
-    px, pz = -dz / d, dx / d
-    c1 = (mx + h * px, mz + h * pz)
-    c2 = (mx - h * px, mz - h * pz)
-    cr1 = (p0[0] - c1[0]) * (p1[1] - c1[1]) - (p0[1] - c1[1]) * (p1[0] - c1[0])
-    if radius > 0:
-        return c1 if cr1 < 0 else c2
-    return c1 if cr1 > 0 else c2
-
 
 def radius_arc_sweep(p0, p1, centre, radius: float) -> float:
     """Signed sweep: clockwise (negative) for +R, counter-clockwise for -R."""

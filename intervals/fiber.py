@@ -66,26 +66,6 @@ class Fiber:
         remaining.append(merged)
         self._intervals = remaining
 
-    def material_at(self, z: float) -> bool:
-        """Point-in-material test at this fiber's X level.
-
-        Returns True if Z position is within any interval (within TOLERANCE).
-        """
-        for interval in self._intervals:
-            if interval.z_start + TOLERANCE >= z >= interval.z_end - TOLERANCE:
-                return True
-        return False
-
-    @property
-    def total_material_length(self) -> float:
-        """Sum of all interval lengths."""
-        return sum(i.length for i in self._intervals)
-
-    @property
-    def interval_count(self) -> int:
-        """Number of distinct material intervals at this X level."""
-        return len(self._intervals)
-
     def _query(self, zone_query: 'ZoneQueryAPI', zone_name: str) -> None:
         """Obtain intervals from ZoneQueryAPI.boundary_at_x() — never manual computation."""
         boundaries = zone_query.boundary_at_x(self._x_dia, zone_name)

@@ -19,3 +19,5 @@ scripts/regression/corpus/Hemisphere Test (T4 derived).json
 scripts/regression/corpus/Quarter-20 Cap Screw Op1 (T4 derived).json
 scripts/regression/corpus/Test Cut (T4 derived).json
 scripts/regression/corpus/Test Program Tab (T4 derived).json
+scripts/regression/corpus/Quadrant Arcs Basic (T4, staircase).json
+scripts/regression/corpus/Quadrant Arcs Basic (T4, offset).json

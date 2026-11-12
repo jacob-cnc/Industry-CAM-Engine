@@ -178,56 +178,14 @@ def _select_center(
     x1_r: float, z1: float, x2_r: float, z2: float,
     radius: float, is_cw: bool
 ) -> Optional[Tuple[float, float]]:
-    """Select arc center using cross-product convention.
+    """Centre of a profile arc in radius space - delegates to geometry.arc_math.radius_arc_centre
+    (the single arc-centre implementation, kernel-checked; 2026-11-12).
 
-    Replicates the center selection logic used in finish_planner.py and
-    program_tab.py. Uses cross product sign to pick the center that
-    produces the correct CW/CCW direction on screen.
-
-    Args:
-        x1_r, z1: Start point (radius, inches)
-        x2_r, z2: End point (radius, inches)
-        radius: Arc radius (absolute value, must be >= chord/2)
-        is_cw: True for CW on screen (+R), False for CCW (-R)
-
-    Returns:
-        (center_x, center_z) or None if no valid solution.
+    Args: start (x1_r, z1), end (x2_r, z2) in radius space; radius = |R|;
+    is_cw True for +R (clockwise in (r, z)). Returns (centre_r, centre_z) or None.
     """
-    mx = (x1_r + x2_r) / 2.0
-    mz = (z1 + z2) / 2.0
-
-    dx = x2_r - x1_r
-    dz = z2 - z1
-    d = math.sqrt(dx * dx + dz * dz)
-
-    if d < 1e-10:
-        return None
-
-    h_sq = radius * radius - (d / 2.0) ** 2
-    if h_sq < 0:
-        h_sq = 0
-    h = math.sqrt(h_sq)
-
-    px = -dz / d
-    pz = dx / d
-
-    c1_x = mx + h * px
-    c1_z = mz + h * pz
-    c2_x = mx - h * px
-    c2_z = mz - h * pz
-
-    # Cross product: (start-center) x (end-center)
-    ax = x1_r - c1_x
-    az = z1 - c1_z
-    bx = x2_r - c1_x
-    bz = z2 - c1_z
-    cr1 = ax * bz - az * bx
-
-    # CW -> negative cross, CCW -> positive cross
-    if is_cw:
-        return (c1_x, c1_z) if cr1 < 0 else (c2_x, c2_z)
-    else:
-        return (c1_x, c1_z) if cr1 > 0 else (c2_x, c2_z)
+    from geometry.arc_math import radius_arc_centre
+    return radius_arc_centre((x1_r, z1), (x2_r, z2), radius if is_cw else -radius)
 
 
 def compute_min_bounded_radius(

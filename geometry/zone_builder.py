@@ -16,6 +16,7 @@ from models.profile import ClosedProfile, ProfileMove, SegmentType, MachiningMod
 from models.stock import StockDef
 from models.tool import ToolDef
 from models.params import RoughingParams
+from models.constants import TOLERANCE
 
 
 @dataclass
@@ -63,7 +64,9 @@ def build_zones(
 
     # Preserve unmachined stock behind this operation in the protected part zone.
     # The operation depth must not truncate the physical workpiece for validation.
-    if stock.physical_z_end < stock.z_end:
+    # More than a sliver only: a back face within TOLERANCE of the operation end is
+    # the same face (and a near-zero-height rectangle is not a face to the kernel).
+    if stock.physical_z_end < stock.z_end - TOLERANCE:
         retained_stock = _build_stock_face(
             stock.diameter / 2.0, stock.z_end, stock.physical_z_end,
             mode, stock.pilot_hole_dia / 2.0,
@@ -519,12 +522,26 @@ def _build_true_face(stock: StockDef, mode: MachiningMode) -> object:
     return sketch.sketch
 
 
+# A kernel bounding box is not exact: for an arc ending at Z-1.5 it reported
+# -1.4999999999999865. Within this distance of the lowest profile vertex, the
+# vertex's exact Z is the answer (2026-11-12, "wires not planar" on a contour that
+# ends at the stock back face). Far below TOLERANCE: a genuine arc dip is never snapped.
+_VERTEX_SNAP = 1e-9
+
+
 def contour_z_end(profile: ClosedProfile) -> float:
-    """Most negative Z on the actual open contour, including kernel arc extrema."""
+    """Most negative Z on the actual open contour, including kernel arc extrema.
+
+    The kernel's bounding box decides (an arc can dip below every vertex); when
+    its minimum agrees with the lowest vertex within _VERTEX_SNAP, the vertex's
+    exact Z is returned instead of the box's float noise.
+    """
     coords = profile_to_radius_coords(profile)
     if not coords:
         raise ValueError("At least one profile point is required.")
     if len(coords) == 1:
         return coords[0]["z"]
     contour = _build_face_from_coords(coords, profile, closed=False)
-    return contour.bounding_box().min.Y
+    kernel_min = contour.bounding_box().min.Y
+    vertex_min = min(c["z"] for c in coords)
+    return vertex_min if abs(kernel_min - vertex_min) <= _VERTEX_SNAP else min(kernel_min, vertex_min)

@@ -148,52 +148,6 @@ class ZoneQueryAPI:
 
         return intervals
 
-    def line_zone_intersection(
-        self, start: Tuple[float, float], end: Tuple[float, float], zone_name: str
-    ) -> bool:
-        """Check if a line segment intersects a zone boundary.
-
-        Args:
-            start: (x_dia, z) start point
-            end: (x_dia, z) end point
-            zone_name: Which zone to check against
-
-        Returns:
-            True if the line segment intersects the zone boundary.
-        """
-        face = self._get_face(zone_name)
-        if face is None:
-            return False
-
-        # Convert to radius
-        p1 = gp_Pnt(start[0] / 2.0, start[1], 0.0)
-        p2 = gp_Pnt(end[0] / 2.0, end[1], 0.0)
-
-        try:
-            line_edge = BRepBuilderAPI_MakeEdge(p1, p2).Edge()
-        except Exception:
-            return False
-
-        ocp_face = self._get_ocp_face(face)
-        if ocp_face is None:
-            return False
-
-        try:
-            section = BRepAlgoAPI_Section(ocp_face, line_edge)
-            section.Build()
-            if not section.IsDone():
-                return False
-        except Exception:
-            return False
-
-        # If section produced any geometry, there's an intersection
-        explorer = TopExp_Explorer(section.Shape(), TopAbs_VERTEX)
-        if explorer.More():
-            return True
-
-        edge_explorer = TopExp_Explorer(section.Shape(), TopAbs_EDGE)
-        return edge_explorer.More()
-
     def boundary_wire_extraction(self, zone_name: str) -> List[EdgeData]:
         """Extract boundary edges from a zone Face for Shapely polygon construction.
 
@@ -428,3 +382,31 @@ class ZoneQueryAPI:
         except Exception:
             pass
         return None
+
+
+def boundary_polyline(edges: List[EdgeData]) -> List[Tuple[float, float]]:
+    """(x_dia, z) polyline through ordered boundary edges, arcs sampled ON the arc.
+
+    Each ARC is sampled in radius space from its centre with the kernel's own
+    signed sweep (EdgeData.sweep, set by _edge_data_from_wire) - no direction or
+    sweep is guessed - and ends exactly on the edge's end point. Point count as
+    before: max(8, int(|sweep| * radius * 20)) per arc.
+
+    Replaces pipeline._extract_zone_boundary's own densification (2026-11-12,
+    hand-math inquiry F5), which mixed diameter-space coordinates with the
+    radius-space radius and put points up to .118 in off an R.25 arc.
+    """
+    from geometry.arc_math import Arc
+    if not edges:
+        return []
+    pts = [tuple(edges[0].start)]
+    for e in edges:
+        if e.edge_type == "ARC" and e.center is not None and e.radius > 0.0001 and e.sweep:
+            arc = Arc(start=(e.start[0] / 2.0, e.start[1]), end=(e.end[0] / 2.0, e.end[1]),
+                      centre=(e.center[0] / 2.0, e.center[1]), radius=e.radius, sweep=e.sweep)
+            n = max(8, int(abs(e.sweep) * e.radius * 20))
+            for i in range(1, n):
+                r, z = arc.point_at(i / float(n))
+                pts.append((2.0 * r, z))
+        pts.append(tuple(e.end))
+    return pts

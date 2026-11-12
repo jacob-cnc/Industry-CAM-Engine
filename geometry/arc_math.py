@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 Point = Tuple[float, float]
 HALF_PI = math.pi / 2.0
@@ -138,3 +138,30 @@ def merge_co_circular(arcs: List[Arc], tol: float = 1e-7) -> List[Arc]:
                 continue
         out.append(a)
     return out
+
+
+def radius_arc_centre(p0, p1, radius: float) -> Optional[Tuple[float, float]]:
+    """Centre of the minor arc for the signed-radius convention of ProfileMove
+    (+R = clockwise in (r, z) = internal ARC_CW). (r, z) in and out.
+
+    The ONE arc-centre implementation (2026-11-12, hand-math inquiry F6): it was
+    copied five times (cleanup/finish planners, pre-planning validator,
+    arc_helpers, arc_entry); the planner copies are gone and the validator /
+    arc_helpers delegate here. Agrees with the kernel's RadiusArc(...).arc_center
+    to 1.4e-12 in over 1600 random arcs, both signs
+    (scripts/hand_math/arc_centre_agreement.py)."""
+    dx, dz = p1[0] - p0[0], p1[1] - p0[1]
+    d = math.hypot(dx, dz)
+    R = abs(radius)
+    if d < 1e-12 or R < 1e-12:
+        return None
+    h = math.sqrt(max(R * R - (d / 2.0) ** 2, 0.0))
+    mx, mz = (p0[0] + p1[0]) / 2.0, (p0[1] + p1[1]) / 2.0
+    px, pz = -dz / d, dx / d
+    c1 = (mx + h * px, mz + h * pz)
+    c2 = (mx - h * px, mz - h * pz)
+    cr1 = (p0[0] - c1[0]) * (p1[1] - c1[1]) - (p0[1] - c1[1]) * (p1[0] - c1[0])
+    if radius > 0:
+        return c1 if cr1 < 0 else c2
+    return c1 if cr1 > 0 else c2
+

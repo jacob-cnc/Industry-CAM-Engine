@@ -309,3 +309,11 @@ Nothing merged to main; the live checkout was not touched. Branch pushed to orig
    checked; likely stale.
 
 Next: branch `claude/hand-math-kernel` (from this branch) for the hand-math inquiry.
+
+### Correction found later (hand-math branch, 2026-11-12 ~07:00)
+
+Step 4b moved the cleanup planner's face-offset route into geometry/face_ops.py believing it live.
+It had no callers (cleanup uses `profile_offset_edges`); step 2's dead-code check relied on the
+architecture checker, which does not find methods without callers. Behaviour-neutral, but it
+relocated dead code. Removed on `claude/hand-math-kernel` with a method-level zero-reference scan
+— see docs/handoffs/2026-11-12-hand-math-inquiry.md, F3.

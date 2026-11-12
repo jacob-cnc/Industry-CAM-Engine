@@ -157,27 +157,6 @@ class ThreadingPlanner:
             "L": params.chamfer_threads,
         }
 
-    def compute_pass_depths(self, params: ThreadingParams) -> List[float]:
-        """Compute cumulative infeed depths for each pass.
-
-        Uses constant-area (sqrt) progression by default (degression=2.0):
-            depth[n] = full_depth * sqrt(n / num_passes)
-
-        Returns:
-            List of cumulative depths (len = num_passes).
-        """
-        full_depth = params.thread_depth
-        n = params.num_passes
-        degression = params.degression
-
-        if degression <= 1.0:
-            # Constant depth per pass
-            step = full_depth / n
-            return [step * (i + 1) for i in range(n)]
-        else:
-            # Constant area (sqrt progression)
-            return [full_depth * math.sqrt((i + 1) / n) for i in range(n)]
-
     def _get_compound_angle(self, infeed_method: str) -> float:
         """Return compound slide angle in degrees for the infeed method."""
         angles = {

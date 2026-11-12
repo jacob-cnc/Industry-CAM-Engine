@@ -34,7 +34,8 @@ import math
 from dataclasses import dataclass
 from typing import List, Tuple
 
-from geometry.arc_entry import quadrant_centre, radius_arc_centre, radius_arc_sweep
+from geometry.arc_entry import quadrant_centre, radius_arc_sweep
+from geometry.arc_math import radius_arc_centre
 
 # A violation smaller than this (degrees) is not reported: tool-table angles are
 # insert defaults, not measured holders.

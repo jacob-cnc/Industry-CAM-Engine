@@ -20,55 +20,14 @@ def _compute_arc_center(
     x1_r: float, z1: float, x2_r: float, z2: float,
     radius: float, is_cw: bool
 ) -> tuple:
-    """Compute arc center using cross-product selection (same logic as planners).
+    """Centre of a profile arc in radius space - delegates to geometry.arc_math.radius_arc_centre
+    (the single arc-centre implementation, kernel-checked; 2026-11-12).
 
-    Uses the same center selection algorithm as finish_planner._find_arc_center()
-    to ensure consistent behavior between validation and planning.
-
-    Args:
-        x1_r, z1: Start point (radius, inches)
-        x2_r, z2: End point (radius, inches)
-        radius: Arc radius (absolute value)
-        is_cw: True for CW on screen (+R), False for CCW (-R)
-
-    Returns:
-        (center_x_radius, center_z) or None if no solution.
+    Args: start (x1_r, z1), end (x2_r, z2) in radius space; radius = |R|;
+    is_cw True for +R (clockwise in (r, z)). Returns (centre_r, centre_z) or None.
     """
-    mx = (x1_r + x2_r) / 2.0
-    mz = (z1 + z2) / 2.0
-
-    dx = x2_r - x1_r
-    dz = z2 - z1
-    d = math.sqrt(dx**2 + dz**2)
-
-    if d < 1e-10:
-        return None
-
-    h_sq = radius**2 - (d / 2.0)**2
-    if h_sq < 0:
-        h_sq = 0
-    h = math.sqrt(h_sq)
-
-    px = -dz / d
-    pz = dx / d
-
-    c1_x = mx + h * px
-    c1_z = mz + h * pz
-    c2_x = mx - h * px
-    c2_z = mz - h * pz
-
-    # Cross product: (start-center) x (end-center)
-    ax = x1_r - c1_x
-    az = z1 - c1_z
-    bx = x2_r - c1_x
-    bz = z2 - c1_z
-    cr1 = ax * bz - az * bx
-
-    # CW -> negative cross, CCW -> positive cross
-    if is_cw:
-        return (c1_x, c1_z) if cr1 < 0 else (c2_x, c2_z)
-    else:
-        return (c1_x, c1_z) if cr1 > 0 else (c2_x, c2_z)
+    from geometry.arc_math import radius_arc_centre
+    return radius_arc_centre((x1_r, z1), (x2_r, z2), radius if is_cw else -radius)
 
 
 def validate_profile(profile: ClosedProfile, stock: StockDef) -> List[ValidationResult]:
