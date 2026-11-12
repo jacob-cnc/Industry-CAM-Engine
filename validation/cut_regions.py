@@ -364,9 +364,9 @@ def stock_polygon(stock, mode_id: bool):
 def part_polygon(profile, stock, mode_id: bool):
     """The intended finished part of this block (the contour it is programmed to
     cut, i.e. after tool-reach bridging), (r, z), closed toward the material."""
-    from geometry.tool_reach import _densify
-    from geometry.zone_builder import _profile_to_radius_coords
-    pts, _ = _densify(_profile_to_radius_coords(profile))
+    from geometry.tool_reach import densify_coords
+    from geometry.zone_builder import profile_to_radius_coords
+    pts, _ = densify_coords(profile_to_radius_coords(profile))
     if mode_id:
         R = stock.diameter / 2.0 + 1.0
         ring = [(R, pts[0][1])] + pts + [(R, pts[-1][1])]
@@ -378,9 +378,9 @@ def part_polygon(profile, stock, mode_id: bool):
 def _concave_corner_zone(profile, tool_radius: float, mode_id: bool):
     """Where the nose radius legitimately leaves material: within ~1.5 TNR of the
     contour's concave corners."""
-    from geometry.tool_reach import _densify
-    from geometry.zone_builder import _profile_to_radius_coords
-    pts, _ = _densify(_profile_to_radius_coords(profile))
+    from geometry.tool_reach import densify_coords
+    from geometry.zone_builder import profile_to_radius_coords
+    pts, _ = densify_coords(profile_to_radius_coords(profile))
     zone = []
     s = -1.0 if mode_id else 1.0
     for a, b, c in zip(pts, pts[1:], pts[2:]):
@@ -445,9 +445,9 @@ def compute_sections(gcode: str, plan_result, uncut_outlines=()) -> CutSections:
     # the contour's start point (with the face left on, that corner is concave).
     margin = 1.6 * tnr + THIN
     judged = box(-10.0, pr.stock.z_end + margin, 10.0, 0.0)
-    from geometry.tool_reach import _densify
-    from geometry.zone_builder import _profile_to_radius_coords
-    start = _densify(_profile_to_radius_coords(pr.profile))[0][0]
+    from geometry.tool_reach import densify_coords
+    from geometry.zone_builder import profile_to_radius_coords
+    start = densify_coords(profile_to_radius_coords(pr.profile))[0][0]
     expected = unary_union([_concave_corner_zone(pr.profile, tnr, mode_id),
                             Point(start).buffer(margin)])
     excess = _d(_i(_d(as_cut, part), judged), expected)

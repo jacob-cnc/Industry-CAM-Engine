@@ -1,7 +1,7 @@
 {
   "_comment": "Ratchet for tests/architecture/test_architecture_ratchet.py: the number of architecture-check ERRORS per category on this branch. It may only go down. When you fix violations, lower the number in the same commit; when a change would raise it, fix the layering instead. Recorded 2026-11-12 on main 01f6cf3.",
   "errors": {
-    "dependency_violation": 43,
+    "dependency_violation": 32,
     "fallback_pattern": 4,
     "hand_math": 23
   },
@@ -9,6 +9,7 @@
     "2026-11-12 main 01f6cf3: dependency 62, fallback 4, hand_math 22",
     "dead code + unused imports: dependency 60; material_sim removed: 56; tool modules -> tools/: 55",
     "cut_regions outputs/ -> validation/: dependency 45; hand_math 22 -> 23 NOT new code: validation/ is scanned for hand math and outputs/ is not, so cut_regions.parse_canon's existing arc densification (atan2 + cos/sin) became visible. Listed for the hand-math branch.",
-    "writer no longer imports planners (threading/grooving planned by the caller): dependency 43"
+    "writer no longer imports planners (threading/grooving planned by the caller): dependency 43",
+    "geometry/kernel.py facade (rule a) + planners import geometry only through it: dependency 32"
   ]
 }

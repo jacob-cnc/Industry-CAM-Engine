@@ -149,7 +149,7 @@ class ContourRoughingPlanner:
 
     def _do_offset(self, face, dist):
         """Offset face outward by dist. Returns OCP face or None."""
-        from geometry.kernel_offset import offset_face
+        from geometry.kernel import offset_face
         try:
             r = offset_face(face, dist, what="contour roughing pass")
             fs = r.faces() if hasattr(r, 'faces') else []
@@ -234,7 +234,7 @@ class ContourRoughingPlanner:
                     # Canonical <= 90 deg pieces with the kernel's true sweep
                     # (geometry/arc_math.py), so _to_moves' short-sweep label
                     # is always right, even after _order flips an edge.
-                    from geometry.arc_math import arc_from_kernel, split_at_quadrants
+                    from geometry.kernel import arc_from_kernel, split_at_quadrants
                     ci = cur.Circle()
                     loc = ci.Location()
                     pm = cur.Value(0.5 * (cur.FirstParameter() + cur.LastParameter()))
@@ -331,7 +331,7 @@ class ContourRoughingPlanner:
                 # the rule every other planner uses: since the 2026-11-10
                 # G-code dialect fix LinuxCNC ran these arcs the long way
                 # round (e.g. -359 deg instead of +1 deg).
-                from geometry.arc_math import short_sweep
+                from geometry.kernel import short_sweep
                 sw = short_sweep((s[0] / 2.0, s[1]), (en[0] / 2.0, en[1]), (ctr[0] / 2.0, ctr[1]))
                 mt = MoveType.ARC_CW if sw < 0 else MoveType.ARC_CCW
                 moves.append(ToolMove(mt, en[0], en[1], feed=params.feed,

@@ -210,3 +210,27 @@ class TestHelperFunctions:
         try_node = tree.body[0]
         handler = try_node.handlers[0]
         assert _has_nontrivial_body(handler.body)
+
+class TestKernelFacadeRule:
+    """Owner rule (a), 2026-11-11: planners reach the geometry kernel only via
+    geometry/kernel.py; any other geometry module is still a violation."""
+
+    def _project(self, tmp_path, planner_src):
+        for pkg in ("models", "geometry", "planners"):
+            (tmp_path / pkg).mkdir()
+            (tmp_path / pkg / "__init__.py").write_text("")
+        (tmp_path / "geometry" / "kernel.py").write_text("def f():\n    return 1\n")
+        (tmp_path / "geometry" / "zone_builder.py").write_text("def g():\n    return 2\n")
+        (tmp_path / "planners" / "p.py").write_text(planner_src)
+        return [v for v in check_dependency_violations(tmp_path) if v.file_path.startswith("planners")]
+
+    def test_planner_may_import_the_kernel_facade(self, tmp_path):
+        assert self._project(tmp_path, "from geometry.kernel import f\nimport geometry.kernel\n") == []
+
+    def test_planner_may_not_import_other_geometry_modules(self, tmp_path):
+        found = self._project(tmp_path, "from geometry.zone_builder import g\n")
+        assert len(found) == 1 and "geometry.zone_builder" in found[0].message
+
+    def test_planner_may_not_import_ocp_even_with_the_facade_rule(self, tmp_path):
+        found = self._project(tmp_path, "from OCP.TopoDS import TopoDS\n")
+        assert len(found) == 1 and "OCP" in found[0].message

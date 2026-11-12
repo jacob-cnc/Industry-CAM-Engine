@@ -59,6 +59,14 @@ ALLOWED_IMPORTS: Dict[str, Set[str]] = {
             "transitions", "validation", "outputs", "pipeline"},
 }
 
+# Single-module exceptions to ALLOWED_IMPORTS (owner decision 2026-11-11, "rule (a)"):
+# planners may use the geometry kernel ONLY through its public facade
+# geometry/kernel.py. Every other geometry module, and raw OCP / build123d,
+# stay off-limits to planners.
+ALLOWED_SUBMODULE_IMPORTS: Dict[str, Set[str]] = {
+    "planners": {"geometry.kernel"},
+}
+
 # Directories to skip during analysis
 SKIP_DIRS = {"__pycache__", "reference", "tests", ".git", ".kiro", ".pytest_cache"}
 
@@ -225,7 +233,9 @@ def check_dependency_violations(project_root: Path) -> List[ArchitectureViolatio
                 continue
 
             # Check internal module dependency violations
-            if top_module in project_modules and top_module != source_module:
+            facades = ALLOWED_SUBMODULE_IMPORTS.get(source_module, set())
+            via_facade = any(import_name == f or import_name.startswith(f + ".") for f in facades)
+            if top_module in project_modules and top_module != source_module and not via_facade:
                 if top_module not in allowed:
                     violations.append(ArchitectureViolation(
                         file_path=str(py_file.relative_to(project_root)),

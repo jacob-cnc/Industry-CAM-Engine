@@ -22,8 +22,7 @@ from models.params import RoughingParams
 from models.stock import StockDef
 from models.profile import ClosedProfile, ProfileMove, SegmentType, MachiningMode
 from models.constants import TOLERANCE
-from geometry.arc_helpers import is_arc_within_x_bounds
-from geometry.zone_builder import _profile_to_radius_coords
+from geometry.kernel import is_arc_within_x_bounds, profile_to_radius_coords
 
 if TYPE_CHECKING:
     from geometry.zone_query import ZoneQueryAPI, EdgeData
@@ -254,7 +253,7 @@ class CleanupPlanner:
         try:
             # Use corner-break-aware coords if profile is available
             if profile is not None:
-                coords = _profile_to_radius_coords(profile)
+                coords = profile_to_radius_coords(profile)
             else:
                 coords = []
                 for seg in segments:
@@ -686,7 +685,7 @@ class CleanupPlanner:
                 if direction in ("cw", "ccw"):
                     sweep = -1.0 if direction == "cw" else 1.0
                 else:                                   # legacy 5-tuple callers
-                    from geometry.arc_math import short_sweep
+                    from geometry.kernel import short_sweep
                     sweep = short_sweep((start[0] / 2.0, start[1]), (end[0] / 2.0, end[1]),
                                         (center[0] / 2.0, center[1]))
 

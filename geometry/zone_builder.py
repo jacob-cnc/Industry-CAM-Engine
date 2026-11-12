@@ -54,7 +54,7 @@ def build_zones(
     mode = profile.mode
 
     # Step 1: Build closed profile contour
-    profile_coords = _profile_to_radius_coords(profile)
+    profile_coords = profile_to_radius_coords(profile)
     closure_coords = _compute_closure_coords(profile, stock, profile_coords)
     all_coords = profile_coords + closure_coords
 
@@ -163,7 +163,7 @@ def build_zones(
     )
 
 
-def _profile_to_radius_coords(profile: ClosedProfile) -> List[dict]:
+def profile_to_radius_coords(profile: ClosedProfile) -> List[dict]:
     """Convert profile segments to radius coordinates for Build123d.
 
     Applies corner breaks (chamfers/fillets) at segment junctions by inserting
@@ -521,7 +521,7 @@ def _build_true_face(stock: StockDef, mode: MachiningMode) -> object:
 
 def contour_z_end(profile: ClosedProfile) -> float:
     """Most negative Z on the actual open contour, including kernel arc extrema."""
-    coords = _profile_to_radius_coords(profile)
+    coords = profile_to_radius_coords(profile)
     if not coords:
         raise ValueError("At least one profile point is required.")
     if len(coords) == 1:

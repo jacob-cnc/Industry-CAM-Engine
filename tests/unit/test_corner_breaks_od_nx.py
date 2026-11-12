@@ -107,11 +107,11 @@ def engine_elements(profile):
     from OCP.BRepAdaptor import BRepAdaptor_Curve
     from OCP.GeomAbs import GeomAbs_Circle
     from geometry.zone_builder import (
-        _build_face_from_coords, _compute_closure_coords, _profile_to_radius_coords,
+        _build_face_from_coords, _compute_closure_coords, profile_to_radius_coords,
     )
     from models.stock import StockDef
     stock = StockDef(diameter=20.0, x_start=20.0, z_start=0.5, z_end=-33.0)
-    coords = _profile_to_radius_coords(profile)
+    coords = profile_to_radius_coords(profile)
     face = _build_face_from_coords(coords + _compute_closure_coords(profile, stock, coords),
                                    profile)
     out = []

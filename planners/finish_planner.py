@@ -147,7 +147,7 @@ class FinishPlanner:
         Returns:
             List of EdgeData for the profile portion in cutting order, or None.
         """
-        from geometry.zone_builder import _profile_to_radius_coords
+        from geometry.kernel import profile_to_radius_coords
 
         try:
             all_edges = zone_query.boundary_wire_extraction("finished_part")
@@ -159,11 +159,11 @@ class FinishPlanner:
             # follows the user profile first-to-last. Normalize to the
             # last-to-first traversal expected below; otherwise the walk
             # selects the stock closure instead of the boring wall.
-            from geometry.zone_query import EdgeData
+            from geometry.kernel import EdgeData
             if profile.mode == MachiningMode.ID:
                 all_edges = [edge.reversed() for edge in reversed(all_edges)]
 
-            profile_coords = _profile_to_radius_coords(profile)
+            profile_coords = profile_to_radius_coords(profile)
             if not profile_coords:
                 return None
 
@@ -244,7 +244,7 @@ class FinishPlanner:
         Returns a new EdgeData if the point lies on the edge (between start and end),
         or None if it doesn't.
         """
-        from geometry.zone_query import EdgeData
+        from geometry.kernel import EdgeData
 
         if edge.edge_type != "LINE":
             return None
@@ -657,14 +657,14 @@ class FinishPlanner:
         """Fallback: trace profile segments with corner breaks expanded.
 
         Used when zone_query is unavailable or OCCT edge extraction fails.
-        Expands chamfers and fillets using _profile_to_radius_coords so the
+        Expands chamfers and fillets using profile_to_radius_coords so the
         finish pass includes all corner break geometry.
         """
-        from geometry.zone_builder import _profile_to_radius_coords
+        from geometry.kernel import profile_to_radius_coords
 
         # Use expanded coords (with chamfers/fillets) if profile is available
         if profile is not None:
-            coords = _profile_to_radius_coords(profile)
+            coords = profile_to_radius_coords(profile)
         else:
             coords = None
 
@@ -735,7 +735,7 @@ class FinishPlanner:
     def _moves_from_expanded_coords(
         self, coords: list, finishing_params: FinishingParams
     ) -> List[ToolMove]:
-        """Convert expanded profile coords (from _profile_to_radius_coords) to ToolMoves.
+        """Convert expanded profile coords (from profile_to_radius_coords) to ToolMoves.
 
         Coords are in RADIUS for x_radius. Output ToolMoves use DIAMETER for x.
         Handles LINE and ARC segments with proper center computation.
@@ -814,7 +814,7 @@ class FinishPlanner:
     ) -> Optional[tuple]:
         """Find arc center given two endpoints and radius (fallback math)."""
         import math
-        from geometry.arc_helpers import is_arc_within_x_bounds
+        from geometry.kernel import is_arc_within_x_bounds
 
         mx = (x1_r + x2_r) / 2.0
         mz = (z1 + z2) / 2.0

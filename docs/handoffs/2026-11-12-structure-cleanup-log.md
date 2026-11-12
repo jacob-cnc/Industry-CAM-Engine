@@ -178,3 +178,34 @@ from contour_roughing_planner) — ratchet lowered.
 - Question for the owner (existing behaviour, unchanged): a zero-width groove at Z−.200 with
   a .094 blade plunges at Z−.153 (= Z−.200 + half the blade). Right or wrong depends on which
   blade corner the grooving tool's Z offset refers to — worth a look before grooving.
+
+### Step 4a — geometry/kernel.py facade + rule (a) in the checker (2026-11-12 02:55 → 03:30)
+
+- `geometry/kernel.py`: the planners' only door into geometry/ (re-exports with `__all__`:
+  Arc, arc_from_kernel, short_sweep, split_at_quadrants, is_arc_within_x_bounds,
+  profile_to_radius_coords, EdgeData, offset_face, KernelOffsetError). Every runtime
+  `from geometry.<x> import` in planners/ now reads `from geometry.kernel import`.
+  Type-hint-only imports under TYPE_CHECKING (ZoneQueryAPI, EdgeData, ContourIntersect) are
+  unchanged: no runtime dependency, and the checker exempts them.
+- validation/architecture_check: `ALLOWED_SUBMODULE_IMPORTS = {"planners": {"geometry.kernel"}}`
+  + three tests (facade allowed; other geometry modules and raw OCP still violations).
+- Public names for helpers used across modules: zone_builder `_profile_to_radius_coords` →
+  `profile_to_radius_coords` (6 modules + 2 tests), tool_reach `_densify` → `densify_coords`.
+- Dependency errors 43 → 32 (ratchet lowered).
+- Verification: suite 1300 passed (1297 + 3 facade-rule tests); regression 16 SAME, 5 BOTH-REFUSE.
+
+Findings while reading the planners' kernel code (for 4b and the hand-math branch):
+- The canonical face builder (zone_builder `_build_face_from_coords`) makes quadrant arcs
+  TRUE circular quarters (ThreePointArc; owner 2026-11-11 "ellipses are retired"). The copies
+  in cleanup_planner and contour_roughing_planner still build them as a 64-segment ELLIPSE
+  POLYLINE. No corpus program has quadrant arcs (radius "Q"/"-Q"), so the regression corpus
+  does not exercise this; tests do. → hand-math branch: replace with the canonical builder and
+  add a basic corpus program with Q arcs first.
+- contour_roughing_planner's fallback `_build_face` passes `RadiusArc(-radius)`: the
+  documented 2026-11-10 bug ("every arc bulged the wrong way", fillet gouges). It runs only if
+  `zone_set.finished_part` is missing, which the pipeline never allows (build_zones raises on
+  failure) and no test does → unreachable, but a silent gouge if it ever ran. Removed in 4b.
+- cleanup_planner offsets with raw `b3d_offset(kind=INTERSECTION)`; everything else uses
+  `kernel_offset.offset_face` (sharp, then logged rounded-join fallback, readable error).
+- Every kernel step in cleanup is wrapped in `except Exception: return []` ("triggers
+  fallback to zone boundary") — a silent fallback; keep for now (behaviour), hand-math branch.

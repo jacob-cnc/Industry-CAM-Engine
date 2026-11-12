@@ -85,8 +85,8 @@ def _match(el, others):
 
 
 def _engine(breaks):
-    from geometry.zone_builder import _profile_to_radius_coords
-    return _chain(_profile_to_radius_coords(_profile(breaks)))
+    from geometry.zone_builder import profile_to_radius_coords
+    return _chain(profile_to_radius_coords(_profile(breaks)))
 
 
 def test_sharp_profile_matches_nx_sharp_part():

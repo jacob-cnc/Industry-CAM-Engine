@@ -327,10 +327,10 @@ class ZoneQueryAPI:
         See docs/handoffs/2026-11-08-id-pocket-removal-model.md.
         """
         from build123d import Side, Vertex
-        from geometry.zone_builder import _profile_to_radius_coords, _build_face_from_coords
+        from geometry.zone_builder import profile_to_radius_coords, _build_face_from_coords
         if not math.isfinite(remaining_allowance_dia) or remaining_allowance_dia < 0:
             raise ValueError("Profile allowance must be finite and nonnegative.")
-        coords = _profile_to_radius_coords(profile)
+        coords = profile_to_radius_coords(profile)
         original = _build_face_from_coords(coords, profile, closed=False)
         wires = original.wires()
         if len(wires) != 1:
