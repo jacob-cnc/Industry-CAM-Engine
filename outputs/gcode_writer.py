@@ -702,16 +702,15 @@ class GCodeWriter:
         is_id = params.is_internal
 
         # Safe X for threading approach/retract
-        if is_id:
-            safe_x = max(0.0, params.major_diameter - 0.100)
-        else:
-            safe_x = stock_dia + 0.050
+        # Where the tool goes is planned (ThreadingPlanner.compute_g76_params);
+        # X_safe never inside the stock for an external thread.
+        safe_x = g76["X_safe"] if is_id else max(g76["X_safe"], stock_dia + 0.050)
 
         # Section header
         thread_type = "Internal" if is_id else "External"
         lines.append(f"; === THREADING ({params.designation}, {thread_type}) ===")
         lines.append(f"; Pitch: {params.pitch * conv:{fmt}} ({'mm/rev' if unit_mode == 'metric' else 'in/rev'})")
-        lines.append(f"; Depth: {params.thread_depth * conv:{fmt}}")
+        lines.append(f"; Depth: {params.thread_depth * conv:{fmt}} per side (G76 J/K are on diameter in G7)")
         lines.append(f"; Passes: {params.num_passes} + {params.spring_passes} spring")
         lines.append(f"; Infeed: {params.infeed_method}")
         if params.num_starts > 1:
@@ -723,55 +722,30 @@ class GCodeWriter:
         # Spindle speed for threading (typically lower than roughing)
         lines.append(self._line(f"S{params.spindle_rpm:.0f} M3", f"Threading speed {params.spindle_rpm:.0f} RPM"))
 
-        # Position at threading start
-        lines.append(self._rapid(safe_x, params.start_z, f"Approach: safe X at thread start Z"))
-        lines.append(self._rapid(params.major_diameter, params.start_z, f"Rapid to thread major dia"))
+        # Approach: safe X at the start Z, then the drive line (planned:
+        # crest + .020 external / - .020 internal; G76 needs the tool there).
+        x_drive = g76["X_drive"]
+        z_starts = g76["Z_start"]
+
+        def g76_word(z_end):
+            return (f"G76 P{g76['P'] * conv:{fmt}} Z{z_end * conv:{fmt}} "
+                    f"I{g76['I'] * conv:{fmt}} J{g76['J'] * conv:{fmt}} K{g76['K'] * conv:{fmt}} "
+                    f"R{g76['R']:.1f} Q{g76['Q']:.1f} H{g76['H']} "
+                    f"E{g76['E'] * conv:{fmt}} L{int(g76['L'])}")
+
+        for k, z0 in enumerate(z_starts):
+            label = f"start {k + 1}" if len(z_starts) > 1 else "thread start"
+            lines.append(self._rapid(safe_x, z0, f"Approach: safe X at {label} Z"))
+            lines.append(self._rapid(x_drive, z0, f"Rapid to the drive line ({'crest - .020' if is_id else 'crest + .020'})"))
+            lines.append(self._line(g76_word(g76["Z"]),
+                                    f"Thread cycle: {params.designation}"
+                                    + (f", {label} of {len(z_starts)}" if len(z_starts) > 1 else "")))
+            self._x, self._z = x_drive, g76["Z"]            # G76 ends at the end of the drive line
+            # Retract: straight off the thread form in X, then out along Z
+            # (an internal thread must leave the hole along Z).
+            lines.append(self._rapid(safe_x, g76["Z"], "Retract X clear of the thread"))
+            lines.append(self._rapid(safe_x, z0, "Retract along Z"))
         lines.append("")
-
-        # G76 threading cycle
-        # LinuxCNC G76 format:
-        # G76 P- Z- I- J- K- R- Q- H- E- L-
-        g76_line = (
-            f"G76 P{g76['P'] * conv:{fmt}} "
-            f"Z{g76['Z'] * conv:{fmt}} "
-            f"I{g76['I'] * conv:{fmt}} "
-            f"J{g76['J'] * conv:{fmt}} "
-            f"K{g76['K'] * conv:{fmt}} "
-            f"R{g76['R']:.1f} "
-            f"Q{g76['Q']:.1f} "
-            f"H{g76['H']} "
-            f"E{g76['E'] * conv:{fmt}} "
-            f"L{int(g76['L'])}"
-        )
-        lines.append(self._line(g76_line, f"Thread cycle: {params.designation}"))
-
-        # Handle multi-start threads
-        if params.num_starts > 1:
-            lines.append(f"; Multi-start: {params.num_starts} starts")
-            for start_num in range(1, params.num_starts):
-                # Offset start Z by (start_num * pitch) for each additional start
-                offset_z = params.start_z - (start_num * params.pitch)
-                g76_ms = (
-                    f"G76 P{g76['P'] * conv:{fmt}} "
-                    f"Z{(g76['Z'] - start_num * params.pitch) * conv:{fmt}} "
-                    f"I{g76['I'] * conv:{fmt}} "
-                    f"J{g76['J'] * conv:{fmt}} "
-                    f"K{g76['K'] * conv:{fmt}} "
-                    f"R{g76['R']:.1f} "
-                    f"Q{g76['Q']:.1f} "
-                    f"H{g76['H']} "
-                    f"E{g76['E'] * conv:{fmt}} "
-                    f"L{int(g76['L'])}"
-                )
-                lines.append(self._line(
-                    f"G00 Z{offset_z * conv:{fmt}}",
-                    f"Position for start {start_num + 1}"
-                ))
-                lines.append(self._line(g76_ms, f"Thread start {start_num + 1}"))
-        lines.append("")
-
-        # Retract
-        lines.append(self._rapid(safe_x, params.start_z, "Retract after threading"))
 
         return lines
 

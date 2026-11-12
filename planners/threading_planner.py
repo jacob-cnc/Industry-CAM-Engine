@@ -103,58 +103,80 @@ class ThreadingPlanner:
 
         return moves
 
+    # Drive line this far outside the crest (on DIAMETER; owner 2026-11-12,
+    # same as the contour feed-in).
+    DRIVE_LINE_CLEARANCE_DIA = 0.020
+    # Retract / approach X this much further from the drive line (diameter).
+    SAFE_X_EXTRA_DIA = 0.050
+
     def compute_g76_params(self, params: ThreadingParams) -> dict:
-        """Compute the G76 word values from ThreadingParams.
+        """G76 words for LinuxCNC in G7 (DIAMETER mode), plus where the tool
+        must be before and after the cycle.
 
-        Returns dict with keys matching G76 words:
-            P: pitch (distance per revolution)
-            Z: final Z position
-            I: thread peak offset (taper amount, 0 for parallel)
-            J: initial cut depth (first pass)
-            K: full thread depth
-            R: depth degression (1.0=constant, 2.0=constant area)
-            Q: compound slide angle (degrees * 10 for LinuxCNC)
-            H: spring passes
-            E: taper distance per thread (0 for parallel)
-            L: chamfer threads (in number of threads at exit)
+        LinuxCNC (2.9 manual, G76): the drive line is the tool's X before the
+        G76; I is the thread crest's offset FROM the drive line (negative =
+        external, positive = internal); J and K are the first and full cut depth
+        beyond the crest; in G7 I, J, K are DIAMETER values. P is the distance
+        per spindle revolution - the LEAD (pitch x starts).
+
+        Until 2026-11-12 the drive line was put ON the major diameter with I0
+        (LinuxCNC: "In G76, I must not be 0"), J / K were radial values read as
+        diameters (half-depth threads), an internal thread was approached at the
+        MAJOR diameter (into the bore wall), and multi-start used the pitch as P.
+
+        Returns the G76 words P Z I J K R Q H E L and (diameter, inches):
+            X_drive   drive line: crest + .020 (external) / crest - .020 (internal)
+            X_safe    approach / retract X, clear of the work
+            crest     major Ø (external) / minor Ø = major - 2 x depth (internal)
+            Z_start   where each start begins (list, one per start)
         """
-        # Full thread depth (K word) — already computed in params
-        full_depth = params.thread_depth
-
-        # Initial cut depth (J word)
-        if params.first_pass_depth > 0:
-            first_depth = params.first_pass_depth
-        else:
-            # Auto-compute: first pass depth from constant-area formula
-            # depth_1 = full_depth * sqrt(1/num_passes)
-            first_depth = full_depth * math.sqrt(1.0 / params.num_passes)
-
-        # Compound angle (Q word) — determines infeed direction
-        compound_angle = self._get_compound_angle(params.infeed_method)
-
-        # Thread peak offset (I word) — for tapered threads (NPT)
-        # I = change in radius over the thread length
-        # Positive = toward spindle (ID taper), Negative = away (OD taper)
         if params.taper_amount != 0.0:
-            thread_length = abs(params.start_z - params.end_z)
-            # taper_amount is in diameter per inch. I word is radius change over full length.
-            peak_offset = (params.taper_amount * thread_length) / 2.0
-            if not params.is_internal:
-                peak_offset = -peak_offset  # OD external taper: negative
+            raise ValueError(
+                "Tapered threads (e.g. NPT) are not supported: LinuxCNC's G76 cuts parallel "
+                "threads only. Set the taper to 0, or cut the taper another way.")
+        depth_dia = 2.0 * params.thread_depth                       # K: radial depth -> diameter
+        if params.first_pass_depth > 0:
+            first_dia = 2.0 * params.first_pass_depth
         else:
-            peak_offset = 0.0
-
+            # constant-area start: depth_1 = full_depth * sqrt(1/num_passes)
+            first_dia = depth_dia * math.sqrt(1.0 / params.num_passes)
+        compound_angle = self._get_compound_angle(params.infeed_method)
+        c = self.DRIVE_LINE_CLEARANCE_DIA
+        if params.is_internal:
+            crest = params.major_diameter - depth_dia
+            x_drive = crest - c
+            peak_offset = +c
+            x_safe = max(0.0, x_drive - self.SAFE_X_EXTRA_DIA)
+        else:
+            crest = params.major_diameter
+            x_drive = crest + c
+            peak_offset = -c
+            x_safe = x_drive + self.SAFE_X_EXTRA_DIA
+        starts = max(1, int(params.num_starts))
+        lead = params.pitch * starts
+        # Pull-out chamfer: LinuxCNC's exit taper (L2) over E along the drive line.
+        exit_taper = max(0.0, params.chamfer_threads) * lead
+        drive_len = abs(params.start_z - params.end_z)
+        if exit_taper > drive_len / 2.0 + 1e-12:
+            raise ValueError(
+                f"The pull-out chamfer ({params.chamfer_threads:g} threads = {exit_taper:.4f}) is "
+                f"longer than half the thread ({drive_len:.4f}); LinuxCNC refuses that. Use a "
+                f"smaller chamfer or a longer thread.")
         return {
-            "P": params.pitch,
+            "P": lead,
             "Z": params.end_z,
             "I": peak_offset,
-            "J": first_depth,
-            "K": full_depth,
+            "J": first_dia,
+            "K": depth_dia,
             "R": params.degression,
             "Q": compound_angle,
             "H": params.spring_passes,
-            "E": 0.0,  # Taper distance per thread (we use I for full taper)
-            "L": params.chamfer_threads,
+            "E": exit_taper,
+            "L": 2 if exit_taper > 0 else 0,
+            "X_drive": x_drive,
+            "X_safe": x_safe,
+            "crest": crest,
+            "Z_start": [params.start_z - k * params.pitch for k in range(starts)],
         }
 
     def _get_compound_angle(self, infeed_method: str) -> float:
