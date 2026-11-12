@@ -9,7 +9,8 @@ Owner rule:
   * pass 1 retracts to stock OD + .005 (OD) / pilot hole - .001 (ID: pass 1
     may be shallower than .005);
   * pass n retracts to the previous pass's highest X + .005 (OD) / lowest X
-    - .005 (ID), arcs included (kernel arc extents);
+    - .005 (ID), arcs included (kernel arc extents); + / - .010 when the pass
+    runs off a free end (no stock beyond it), clearing the nose scallops there;
   * a pass that ends at a wall or shoulder (stock just beyond its end) pulls
     off at 45 deg: away from the wall in Z by the same radial distance it
     retracts in X (never back past the pass's own start), else straight in X;
@@ -38,6 +39,9 @@ from models.moves import MoveType, PassType, ToolMove
 
 OD_CLEAR = 0.005          # retract beyond the previous pass (diameter)
 ID_CLEAR = 0.005
+FREE_END_CLEAR = 0.010    # ... when the pass runs off a free end: the nose-radius
+                          # scallops left on that edge stand up to ~.0023 a side
+                          # (owner 2026-11-12)
 OD_FIRST_CLEAR = 0.005    # pass 1: beyond stock OD
 ID_FIRST_CLEAR = 0.001    # pass 1: inside the pilot hole (pass 1 may be < .005 deep)
 FIRST_Z_CLEAR = 0.050     # pass 1 arrives this far in front of the stock face first
@@ -154,14 +158,15 @@ def plan_rough_links(passes, stock, is_id: bool, feed: float,
                                  feed=feed, pass_type=PassType.TRANSITION))
 
         # --- retract: owner's target, 45 deg off a wall, full exit outside the corridor
-        target = first_target if i == 0 else (
-            extents[i - 1][0] - ID_CLEAR if is_id else extents[i - 1][1] + OD_CLEAR)
-        if is_id:
-            target = max(0.0, target)
         end = _end(p)
         travel_up = p.z_start >= end[1]                  # pass ran toward -Z
         back = 1.0 if travel_up else -1.0                # Z direction away from the end wall
         wall = material_beyond((end[0], end[1] - back * 0.001))
+        clear = (ID_CLEAR if is_id else OD_CLEAR) if wall else FREE_END_CLEAR
+        target = first_target if i == 0 else (
+            extents[i - 1][0] - clear if is_id else extents[i - 1][1] + clear)
+        if is_id:
+            target = max(0.0, target)
         dz = 0.0
         if wall:
             dz = min(abs(target - end[0]) / 2.0, abs(p.z_start - end[1]))   # 45 deg, <= own length
