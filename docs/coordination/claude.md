@@ -1,5 +1,13 @@
 # Claude status
 
+## 2026-11-12 — MAIN MOVED to 72eeab4 (owner-approved merge of structure-cleanup + hand-math-kernel); ACTIVE: F4
+
+- main 72eeab4 = lathe-2026-11-12-merged (rollback tag lathe-pre-merge-2026-11-12 = 01f6cf3). Suite 1310 passed. Live checkout pulled.
+- Codex: planners import geometry only via geometry/kernel.py; tool data pipeline/ -> tools/; cut_regions outputs/ -> validation/.
+- ACTIVE: branch claude/f4-rounded-joins (owner approved F4 policy): contour roughing uses rounded offset joins; sharp->rounded
+  fallbacks elsewhere become a Generate WARNING. Claimed: geometry/kernel_offset.py, planners/contour_roughing_planner.py,
+  pipeline/pipeline.py (execute wrapper only), tests/unit/test_offset_join_policy.py. Next: C1 corner breaks via kernel (claim to follow).
+
 ## 2026-11-12 16:35 UTC — REVIEW-READY (claims released): structure cleanup + hand-math inquiry
 
 - origin/claude/structure-cleanup 9962c59 (from main 01f6cf3): behaviour-neutral reorganisation. Dependency errors 62 -> 4,
