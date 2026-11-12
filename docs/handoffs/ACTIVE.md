@@ -41,13 +41,32 @@ the distinction between the owner's verbatim request and later design advice.
   - Still open from this handoff: ID corner breaks unvalidated; offset_contour
     gouge on large concave fillets; V1 front-face chamfer; Kiro GUI tests on Linux.
 
+- [X Vernier: Commissioning Runbook](2026-11-10-x-vernier-commissioning.md)
+  - Status: Built and bench-proven 2026-11-10 on branch `claude/x-vernier`;
+    not yet on the machine. Owner-present tuning session required.
+  - Sub-count X position from scale edges + step feedback (`rtcomp/xvernier.comp`).
+    Bench, with calibration fitted from a simulated sweep: ±.00005-.0001 dia
+    parking vs ±.0009 today. No new hardware; wear workflow unchanged.
+  - First action: merge (inert), `sudo halcompile --install rtcomp/xvernier.comp`,
+    then the runbook steps 1-6 (shadow → baseline → sweep/fit → indicator check
+    → close → cut). The bench-day card at the top of the runbook has the commands;
+    fill in its session log.
+
+- [Z Vernier: Plan](2026-11-11-z-vernier-plan.md)
+  - Status: Plan only (2026-11-11). Starts after X is closed and cutting parts.
+  - Same estimator, own twin component; Z differences: 5.3 steps/count, 10" travel
+    (maybe a pitch table), cutting thrust on the nut, deadband already 1 count.
+  - First data: optional X runbook step 7 (raw Z sweep, ~5 min, Z vernier not needed).
+  - Owner: acme/tight nut, same scale, Z tolerance ±.0005–.001 → Z is likely already in
+    band; measure it first (offline replay of raw captures), build only if needed.
+
 - [X Axis: Hold a .0004" Diameter Band](2026-11-10-x-axis-tolerance.md)
   - Status: Plan written 2026-11-10 after an evening of chasing X wear by hand
     (11 corrections, .001" window). Owner-present session required.
   - Finding: X scale = 1 count per .0004" dia (the whole band); deadband
     .0005 r = +/-.0010 dia parking window. Tuning alone cannot reach the band.
-  - First action: deadband step-down (2026-11-08 handoff below), then a
-    read-only error log; decide on a 1 um X scale (recommended).
+  - Superseded by the X vernier (above), chosen by the owner 2026-11-10 over a
+    1 um scale. Deadband step-down kept as the fallback.
 
 - [X Position-Loop Deadband Tuning](2026-11-08-x-deadband-tuning.md)
   - Status: Planned; owner-present bench session required. Nothing changed yet.

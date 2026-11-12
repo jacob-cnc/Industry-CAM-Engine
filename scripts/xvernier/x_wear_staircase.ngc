@@ -1,0 +1,28 @@
+%
+( X WEAR STAIRCASE  -  AIR ONLY, MOVES X ONLY, SPINDLE OFF                      )
+( docs/handoffs/2026-11-10-x-vernier-commissioning.md, steps 2 and 5            )
+( Indicator, .0001 grad, on the cross slide reading X travel. Each step is .0002)
+( diameter = .0001 on the indicator. 10 steps up, then 10 down, 5 s per step:   )
+( read the indicator during each dwell.                                         )
+( Today's loop: steps come in lumps or not at all. Closed vernier: one tenth    )
+( per step on the indicator, every step.                                         )
+#<xd> = 2.0000
+N10 G20 G7 G18 G90 G94 G40 G49 G80
+N20 M5
+N30 G00 X[#<xd> - 0.050]
+N40 G01 X[#<xd>] F2.0
+N50 G04 P5.0
+#<i> = 1
+o100 while [#<i> LE 10]
+  G01 X[#<xd> + 0.0002 * #<i>] F2.0
+  G04 P5.0
+  #<i> = [#<i> + 1]
+o100 endwhile
+#<i> = 9
+o200 while [#<i> GE 0]
+  G01 X[#<xd> + 0.0002 * #<i>] F2.0
+  G04 P5.0
+  #<i> = [#<i> - 1]
+o200 endwhile
+N900 M2
+%

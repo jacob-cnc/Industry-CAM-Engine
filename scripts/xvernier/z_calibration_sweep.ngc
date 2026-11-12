@@ -1,0 +1,39 @@
+%
+( Z CALIBRATION SWEEP  -  AIR ONLY, MOVES Z ONLY, SPINDLE OFF                   )
+( Optional data grab for the Z phase: docs/handoffs/2026-11-11-z-vernier-plan.md )
+( Start "capture.sh 330 OUT.txt z" first, then run this. About 5 minutes.        )
+( Z travels from ZS toward the chuck to ZS - 1.0 and back, slowly, at three     )
+( feeds, then makes ten short back-and-forth reversals for backlash.           )
+( X never moves. Set ZS so there is 1.0 of clear Z travel below it with the    )
+( tool where X is now, nothing in the chuck in the way.                        )
+#<zs> = 0.0000
+#<span> = 1.0000
+N10 G20 G7 G18 G90 G94 G40 G49 G80
+N20 M5
+N30 G00 Z[#<zs>]
+N40 G04 P1.0
+( three speeds: slow edges for the map, faster ones for drive lag )
+N50 G01 Z[#<zs> - #<span>] F1.0
+N60 G04 P0.5
+N70 G01 Z[#<zs>] F1.0
+N80 G04 P0.5
+N90 G01 Z[#<zs> - #<span>] F2.0
+N100 G04 P0.5
+N110 G01 Z[#<zs>] F2.0
+N120 G04 P0.5
+N130 G01 Z[#<zs> - #<span>] F3.0
+N140 G04 P0.5
+N150 G01 Z[#<zs>] F3.0
+N160 G04 P0.5
+( backlash: ten .010 reversals, stepping toward the chuck .020 each time )
+#<i> = 0
+o100 while [#<i> LT 10]
+  G01 Z[#<zs> - 0.020 * #<i> - 0.010] F1.0
+  G04 P0.3
+  G01 Z[#<zs> - 0.020 * #<i>] F1.0
+  G04 P0.3
+  #<i> = [#<i> + 1]
+o100 endwhile
+N900 G00 Z[#<zs>]
+N910 M2
+%

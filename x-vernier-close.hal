@@ -1,0 +1,22 @@
+# ============================================================================
+# x-vernier-close.hal — close the X loop on the vernier estimate
+# docs/handoffs/2026-11-10-x-vernier-commissioning.md
+#
+# Requires x-vernier-observe.hal loaded first. pid.x and the DRO/following
+# error now use xvernier.pos-est (sub-count) instead of the raw scale; the
+# vernier itself is pinned to the scale within half a count, so this can't
+# be worse than the scale. PID gains are unchanged; only the deadband drops
+# because the feedback is no longer quantized to .000197.
+# Enable:  [HAL] HALFILE = x-vernier-close.hal  (after x-vernier-observe.hal)
+# Rollback: comment that line out -> exactly the old loop.
+# ============================================================================
+
+unlinkp pid.x.feedback
+unlinkp joint.0.motor-pos-fb
+net x-pos-est  xvernier.pos-est => pid.x.feedback joint.0.motor-pos-fb
+
+setp pid.x.deadband  [XVERNIER]PID_DEADBAND
+
+# a forced correction > FAULT_LIMIT in one servo cycle (lost steps, scale glitch)
+# drops the machine out like a drive fault
+net x-vernier-fault  xvernier.fault => joint.0.amp-fault-in

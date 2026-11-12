@@ -1,0 +1,30 @@
+%
+( X VERNIER POSITIONING TEST  -  AIR ONLY, MOVES X ONLY, SPINDLE OFF           )
+( docs/handoffs/2026-11-10-x-vernier-commissioning.md, steps 2 and 5            )
+( Start capture.sh 200 OUT.txt first, then run this. About 3 minutes.           )
+( Twelve target diameters with odd last digits, each reached three ways:        )
+(   feed up from .050 below, feed down from .050 above, rapid from .300 away;   )
+( a 3 s dwell at each. analyze_holds.py reports the parking error per hold.     )
+( Set XD so there is 0.7 dia of clear travel above it.                          )
+#<xd> = 2.0000
+N10 G20 G7 G18 G90 G94 G40 G49 G80
+N20 M5
+N30 G00 X[#<xd> + 0.1]
+#<k> = 0
+o100 while [#<k> LT 12]
+  ( targets spread over .33 dia with sub-count fractions: XD + .1 + .02753 k )
+  #<t> = [#<xd> + 0.1000 + 0.02753 * #<k>]
+  G00 X[#<t> - 0.050]
+  G01 X[#<t>] F2.0
+  G04 P3.0
+  G00 X[#<t> + 0.050]
+  G01 X[#<t>] F2.0
+  G04 P3.0
+  G00 X[#<t> + 0.300]
+  G00 X[#<t>]
+  G04 P3.0
+  #<k> = [#<k> + 1]
+o100 endwhile
+N900 G00 X[#<xd>]
+N910 M2
+%

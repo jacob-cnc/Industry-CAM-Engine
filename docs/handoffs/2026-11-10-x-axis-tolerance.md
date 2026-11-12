@@ -1,5 +1,14 @@
 # X axis: holding a .0004" diameter tolerance band (2026-11-10)
 
+> **Update 2026-11-10 (later):** the owner chose the software route. Note: their
+> report is that X parks 2.9500-2.9510 for a 2.9505 command while the part matches
+> the DRO, so the scale is truthful and the loop's stopping point is the problem.
+> Implemented as the X vernier (option 4's idea, but done with scale *edges*,
+> which also beats the .0004 grid): see
+> [2026-11-10-x-vernier-commissioning.md](2026-11-10-x-vernier-commissioning.md).
+> The owner wants the wear-offset GUI unchanged, so the "measured diameter →
+> wear" helper in option 5 is dropped.
+
 Owner goal: parts with a **total** tolerance band of .0004" (diameter), so the
 actual-vs-commanded X position must hold *tighter* than that. Tonight's parts
 were made to size, but only by chasing X wear by hand.
