@@ -277,3 +277,42 @@ pass now arcs around convex corners at exactly allowance + n·DOC (e.g. NX pass 
 out to X.7262 at Z−.016, instead of a sharp drop at X.7262), so roughing takes the corner material the sharp
 extension used to leave and the cleanup pass sees an even DOC. No corpus program triggers the new WARNING
 (no keep-zone or cleanup/finish fallback occurs).
+
+## C1 — corner breaks from the kernel (owner approved 2026-11-12, branch claude/c1-corner-breaks)
+
+Probe first (`scripts/hand_math/corner_break_probe.py`):
+- NX part, line-line: OCCT 2D fillet / chamfer (BRepFilletAPI_MakeFillet2d, build123d `fillet_2d` /
+  `chamfer_2d`) on the sharp outline reproduces NX at 9/10 vertices; V9 (the deliberate "does not fit")
+  is refused by OCCT (StdFail_NotDone) — the owner's NX trim rule stays hand-solved for that case.
+- Next to arcs the engine used a chord construction: the break's end point was put along the CHORD,
+  off the arc, and the operator's arc redrawn through it — centre moved .008 in (.05 fillet) /
+  .034 in (.05 chamfer), 29–43° kinks where a fillet should be tangent. Kernel: centre kept, tangent.
+- Pitfalls met: OCCT's analytic `ChFi2d_FilletAPI` picked a fillet on the arc's EXTENSION (wrong);
+  the topological MakeFillet2d is right. OCCT can also "succeed" with a chamfer longer than its edge
+  (it starts past the edge end) — kernel results are checked to start/end on their edges.
+
+Engine (`geometry/corner_breaks_od.py`): every break that fits is built by the kernel on the two
+neighbouring edges as the zone builder builds them (new `zone_builder.edge_from_coords`); kernel
+refusal → NX trim rules (line-line) or "skipped" with a message (next to an arc). 2000 random
+profiles: kernel refusals == NX trims exactly. Trimmed quadrant arcs are emitted as plain arcs of
+the same circle. Convex/concave from real tangents. Removed: `_legacy_vertex`, the unreachable
+pre-solver code in `profile_to_radius_coords`. hand_math 20 → 19.
+
+Preview (`gui/program_tab.py`): draws `zone_builder.sample_outline` over the solver's coords (the
+kernel edges the zone builder machines) per row; its own geometry (chord breaks, arc-centre pick
+with a bounds swap, quadrant points; other blocks' arcs as chords; the tool's chord ghost) removed.
+Half-typed rows degrade per element (straight guide). `scripts/hand_math/preview_render.py` renders
+the preview offscreen and compares two checkouts.
+
+Also: the writer never prints a signed zero (`z.4f`); main printed `-0.0000` in 12 of 19 programs.
+
+Verification: suite 1328 passed. Corpus vs main: with `-0.0000` normalised, all 23 programs
+text-identical. Previews of the 23: within .000033 in (sampling). Synthetic quadrant program with
+breaks at its arc junctions: main MACHINED a part up to .073 in (radius) off the operator's quadrants
+(three of those junctions are tangent — no corner — and are now reported "skipped"); the branch
+machines the sharp profile plus exactly the one real break (cut_regions vs a no-break copy:
+7.8e-4 in² = ½·.04², deviation .027 = .04·sin45°). No owner program has a break next to an arc.
+
+Still open in C1: NX trim rules next to arcs (cut-short / smooth) — not built; such breaks are
+reported "skipped". Vertex labels after an arc split (normalize_profile inserts points, the V numbers
+in reports shift) — pre-existing, worth a look with the owner.
