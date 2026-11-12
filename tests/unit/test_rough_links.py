@@ -33,17 +33,26 @@ def _retract(p):
     return m.x, m.z
 
 
-def test_od_targets_stock_then_previous_pass_plus_005():
+def test_od_targets_stock_then_previous_pass_plus_005_at_a_wall():
+    ps = plan_rough_links([_pass(1.9, 0.0, -1.0), _pass(1.8, 0.0, -1.0), _pass(1.7, 0.0, -1.0)],
+                          _Stock(2.0), False, 0.01, WALL)
+    assert [_retract(p)[0] for p in ps] == pytest.approx([2.005, 1.905, 1.805])
+
+
+def test_od_free_end_uses_010_and_retracts_straight_in_x():
     ps = plan_rough_links([_pass(1.9, 0.0, -1.0), _pass(1.8, 0.0, -1.0), _pass(1.7, 0.0, -1.0)],
                           _Stock(2.0), False, 0.01, NO_WALL)
-    assert [_retract(p)[0] for p in ps] == pytest.approx([2.005, 1.905, 1.805])
+    assert [_retract(p)[0] for p in ps] == pytest.approx([2.005, 1.91, 1.81])   # pass 1: stock + .005
     assert all(_retract(p)[1] == pytest.approx(-1.0) for p in ps)          # straight X, no wall
 
 
 def test_id_targets_pilot_minus_001_then_previous_pass_minus_005():
     ps = plan_rough_links([_pass(1.05, 0.0, -1.0), _pass(1.10, 0.0, -1.0)],
-                          _Stock(3.0, pilot=1.0), True, 0.01, NO_WALL)
+                          _Stock(3.0, pilot=1.0), True, 0.01, WALL)
     assert [_retract(p)[0] for p in ps] == pytest.approx([0.999, 1.045])
+    ps = plan_rough_links([_pass(1.05, 0.0, -1.0), _pass(1.10, 0.0, -1.0)],
+                          _Stock(3.0, pilot=1.0), True, 0.01, NO_WALL)
+    assert [_retract(p)[0] for p in ps] == pytest.approx([0.999, 1.04])      # free end: .010
 
 
 def test_45_degree_pull_off_at_a_wall_capped_by_the_pass_length():
@@ -82,13 +91,13 @@ def test_first_approach_arrives_in_front_of_the_face_then_straight_in_z():
 def test_traverse_out_of_a_pocket_goes_to_the_pocket_mouth():
     """Pass 0 covers the whole length at X1.0; then front (Z0..-.2) and back
     (Z-.5..-1) regions alternate at X0.9 and X0.8 with the part between them.
-    Pass 3 (front, X0.8) retracts to X0.905 (pass 2 + .005); travelling to the
+    Pass 3 (front, X0.8) retracts to X0.91 (pass 2 + .010, free end); travelling to the
     back from there would cross the part, so pass 4's approach first rises to
     X1.005 - just beyond pass 0, the pocket's mouth - not to the stock."""
     ps = plan_rough_links([_pass(1.0, 0.0, -1.0), _pass(0.9, 0.0, -0.2), _pass(0.9, -0.5, -1.0),
                            _pass(0.8, 0.0, -0.2), _pass(0.8, -0.5, -1.0)],
                           _Stock(2.0), False, 0.01, NO_WALL)
-    assert _retract(ps[3]) == pytest.approx((0.905, -0.2))
+    assert _retract(ps[3]) == pytest.approx((0.91, -0.2))        # free end: pass 2 + .010
     a = ps[4].approach_moves
     assert (a[0].x, a[0].z) == pytest.approx((1.005, -0.2))      # out of the pocket first
     assert (a[1].x, a[1].z) == pytest.approx((1.005, -0.5))      # then along Z

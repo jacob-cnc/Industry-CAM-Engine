@@ -23,8 +23,10 @@ from typing import List, Optional, Tuple
 from shapely.geometry import LineString, Point, Polygon
 from shapely.ops import unary_union
 
+from shapely.geometry import box
+
 from validation.cut_regions import (NOSE_QUAD_SEGS, _translate, _wedge, nose_offset,
-                                    parse_canon, run_rs274, stock_polygon)
+                                    parse_canon, run_rs274)
 
 HIT_DEPTH = 0.0002       # in: material thinner than this (largest inscribed circle's
                          # diameter) is contact / polygon noise, not a collision
@@ -74,6 +76,28 @@ def _depth(geom) -> float:
     return best
 
 
+def material_at_start(pr, mode_id: bool):
+    """The material before the block runs, (r, z).
+
+    Behind Z0: the bar, from the axis (OD) / pilot hole (ID) to the stock OD.
+    In front of Z0 (up to Z start) only where the block FACES it: Z0 is the
+    faced surface and Z start is a cushion that may be stock or air (owner
+    2026-11-11); stock proud of Z0 means the operator faces it, so it lies
+    within the face passes' band (OD: X start to the stock OD; ID: pilot hole
+    to X start) and nowhere else (owner 2026-11-12, GCH bores: "the Z0 datum
+    is the true face of the stock")."""
+    st = pr.stock
+    r_in = st.pilot_hole_dia / 2.0 if mode_id else 0.0
+    R = st.diameter / 2.0
+    body = box(r_in, st.z_end, R, 0.0)
+    front = 0.0 if getattr(st, "face_at_z0", False) else max(st.z_start, 0.0)
+    if front > 0.0 and pr.face_passes:
+        band = (box(r_in, 0.0, st.x_start / 2.0, front) if mode_id
+                else box(st.x_start / 2.0, 0.0, R, front))
+        body = unary_union([body, band])
+    return body
+
+
 def check_rapids(gcode: str, plan_result) -> List[RapidReport]:
     """Every rapid of the program with what it hits and its clearance."""
     from models.profile import MachiningMode
@@ -84,7 +108,7 @@ def check_rapids(gcode: str, plan_result) -> List[RapidReport]:
     if ft is not None:
         tools[ft.tool_number] = ft
     moves = parse_canon(run_rs274(gcode, tools.values()))
-    remaining = stock_polygon(pr.stock, mode_id)
+    remaining = material_at_start(pr, mode_id)
     out: List[RapidReport] = []
     for mv in moves:
         t = tools.get(mv.tool)
