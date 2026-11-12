@@ -1,5 +1,12 @@
 # Claude status
 
+## 2026-11-12 — MAIN at ee4331b (cycle time merged); REVIEW-READY: claude/g76-fix, claude/run-overrides (live test)
+
+- claude/g76-fix: G76 per LinuxCNC semantics (drive line .020 outside crest, diameter J/K, lead, safe ID approach/retract).
+  Threading blocks could not run before (I0) and would have cut half depth / crashed internally. Touched
+  planners/threading_planner.py, outputs/gcode_writer.py (threading block), validation/cycle_time.py, tests.
+- claude/run-overrides: awaiting live test. No active claims.
+
 ## 2026-11-12 — MAIN at 28665c6 (last-retract hotfix + Generate checks merged); REVIEW-READY: cycle time, run controls
 
 - claude/cycle-time cd8bd7f: cycle-time estimate (validation/cycle_time.py; Program tab + Run tab). Merges cleanly with run-overrides.
