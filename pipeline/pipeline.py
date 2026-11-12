@@ -206,6 +206,13 @@ def _execute(
             zone_query, zone_set, tool, roughing_params, stock, profile.mode, profile,
         )
 
+    # Step 5b: Roughing retracts / approaches (owner rule 2026-11-12,
+    # planners/rough_links.py): what the writer emits and the validator checks.
+    from planners.rough_links import plan_rough_links
+    roughing_passes = plan_rough_links(
+        roughing_passes, stock, profile.mode == MachiningMode.ID, roughing_params.feed,
+        lambda pt: zone_query.contains("stock", pt[0], pt[1]))
+
     # Step 6: Plan cleanup pass
     # Both strategies need a cleanup pass. For staircase, the cleanup removes
     # the stair-step material left between DOC levels. For offset-contour,
@@ -225,6 +232,7 @@ def _execute(
     transitions = transition_planner.plan_all(
         all_passes, profile.mode, stock, zone_query, roughing_params.strategy
     )
+    transitions = _with_rough_links(all_passes, transitions)
 
     # Persist contour exits and incoming finish links so output uses validated
     # motion, including the final contour's exit before travel to park.
@@ -362,6 +370,22 @@ def _extract_zone_boundary(zone_query, zone_name):
     return boundary_polyline(edges)
 
 
+def _with_rough_links(all_passes, transitions):
+    """Transitions touching roughing passes made of the passes' own planned
+    retract / approach (planners/rough_links.py), so the moves validated are
+    the moves the writer emits."""
+    out = list(transitions)
+    for k, t in enumerate(out):
+        a, b = all_passes[k], all_passes[k + 1]
+        a_rough, b_rough = a.pass_type == PassType.ROUGH, b.pass_type == PassType.ROUGH
+        if not (a_rough or b_rough):
+            continue
+        moves = list(a.retract_moves or ()) if a_rough else []
+        moves += list(b.approach_moves) if b_rough else list(t.moves)
+        out[k] = replace(t, moves=moves)
+    return out
+
+
 def _plan_comp_contours(all_passes, profile, stock, tool, finish_tool, zone_query):
     """Every cleanup / finish pass with its cutter-comp plan
     (planners/comp_contour.py): entry, contour, lead-out, as the writer will
@@ -442,7 +466,10 @@ def _assemble_moves(passes: List[TurningPass], transitions: list) -> List[ToolMo
     all_moves = []
 
     for i, pass_obj in enumerate(passes):
-        # Add transition moves before this pass (except the first)
+        # The first pass's own planned approach (a roughing pass when there is no
+        # facing), then the transition before every later pass.
+        if i == 0:
+            all_moves.extend(pass_obj.approach_moves)
         if i > 0 and i - 1 < len(transitions):
             transition = transitions[i - 1]
             all_moves.extend(transition.moves)

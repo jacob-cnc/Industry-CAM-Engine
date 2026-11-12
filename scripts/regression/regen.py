@@ -75,6 +75,37 @@ def _sections(section_inputs) -> dict:
     return {k: unary_union(v) if v else None for k, v in parts.items()}, notes
 
 
+def _rapids(section_inputs) -> dict:
+    """Rapid-collision summary over all profile blocks (validation/rapid_collision.py,
+    loaded from THIS script's checkout so a baseline checkout without it can be checked)."""
+    import importlib.util
+    here = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                        "validation", "rapid_collision.py")
+    if not os.path.exists(here):
+        return {}
+    spec = importlib.util.spec_from_file_location("rapid_collision_tool", here)
+    rc = importlib.util.module_from_spec(spec)
+    sys.modules["rapid_collision_tool"] = rc        # dataclasses look their module up
+    spec.loader.exec_module(rc)
+    reports = []
+    for gcode_text, plan_result, _outlines in section_inputs:
+        try:
+            reports += rc.check_rapids(gcode_text, plan_result)
+        except Exception as exc:                     # report, never hide
+            return {"error": f"{type(exc).__name__}: {exc}"}
+    return rc.summary(reports)
+
+
+def _rapid_text(rp) -> str:
+    if not rp:
+        return "rapids=-"
+    if "error" in rp:
+        return f"rapids=ERROR({rp['error'][:60]})"
+    mc = rp.get("min_clearance")
+    return (f"rapid_hits={rp['collisions']}/{rp['rapids']} depth={rp.get('max_depth', 0):.4f} "
+            f"min_clear={'-' if mc is None else f'{mc:.4f}'}")
+
+
 _DIALOGS: list = []
 
 
@@ -130,6 +161,7 @@ def regenerate(program_path: str, resolver, out_dir: str) -> dict:
             "dialogs": list(_DIALOGS),
             "generated": bool(code),
             "seconds": round(dt, 2),
+            "rapids": _rapids(getattr(tab, "_section_inputs", [])),
             "areas": {k: (g.area if g is not None else None) for k, g in sections.items()},
             "wkt": {k: (g.wkt if g is not None else None) for k, g in sections.items()},
         }
@@ -173,7 +205,8 @@ def main() -> int:
         bad += not r["generated"]
         a_ = {k: (v or 0.0) for k, v in r["areas"].items()}
         print(f"{flag} {os.path.basename(p)}: {r['seconds']}s  gouge={a_.get('gouge', 0):.2e} "
-              f"not_removed={a_.get('not_removed', 0):.2e}  notes={len(r['notes'])} dialogs={len(r['dialogs'])}  | {r['status'][:90]}", flush=True)
+              f"not_removed={a_.get('not_removed', 0):.2e}  {_rapid_text(r.get('rapids'))}  "
+              f"notes={len(r['notes'])} dialogs={len(r['dialogs'])}  | {r['status'][:90]}", flush=True)
     return 1 if bad else 0
 
 

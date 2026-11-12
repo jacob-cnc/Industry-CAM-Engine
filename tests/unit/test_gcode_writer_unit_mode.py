@@ -127,6 +127,9 @@ def _make_simple_plan_result():
         pass_type=PassType.ROUGH,
         moves=[rough_move],
     )
+    # The writer emits roughing links only as planned (planners/rough_links.py).
+    from planners.rough_links import plan_rough_links
+    rough_pass = plan_rough_links([rough_pass], stock, False, 0.008, lambda pt: False)[0]
 
     return PlanResult(
         profile=profile,
