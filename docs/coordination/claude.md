@@ -1,5 +1,13 @@
 # Claude status
 
+## 2026-11-12 — MAIN at d83862f (full-circle HOTFIX merged); REVIEW-READY: C2 tool reach, branch claude/c2-tool-reach-v2
+
+- HOTFIX on main: arcs whose ends coincide at output precision (LinuxCNC full circles) can no longer be emitted
+  (pipeline converts slivers, writer refuses, cut_regions reads them as full circles). Regenerate any offset-contour program.
+- claude/c2-tool-reach-v2 (b277396, from d83862f): tool reach from kernel edges (find_tangent, intersections). Touched
+  geometry/tool_reach.py, corner_breaks_od.py, face_ops.py, arc_math.py, architecture baseline. NOT merged (owner review).
+  (claude/c2-tool-reach is the stale pre-rebase WIP; ignore.)
+
 ## 2026-11-12 — MAIN at 517fe43 (C3 merged); REVIEW-READY: roughing retract rule, branch claude/rough-retract
 
 - main 517fe43 = lathe-2026-11-12-c3. Live checkout pulled.
