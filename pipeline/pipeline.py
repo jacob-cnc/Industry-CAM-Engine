@@ -285,93 +285,33 @@ def _extract_boundary_coords(zone_query: ZoneQueryAPI, zone_name: str) -> List[T
 
 
 def _extract_zone_boundary_optional(zone_query, zone_name):
-    """Extract zone boundary — returns empty list if zone has no extractable wire.
+    """Zone boundary polyline, or [] if the zone has no extractable wire.
 
-    Used for display-only zones (finish_allowance) that may be too thin to
-    extract in some configurations (e.g., ID mode with very small fin_allowance).
-    This is NOT a fallback — the zone genuinely may not have a usable wire.
-    Arc edges are densified into intermediate points for smooth display.
+    For display-only zones (finish_allowance) that may be too thin to extract
+    in some configurations (e.g. ID with a very small fin_allowance). This is
+    NOT a fallback - the zone genuinely may not have a usable wire.
+    Arcs are sampled on the kernel's arc (geometry.zone_query.boundary_polyline).
     """
-    import math
-
-    edges = zone_query.boundary_wire_extraction(zone_name)
-    if not edges:
-        return []
-    coords = [edges[0].start]
-    for edge in edges:
-        if edge.edge_type == "ARC" and edge.center is not None and edge.radius > 0.0001:
-            sx, sz = edge.start
-            ex, ez = edge.end
-            cx, cz = edge.center
-            r = edge.radius
-            angle_start = math.atan2(sz - cz, sx - cx)
-            angle_end = math.atan2(ez - cz, ex - cx)
-            diff = angle_end - angle_start
-            if diff > math.pi:
-                diff -= 2 * math.pi
-            elif diff < -math.pi:
-                diff += 2 * math.pi
-            n_pts = max(8, int(abs(diff) * r * 20))
-            for i in range(1, n_pts + 1):
-                t = i / float(n_pts)
-                angle = angle_start + diff * t
-                px = cx + r * math.cos(angle)
-                pz = cz + r * math.sin(angle)
-                coords.append((px, pz))
-        else:
-            coords.append(edge.end)
-    return coords
+    from geometry.zone_query import boundary_polyline
+    return boundary_polyline(zone_query.boundary_wire_extraction(zone_name))
 
 
 def _extract_zone_boundary(zone_query, zone_name):
-    """Extract zone boundary coordinates from Build123d via wire extraction.
+    """Zone boundary as (x_dia, z) points from the kernel's wire (closed polygon).
 
-    This is the ONLY path to get zone polygon coordinates.
-    No hand math. No fallback. If this fails, the pipeline raises.
-    
-    Returns list of (x_dia, z) coordinate pairs forming a closed polygon.
-    Arc edges are densified into intermediate points for smooth display.
+    The ONLY path to zone polygon coordinates: no hand math, no fallback - if
+    the kernel gives no edges, the pipeline raises. Arcs are sampled ON the
+    kernel's arc (geometry.zone_query.boundary_polyline; until 2026-11-12 this
+    function densified arcs itself and put points up to .118 in off an R.25 arc).
     """
-    import math
-
+    from geometry.zone_query import boundary_polyline
     edges = zone_query.boundary_wire_extraction(zone_name)
     if not edges:
         raise RuntimeError(
             f"boundary_wire_extraction('{zone_name}') returned no edges. "
             f"Zone construction may have failed. Do NOT create a hand-math fallback."
         )
-    # Build ordered coordinate list from chained edges, densifying arcs
-    coords = [edges[0].start]
-    for edge in edges:
-        if edge.edge_type == "ARC" and edge.center is not None and edge.radius > 0.0001:
-            # Densify arc into intermediate points
-            sx, sz = edge.start
-            ex, ez = edge.end
-            cx, cz = edge.center
-            r = edge.radius
-
-            # Compute angles (in diameter+Z space, matching edge data)
-            angle_start = math.atan2(sz - cz, sx - cx)
-            angle_end = math.atan2(ez - cz, ex - cx)
-
-            # Normalize sweep to [-pi, pi]
-            diff = angle_end - angle_start
-            if diff > math.pi:
-                diff -= 2 * math.pi
-            elif diff < -math.pi:
-                diff += 2 * math.pi
-
-            # Generate intermediate points (skip first — already in coords)
-            n_pts = max(8, int(abs(diff) * r * 20))
-            for i in range(1, n_pts + 1):
-                t = i / float(n_pts)
-                angle = angle_start + diff * t
-                px = cx + r * math.cos(angle)
-                pz = cz + r * math.sin(angle)
-                coords.append((px, pz))
-        else:
-            coords.append(edge.end)
-    return coords
+    return boundary_polyline(edges)
 
 
 def _compute_stock_boundary(stock: StockDef) -> List[Tuple[float, float]]:

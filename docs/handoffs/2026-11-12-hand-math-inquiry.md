@@ -163,3 +163,25 @@ Recommendations (owner decision — changes roughing geometry on these programs)
 3. If sharp roughing corners are wanted, the robust route is rounded-join offset followed by
    explicit corner extension at convex vertices (a kernel-side post-step), not OCCT's
    intersection join — worth a prototype on its own branch.
+
+### F5 — Zone boundary polylines were up to .118 in off their arcs (FIXED)
+
+`pipeline._extract_zone_boundary` (and its `_optional` twin — two copies, trig in the
+orchestration layer) densified boundary arcs using DIAMETER-space start/end/centre with the
+RADIUS-space radius and a re-guessed ±π sweep. Basic check: an R.25 quarter arc came out up to
+.118 in off the true arc (squashed in X); on real zones, points up to .0206 in off the kernel's
+own outline. Consumers: zone shading in the graph adapter (when the parsed-G-code path isn't
+used), DXF/SVG debug exports, and — machining-relevant — the G-code writer's comp lead-out,
+which tests `Polygon(pr.finished_part_boundary)` to decide whether material lies beyond a
+contour end. (cut_regions and the post-planning validator build their own geometry: unaffected.)
+
+Fix: `geometry.zone_query.boundary_polyline(edges)` samples each arc ON the kernel's arc (radius
+space, the edge's own signed sweep from `_edge_data_from_wire`, exact end points); both pipeline
+functions call it (pipeline has no trig left). Tests (tests/unit/test_boundary_polyline.py, 5):
+every finished-part / material-to-rough boundary point of two arc profiles lies on the kernel
+outline within 1e-7 (failed before: .0206); an arc sample check to 1e-12.
+Verification: suite 1310 passed; regression 18 SAME (no corpus lead-out decision sat near a
+distorted arc — the geometry is now right where it would).
+
+Checked and correct (no change): `post_planning_validator._densify_arc_move` — radius space, the
+move's own direction ("never the shorter guess"), shared adaptive densifier.

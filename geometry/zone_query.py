@@ -382,3 +382,31 @@ class ZoneQueryAPI:
         except Exception:
             pass
         return None
+
+
+def boundary_polyline(edges: List[EdgeData]) -> List[Tuple[float, float]]:
+    """(x_dia, z) polyline through ordered boundary edges, arcs sampled ON the arc.
+
+    Each ARC is sampled in radius space from its centre with the kernel's own
+    signed sweep (EdgeData.sweep, set by _edge_data_from_wire) - no direction or
+    sweep is guessed - and ends exactly on the edge's end point. Point count as
+    before: max(8, int(|sweep| * radius * 20)) per arc.
+
+    Replaces pipeline._extract_zone_boundary's own densification (2026-11-12,
+    hand-math inquiry F5), which mixed diameter-space coordinates with the
+    radius-space radius and put points up to .118 in off an R.25 arc.
+    """
+    from geometry.arc_math import Arc
+    if not edges:
+        return []
+    pts = [tuple(edges[0].start)]
+    for e in edges:
+        if e.edge_type == "ARC" and e.center is not None and e.radius > 0.0001 and e.sweep:
+            arc = Arc(start=(e.start[0] / 2.0, e.start[1]), end=(e.end[0] / 2.0, e.end[1]),
+                      centre=(e.center[0] / 2.0, e.center[1]), radius=e.radius, sweep=e.sweep)
+            n = max(8, int(abs(e.sweep) * e.radius * 20))
+            for i in range(1, n):
+                r, z = arc.point_at(i / float(n))
+                pts.append((2.0 * r, z))
+        pts.append(tuple(e.end))
+    return pts
