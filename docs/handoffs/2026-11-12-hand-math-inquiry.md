@@ -367,3 +367,25 @@ hand_math 19 → 15.
 Verification: tests/integration/test_tool_reach.py (all, incl. the LinuxCNC run) and the full suite pass.
 Corpus vs main d83862f: finished parts within .000073 in (radius), gouge 0, left 0 everywhere; the
 changes are the bridge starts moving onto the exact tangent point (roughing ends .0001–.0002 later in Z).
+
+## C4 / C5 / C6 — leftovers (branch claude/c456-leftovers)
+
+- C6: the curve-fitting path was unreachable (corpus: 1896 LINE, 443 ARC, 0 CURVE edges): removed
+  `geometry/curve_fit.py` and `FinishPlanner._decompose_curve_edge`. A non-circular edge or an ARC
+  without a centre is now REFUSED - it used to be approximated, cut as a straight line (finish planner
+  fallback) or silently dropped (`face_ops.wire_edges`: a missing cut).
+- C5: `cut_regions.parse_canon` samples LinuxCNC's arcs on the canonical `arc_math.Arc`
+  (identical to 2e-15 on 3000 random arcs; same-point arc = full circle kept).
+- C4: dead `arc_helpers.compute_fillet_quadrant_radius` removed.
+- hand_math 15 → 9. Corpus 20 SAME, 4 BOTH-REFUSE. Suite passes.
+
+What is left (9 checker findings) and why it stays for now:
+- Profile-ENTRY helpers (`arc_helpers`: minimum / tangent radius, tangent Z / X, max Z / X for a radius,
+  validation message; `arc_entry`: quadrant points, X-extreme split, arc-picker candidates). They
+  SUGGEST values while the operator types; whatever is accepted is then built and checked by the
+  kernel (zone builder, corner solver, tool reach). Converting them is GUI work with no effect on what
+  is cut - a separate, owner-prioritised task.
+- `tool_reach._kernel_bridges`: the trig is the insert's limit direction (a frame mapping), not
+  arc construction - a checker false positive.
+- `post_planning_validator._densify_arc_move`: one radius `sqrt`; the sampling is the shared
+  adaptive densifier (exempt by design).

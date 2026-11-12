@@ -25,7 +25,6 @@ from models.tool import ToolDef
 from models.params import FinishingParams
 from models.stock import StockDef
 from models.profile import ClosedProfile, MachiningMode
-from geometry.kernel import circumcenter, curve_arc_spans
 
 if TYPE_CHECKING:
     from geometry.zone_query import ZoneQueryAPI, EdgeData
@@ -139,12 +138,10 @@ class FinishPlanner:
 
         LINE edges → G01 feed moves
         ARC edges → G02/G03 with exact center from OCCT
-        CURVE edges → decomposed into G02/G03 arc sequences via chord-error subdivision
+        anything else → refused (ValueError): profiles are lines and circular arcs
 
         The first move feeds to the first edge's start point.
         """
-        from models.constants import QUADRANT_CHORD_ERROR
-
         moves = []
         if not edges:
             return moves
@@ -166,17 +163,19 @@ class FinishPlanner:
         for edge in edges:
             end_x_dia, end_z = edge.end
 
-            if edge.edge_type == "CURVE" and edge.ocp_edge is not None:
-                # Decompose non-circular edge into circular arc segments
-                arc_moves = self._decompose_curve_edge(
-                    edge, prev_x_dia, prev_z, finishing_params, QUADRANT_CHORD_ERROR
-                )
-                moves.extend(arc_moves)
-                # Update prev position to the edge endpoint (guaranteed by decomposition)
-                prev_x_dia = end_x_dia
-                prev_z = end_z
+            if edge.edge_type not in ("LINE", "ARC") or \
+                    (edge.edge_type == "ARC" and edge.center is None):
+                # Profiles are lines and circular arcs (ellipses retired
+                # 2026-11-11), so their outlines and offsets are too. Anything
+                # else is an engine fault: refuse rather than cut it as a line
+                # or approximate it (the curve-fitting path, unreachable since,
+                # was removed 2026-11-12).
+                raise ValueError(
+                    f"Finish contour: a {edge.edge_type} edge from X{edge.start[0]:.4f} "
+                    f"Z{edge.start[1]:.4f} to X{edge.end[0]:.4f} Z{edge.end[1]:.4f} is not a line "
+                    "or a circular arc with a centre; it can't be cut. Please report this.")
 
-            elif edge.edge_type == "ARC" and edge.center is not None:
+            if edge.edge_type == "ARC":
                 # Arc move with exact OCCT center
                 center_x_dia, center_z = edge.center
                 # I/K are incremental from start point (in diameter for I)
@@ -216,99 +215,3 @@ class FinishPlanner:
             prev_z = end_z
 
         return moves
-
-    def _decompose_curve_edge(
-        self, edge: 'EdgeData', prev_x_dia: float, prev_z: float,
-        finishing_params: FinishingParams, chord_error: float
-    ) -> List[ToolMove]:
-        """Decompose a non-circular OCCT edge into circular arc segments.
-
-        Uses adaptive parametric sampling with chord-error-based subdivision.
-        For each sub-span, fits a circular arc through three points (start, mid, end)
-        and checks that the maximum deviation from the true curve is within tolerance.
-        If not, the span is subdivided recursively.
-
-        Guarantees:
-        - Endpoint continuity: each sub-arc starts exactly where the previous ended
-        - Final endpoint matches edge.end exactly (no drift)
-        - All sub-arcs respect chord_error tolerance
-
-        Args:
-            edge: EdgeData with ocp_edge set (non-circular curve)
-            prev_x_dia: Current X position (diameter)
-            prev_z: Current Z position
-            finishing_params: Feed rate and pass info
-            chord_error: Maximum allowable deviation (inches)
-
-        Returns:
-            List of ToolMove objects (G2/G3 arcs) approximating the curve.
-        """
-        import math
-
-        moves = []
-        # Arc pieces on the curve in cutting order, first/last snapped to the
-        # edge's ends (kernel: geometry/curve_fit.curve_arc_spans).
-        spans = curve_arc_spans(edge.ocp_edge, edge.start, edge.end, chord_error)
-
-        # Convert each span into a circular arc ToolMove
-        # Track the running start point for incremental I/K calculation
-        running_x_dia = prev_x_dia
-        running_z = prev_z
-
-        for i, ((ax_dia, az), (mx_dia, mz), (bx_dia, bz)) in enumerate(spans):
-            # Fit circular arc through three points (circumcenter in radius space)
-            ax_r = ax_dia / 2.0
-            mx_r = mx_dia / 2.0
-            bx_r = bx_dia / 2.0
-
-            center = circumcenter(ax_r, az, mx_r, mz, bx_r, bz)
-
-            if center is None:
-                # Degenerate (collinear) — emit as line move
-                moves.append(ToolMove(
-                    move_type=MoveType.FEED,
-                    x=bx_dia,
-                    z=bz,
-                    feed=finishing_params.feed,
-                    pass_type=PassType.FINISH,
-                    pass_index=0,
-                ))
-            else:
-                cx_r, cz = center
-                cx_dia = cx_r * 2.0
-                radius = math.sqrt((ax_r - cx_r) ** 2 + (az - cz) ** 2)
-
-                # I/K incremental from the arc start point (in diameter for I)
-                center_i = cx_dia - running_x_dia
-                center_k = cz - running_z
-
-                # Determine arc direction (CW/CCW) using cross product
-                # Cross product of (start→mid) × (start→end)
-                dx1 = mx_r - ax_r
-                dz1 = mz - az
-                dx2 = bx_r - ax_r
-                dz2 = bz - az
-                cross = dx1 * dz2 - dz1 * dx2
-
-                # Negative cross = CW (G02), Positive cross = CCW (G03)
-                is_cw = cross < 0
-                move_type = MoveType.ARC_CW if is_cw else MoveType.ARC_CCW
-                signed_r = radius if is_cw else -radius
-
-                moves.append(ToolMove(
-                    move_type=move_type,
-                    x=bx_dia,
-                    z=bz,
-                    feed=finishing_params.feed,
-                    radius=signed_r,
-                    center_i=center_i,
-                    center_k=center_k,
-                    pass_type=PassType.FINISH,
-                    pass_index=0,
-                ))
-
-            running_x_dia = bx_dia
-            running_z = bz
-
-        return moves
-
