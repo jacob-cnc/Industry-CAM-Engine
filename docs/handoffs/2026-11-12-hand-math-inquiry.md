@@ -132,3 +132,34 @@ remains lives only there); the validator's `_compute_arc_center` and arc_helpers
 under 1e-10 (validator / arc_helpers) vs 1e-12 (arc_entry) is "no arc" — irrelevant for real
 profiles (the validator rejects such segments anyway). Hand-math errors 22 → 20.
 Verification: suite 1305 passed; regression 18 SAME; agreement tool still 0 disagreements.
+
+### F4 — A real kernel wall: OCCT sharp-join offsets of concave features (RECOMMENDATION)
+
+`fallback_probe.py`: "GUI Conv Test" (both copies) and "Test Program Tab (T4)" — all
+offset-contour roughing — log 29 sharp-join failures per run; kernel_offset falls back to rounded
+joins (logged, NOT shown to the operator). `scripts/hand_math/offset_join_probe.py` asks the
+kernel directly, sharp joins only, for every roughing distance:
+
+| program | closed finished-part face | open profile wire |
+|---|---|---|
+| GUI Conv Test / Test Program Tab (concave arc into the back face) | fails at all 39 distances (from .0435) | fails from .2435 (22/39) |
+| Quadrant Arcs Basic (offset) (convex Q + concave −Q) | fails from .1435 (35/39) | fails from .1435 (35/39) |
+| NX corner-break offset program | all OK | all OK |
+
+So unlike F2 this is not the engine's closure: OCCT's GeomAbs_Intersection offset cannot resolve
+large offsets of concave features (the offset curve self-intersects) — the open wire only delays
+it. That is a wall in the kernel as used.
+
+What it means at the metal: rounded joins keep EXACTLY the offset distance around convex
+corners (the true constant-distance path) instead of extending the corner sharp. For a round-nosed
+tool roughing to a finish allowance that is arguably the more correct path, and cut_regions shows
+no gouge and nothing left on all three programs.
+
+Recommendations (owner decision — changes roughing geometry on these programs):
+1. Make rounded joins the deliberate policy for contour-roughing passes (not an error-path
+   fallback); keep sharp joins where corner extension is intended (the keep zone used for
+   validation, `zone_builder`).
+2. Whenever a sharp-join request is replaced, add a Generate note so the operator knows.
+3. If sharp roughing corners are wanted, the robust route is rounded-join offset followed by
+   explicit corner extension at convex vertices (a kernel-side post-step), not OCCT's
+   intersection join — worth a prototype on its own branch.
