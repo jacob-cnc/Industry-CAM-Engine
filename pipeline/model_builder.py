@@ -115,6 +115,7 @@ def build_from_fields(
         diameter=stock_dia,
         x_start=x_start,
         z_start=_safe_z_start(z_start, fin_allowance),
+        face_at_z0=z_start <= fin_allowance / 2.0 + 0.001,
         z_end=operation_z_end,
         back_face_z=stock_back_z,
         mode=machining_mode,

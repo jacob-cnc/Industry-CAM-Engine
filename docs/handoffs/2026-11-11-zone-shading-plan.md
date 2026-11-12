@@ -349,3 +349,26 @@ near-coincident edges that made plain GEOS overlay fail.
 - Observed, not changed: with facing off but stock in front of Z0 (Z start > 0),
   roughing starts at Z+fin/2 as if the face were clear, and the finish and cleanup
   leads cross the uncut stub between the first point and the stock OD.
+
+## 10. 1a done: face chamfer / rounded edge at the start of the profile (2026-11-11)
+
+- **Cleanup** (`cleanup_planner._face_level_extension`): when an OD offset contour's
+  first cut starts below the face-allowance level (the offset of a chamfer or
+  rounded edge), the first cut is run back along its own line or start tangent to
+  the face level, instead of a .0007–.0029 vertical step. The cleanup then runs
+  along the face and straight down the chamfer in one motion; the corner lands
+  exactly at the true offset intersection (X.6083 Z.010 in the example). That step
+  had made an inside corner LinuxCNC comp can't make, so the program was refused.
+- **Facing off with the face already at Z0:** `StockDef.face_at_z0` (set by
+  `model_builder` when the operator's Z start ≤ allowance; the old Z-start bump
+  hid that fact). The inward lead over the finished face is air, and the writer
+  drops it. Passes then enter in line with a chamfer, or straight down a
+  diameter, instead of reversing onto it under comp (the ID mouth-chamfer problem,
+  mirrored).
+- **Results:** chamfer-first (faced, at .005 and .020 allowance), a rounded edge
+  first, chamfer-first with facing off and the face at Z0, and the same chamfer
+  drawn as a V1 corner break all generate and check clean. Saved programs are
+  unchanged and clean.
+- **Still open (item 3):** facing off with stock left in front of Z0 (Z start >
+  allowance, X start = stock OD). The passes still come in on the inward lead and
+  the graph flags the chamfer top red.

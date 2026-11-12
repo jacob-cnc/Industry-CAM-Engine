@@ -124,6 +124,26 @@ class CleanupPlanner:
 
         moves = []
 
+        # OD contour whose first cut starts below the face-allowance level (the
+        # offset of a chamfer or rounded edge at the face): don't step straight
+        # down to it - that .0007-.0029 step before the turn is an inside corner
+        # LinuxCNC's comp can't make, so the program was refused. Run the first
+        # cut back along its own direction up to the face level instead: along
+        # the face, then straight down the chamfer in one motion, like the finish
+        # (owner 2026-11-11: no burr at the face/chamfer transition).
+        ext = self._face_level_extension(offset_edges[0], z0_fin, x_start_fin_dia) \
+            if mode == MachiningMode.OD and offset_start_z < z0_fin - TOLERANCE else None
+        if ext is not None:
+            if ext[0] - x_start_fin_dia > TOLERANCE:
+                moves.append(ToolMove(move_type=MoveType.FEED, x=ext[0], z=z0_fin,
+                                      feed=params.feed, pass_type=PassType.CLEANUP, pass_index=0))
+            moves.append(ToolMove(move_type=MoveType.FEED, x=offset_x_dia, z=offset_start_z,
+                                  feed=params.feed, pass_type=PassType.CLEANUP, pass_index=0))
+            moves.extend(self._build_moves_from_offset(offset_edges, params))
+            return [TurningPass(
+                x_level=x_start_fin_dia, z_start=z0_fin, z_end=min(m.z for m in moves),
+                pass_index=0, pass_type=PassType.CLEANUP, moves=moves, swept_region=None)]
+
         # Approach: feed from (X_start+fin, z0_fin) to the first offset edge start.
         # This may be a face-level feed (if first edge starts at Z≈0) or a
         # two-step approach (feed along face, then down to edge start Z).
@@ -604,6 +624,34 @@ class CleanupPlanner:
             return ordered
         except Exception:
             return []
+
+    @staticmethod
+    def _face_level_extension(edge, z_face, x_min_dia):
+        """(X dia, Z) where the first cut, run backward along its start direction,
+        reaches the face level z_face - or None if it doesn't rise to it at a
+        sensible slope (>= 15 deg) or would pass inside x_min_dia."""
+        import math
+        start, end, edge_type, center, radius = edge[:5]
+        direction = edge[5] if len(edge) > 5 else None
+        s0 = (start[0] / 2.0, start[1])
+        if edge_type == "LINE":
+            t = (end[0] / 2.0 - s0[0], end[1] - s0[1])
+        elif edge_type == "ARC" and direction in ("cw", "ccw") and center is not None:
+            rv = (s0[0] - center[0] / 2.0, s0[1] - center[1])
+            t = (rv[1], -rv[0]) if direction == "cw" else (-rv[1], rv[0])
+        else:
+            return None
+        L = math.hypot(*t)
+        if L < 1e-12:
+            return None
+        u = (t[0] / L, t[1] / L)
+        if u[1] > -0.2588:                       # must fall toward the chuck, >= 15 deg
+            return None
+        s = (z_face - s0[1]) / (-u[1])
+        p = (s0[0] - u[0] * s, z_face)
+        if 2.0 * p[0] < x_min_dia - 1e-9:
+            return None
+        return (2.0 * p[0], z_face)
 
     def _build_moves_from_offset(
         self,

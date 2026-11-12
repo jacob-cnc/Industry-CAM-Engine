@@ -65,7 +65,8 @@ def _run(rows, tool, **kw):
     from pipeline.pipeline import execute
     p, s, r, f = build_from_fields(
         segments=rows, stock_dia=kw.get("stock_dia", 1.4), x_start=kw.get("x_start", 0.0),
-        z_start=0.05, z_end=min(x["z"] for x in rows), stock_back_z=None, mode=kw.get("mode", "od"),
+        z_start=kw.get("z_start", 0.05), z_end=min(x["z"] for x in rows), stock_back_z=None,
+        mode=kw.get("mode", "od"),
         pilot_hole_dia=kw.get("pilot", 0.0), doc_dia=0.08, feed=0.008, strategy="staircase",
         fin_allowance=kw.get("fin", 0.02), peck_enabled=False, peck_length=None, spindle_rpm=1000.0,
         finish_passes=1, finish_doc_dia=0.002, finish_feed=0.003, finish_spring_pass=False,
@@ -331,9 +332,31 @@ def test_no_centre_nib_and_a_flat_face(label, rows, x_start):
 
 def test_facing_off_leaves_the_face_alone():
     """X start at the stock OD = no facing: nothing in front of Z0 inside the
-    first point is cut (owner: users often don't want the part faced)."""
+    first point is cut (owner: users often don't want the part faced). (Stock in
+    front of Z0 with facing off is the open item-3 discussion.)"""
     from shapely.geometry import box, LineString
     res = _run(_rows(1.0, (1.0, -0.4), (1.2, -0.4), (1.2, -1.0)), CNMG, x_start=1.4)
     s = _sections(res)
     front = s.finished.intersection(box(-5, 1e-5, 5, 5))
     assert LineString([(0.0, 0.0), (0.0, 1.0)]).intersection(front).length == pytest.approx(0.05, abs=1e-4)
+
+
+@pytest.mark.parametrize("label,rows,kw", [
+    ("chamfer first, faced to centre", _rows(0.6, (0.8, -0.1), (0.8, -0.5), (1.2, -0.5), (1.2, -1.0)), {}),
+    ("rounded edge first, faced", _rows(0.6, (0.8, -0.1, 0.1), (0.8, -0.5), (1.2, -0.5), (1.2, -1.0)), {}),
+    ("chamfer first, facing off, face at Z0", _rows(0.6, (0.8, -0.1), (0.8, -0.5), (1.2, -0.5), (1.2, -1.0)),
+     dict(x_start=1.4, z_start=0.0)),
+    ("chamfer first, fin .005", _rows(0.6, (0.8, -0.1), (0.8, -0.5), (1.2, -0.5), (1.2, -1.0)), dict(fin=0.005)),
+])
+def test_face_chamfer_profiles_generate_and_cut_in_one_motion(label, rows, kw):
+    """1a (owner 2026-11-11): a profile starting with a chamfer / rounded edge at
+    the face used to be refused - the cleanup stepped straight down .0007-.0029 to
+    the chamfer's offset, an inside corner LinuxCNC comp can't make. The cleanup
+    now runs its first cut back along its own line to the face level: along the
+    face and straight down the chamfer in one motion. With the face already at Z0
+    and facing off, the inward lead over the face is air and is dropped, so the
+    passes enter in line with the chamfer instead of reversing onto it."""
+    res = _run(rows, CNMG, **kw)
+    assert res.plan_result is not None, [v.message for v in res.validations if v.severity.value == "error"]
+    s = _sections(res)                    # writes the G-code: raises if refused
+    assert s.ok, s.notes

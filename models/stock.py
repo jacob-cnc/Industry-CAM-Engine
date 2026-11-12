@@ -31,6 +31,9 @@ class StockDef:
     z_park: float = 3.0
     pilot_hole_dia: float = 0.0
     back_face_z: float | None = None  # Physical stock back face; z_end is operation depth.
+    # True when the operator's Z start said the face is already at Z0 (no stock in
+    # front); z_start is then only approach clearance (model_builder._safe_z_start).
+    face_at_z0: bool = False
 
     @property
     def physical_z_end(self) -> float:

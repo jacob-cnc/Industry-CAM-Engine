@@ -516,6 +516,14 @@ class GCodeWriter:
                            and abs(mv.x - px) > 1e-9)
             if is_id and near_radial and not radial:
                 radial = True
+            # OD with the face already at Z0 (operator Z start <= allowance, no stock in front):
+            # a lead moving INWARD from X start to the contour start runs over the
+            # finished face in air. Kept, comp treated it as a wall and stopped the
+            # nose short of a face chamfer (the ID mouth-chamfer problem, mirrored).
+            mostly_radial = abs(mv.x - px) / 2.0 > 5.0 * abs(mv.z - pz)
+            face_clear = bool(getattr(getattr(pr, "stock", None), "face_at_z0", False))
+            if (not is_id and mostly_radial and mv.x < px - 1e-9 and face_clear):
+                px, pz = mv.x, mv.z; k += 1; continue
             tiny_axial = abs(mv.x - px) < 1e-9 and 0 < abs(mv.z - pz) < max(2.0 * r, 0.005)
             nxt_radial = (k + 1 < len(moves) and abs(moves[k + 1].z - mv.z) < 1e-9)
             if is_id and radial:                      # ID face lead: air
