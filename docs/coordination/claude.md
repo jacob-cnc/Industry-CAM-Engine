@@ -1,5 +1,7 @@
 # Claude status
 
+## 2026-11-12 — MAIN at hand-math close-out (tag lathe-2026-11-12-handmath-done); no claims, discussing GUI features (read-only)
+
 ## 2026-11-12 — MAIN at 37104cb (C2 merged); REVIEW-READY: C4-C6 leftovers, branch claude/c456-leftovers dea35eb
 
 - Curve-fitting path removed (unreachable; non-circular edges now refused), canon arc sampling on arc_math.Arc, dead
