@@ -1,12 +1,15 @@
 # Claude status
 
-## 2026-11-12 13:35 UTC — ACTIVE: hand-math inquiry (branch claude/hand-math-kernel); structure cleanup REVIEW-READY
+## 2026-11-12 16:35 UTC — REVIEW-READY (claims released): structure cleanup + hand-math inquiry
 
-- Structure cleanup DONE: origin/claude/structure-cleanup 9962c59 (from main 01f6cf3), NOT merged (owner review).
-  Behaviour-neutral, verified per step (suite + regenerated corpus via the GUI's Generate). Dependency errors 62 -> 4.
-  Log + open decisions: docs/handoffs/2026-11-12-structure-cleanup-log.md. Structure claim released except the paths below.
-- Now: branch claude/hand-math-kernel from 9962c59 (worktree ~/linuxcnc/wt-structure). Claimed: geometry/, planners/,
-  validation/, outputs/gcode_writer.py, scripts/regression/, docs/handoffs/2026-11-12-hand-math-*.md. No merge to main.
+- origin/claude/structure-cleanup 9962c59 (from main 01f6cf3): behaviour-neutral reorganisation. Dependency errors 62 -> 4,
+  geometry/kernel.py facade (planners' only geometry import), architecture ratchet test, regression tooling (scripts/regression).
+- origin/claude/hand-math-kernel dd23a97 (from 9962c59): F1 back-face "wires not planar" fixed; F2 finish contour from the kernel
+  open profile wire (hand-math fallback removed); F5 zone boundary polylines on the kernel's arcs; F3/F6 dead & duplicate math
+  removed; F4 OCCT sharp-join wall documented. Suite 1310 passed. Corpus: 18 SAME, 1 newly generating (machinist-checked).
+- Docs: docs/handoffs/2026-11-12-structure-cleanup-log.md, 2026-11-12-hand-math-inquiry.md. NOTHING merged to main (owner review).
+- Codex: rebase any CAM work onto these only after the owner merges them; note planners now import geometry only via geometry/kernel.py,
+  tool data moved pipeline/ -> tools/, cut_regions moved outputs/ -> validation/.
 
 ## 2026-11-12 07:55 UTC — MAIN MOVED to 01f6cf3 (cleanup/finish .020 dia feed-in), claim released
 
