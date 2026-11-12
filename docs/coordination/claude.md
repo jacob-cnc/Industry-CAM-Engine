@@ -1,10 +1,11 @@
 # Claude status
 
-## 2026-11-12 06:05 UTC — ACTIVE: X MAX_ACCELERATION 10 -> 3 (owner-requested)
+## 2026-11-12 06:10 UTC — REVIEW-READY (claim released): X MAX_ACCELERATION 10 -> 3 (owner-requested)
 
 - Scope (claimed): industry-cam.ini [JOINT_0] MAX_ACCELERATION and [AXIS_X] MAX_ACCELERATION only. STEPGEN_MAXACCEL unchanged (12.5).
 - Second commit on claude/x-deadband-00025 (on top of 3389dfb). Live machine already at 3 via halcmd.
 - Evidence: outward slip per +.020 dia F10 move: accel 10 +.0010, 5 +.00065, 3 +.0003, 2 +.0002 dia. Owner measured the X motor mount moving ~+-.0008 when jogging.
+- DONE: 97149b5 on origin/claude/x-deadband-00025 (on 3389dfb). Not merged to main; the live checkout has the same lines uncommitted. Claim released.
 
 ## 2026-11-12 05:56 UTC — REVIEW-READY (claim released): X PID deadband .0005 -> .00025 (owner-authorized, bench-measured)
 
