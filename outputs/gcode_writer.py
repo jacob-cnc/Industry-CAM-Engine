@@ -1182,7 +1182,7 @@ class GCodeWriter:
     # ------------------------------------------------------------------
 
     def write_threading_block(
-        self, params: ThreadingParams, tool: ToolDef, stock_dia: float,
+        self, params: ThreadingParams, g76: dict, tool: ToolDef, stock_dia: float,
         park_x: float = 3.0, park_z: float = 3.0, unit_mode: str = "inch",
     ) -> List[str]:
         """Generate G-code lines for a threading operation (G76 cycle).
@@ -1192,6 +1192,8 @@ class GCodeWriter:
 
         Args:
             params: Threading parameters.
+            g76: G76 word values from ThreadingPlanner.compute_g76_params(params)
+                 (the writer only emits; planning happens before it).
             tool: Threading tool definition.
             stock_dia: Stock OD for safe retract computation.
             park_x: Park X position (diameter).
@@ -1201,13 +1203,8 @@ class GCodeWriter:
         Returns:
             List of G-code lines (strings).
         """
-        from planners.threading_planner import ThreadingPlanner
-
         conv = 25.4 if unit_mode == "metric" else 1.0
         fmt = ".3f" if unit_mode == "metric" else ".4f"
-
-        planner = ThreadingPlanner()
-        g76 = planner.compute_g76_params(params)
 
         lines = []
         is_id = params.is_internal
@@ -1291,7 +1288,7 @@ class GCodeWriter:
     # ------------------------------------------------------------------
 
     def write_grooving_block(
-        self, params: GroovingParams, tool: ToolDef, stock_dia: float,
+        self, params: GroovingParams, plunge_positions: List[float], tool: ToolDef, stock_dia: float,
         park_x: float = 3.0, park_z: float = 3.0, unit_mode: str = "inch",
     ) -> List[str]:
         """Generate G-code lines for a grooving/parting operation.
@@ -1301,6 +1298,8 @@ class GCodeWriter:
 
         Args:
             params: Grooving parameters.
+            plunge_positions: Z of each plunge from
+                 GroovingPlanner.compute_plunge_positions(...) (the writer only emits).
             tool: Grooving tool definition.
             stock_dia: Stock OD for safe retract.
             park_x: Park X position (diameter).
@@ -1310,8 +1309,6 @@ class GCodeWriter:
         Returns:
             List of G-code lines (strings).
         """
-        from planners.grooving_planner import GroovingPlanner
-
         conv = 25.4 if unit_mode == "metric" else 1.0
         fmt = ".3f" if unit_mode == "metric" else ".4f"
 
@@ -1341,11 +1338,7 @@ class GCodeWriter:
         # Spindle
         lines.append(self._line(f"S{params.spindle_rpm:.0f} M3", f"Grooving speed {params.spindle_rpm:.0f} RPM"))
 
-        # Compute plunge positions
-        planner = GroovingPlanner()
-        positions = planner._compute_plunge_positions(
-            params.z_start, params.z_end, params.blade_width
-        )
+        positions = list(plunge_positions)
 
         # Clearance above start surface
         clearance = 0.010

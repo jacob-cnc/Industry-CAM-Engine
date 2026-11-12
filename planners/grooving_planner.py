@@ -44,7 +44,7 @@ class GroovingPlanner:
             safe_x = stock.diameter + 0.050
 
         # Compute plunge Z positions to fill the groove width
-        plunge_positions = self._compute_plunge_positions(
+        plunge_positions = self.compute_plunge_positions(
             params.z_start, params.z_end, params.blade_width
         )
 
@@ -182,7 +182,7 @@ class GroovingPlanner:
 
         return moves
 
-    def _compute_plunge_positions(
+    def compute_plunge_positions(
         self, z_start: float, z_end: float, blade_width: float
     ) -> List[float]:
         """Compute Z positions for plunge operations to fill the groove width.

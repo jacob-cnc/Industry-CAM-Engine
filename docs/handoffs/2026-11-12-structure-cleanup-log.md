@@ -160,3 +160,21 @@ from contour_roughing_planner) — ratchet lowered.
   (`tool_reach._densify`, `zone_builder._profile_to_radius_coords`) — they should be public
   geometry API.
 - Verification: suite 1297 passed; regression 16 SAME, 5 BOTH-REFUSE.
+
+### Step 3c — the writer stops planning (2026-11-12 02:25 → 02:55)
+
+- `GCodeWriter.write_threading_block` called `ThreadingPlanner().compute_g76_params()` and
+  `write_grooving_block` called the PRIVATE `GroovingPlanner._compute_plunge_positions()`:
+  an output module planning. Now the writer takes the planned values
+  (`write_threading_block(params, g76, tool, …)`, `write_grooving_block(params,
+  plunge_positions, tool, …)`) and the caller plans: gui/program_tab's
+  `_generate_threading_block` / `_generate_grooving_block` (2 call sites, ~3 lines each)
+  and one unit test. `compute_plunge_positions` is public now.
+- Dependency errors 45 → 43 (ratchet lowered).
+- Verification: suite 1297 passed; regression 16 SAME, 5 BOTH-REFUSE — includes the only
+  threading program (Quarter-20 Cap Screw, T4 derived). No program in the corpus grooves, so
+  grooving was checked directly: three blocks (OD peck, OD single plunge, ID multi-plunge
+  peck) emitted with main's code and with this branch → identical text.
+- Question for the owner (existing behaviour, unchanged): a zero-width groove at Z−.200 with
+  a .094 blade plunges at Z−.153 (= Z−.200 + half the blade). Right or wrong depends on which
+  blade corner the grooving tool's Z offset refers to — worth a look before grooving.

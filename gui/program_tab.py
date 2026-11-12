@@ -1455,8 +1455,10 @@ class ProgramTab(QWidget):
         tool_def = self._resolve_tool_for_block(block)
         # Use a reasonable stock diameter for safe_x calculation
         stock_dia = data.get("major_diameter", 0.5) + 0.1
+        from planners.threading_planner import ThreadingPlanner
+        g76 = ThreadingPlanner().compute_g76_params(params)
         lines.extend(writer.write_threading_block(
-            params, tool_def, stock_dia=stock_dia,
+            params, g76, tool_def, stock_dia=stock_dia,
             unit_mode=unit_state.mode.value,
         ))
         return lines
@@ -1495,8 +1497,11 @@ class ProgramTab(QWidget):
 
         tool_def = self._resolve_tool_for_block(block)
         stock_dia = data.get("start_diameter", 1.0) + 0.25
+        from planners.grooving_planner import GroovingPlanner
+        plunge_positions = GroovingPlanner().compute_plunge_positions(
+            params.z_start, params.z_end, params.blade_width)
         lines.extend(writer.write_grooving_block(
-            params, tool_def, stock_dia=stock_dia,
+            params, plunge_positions, tool_def, stock_dia=stock_dia,
             unit_mode=unit_state.mode.value,
         ))
         return lines
