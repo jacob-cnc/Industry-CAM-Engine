@@ -2199,8 +2199,9 @@ class ProgramTab(QWidget):
         if not verts:
             return
         segs = self._segment_list.get_segments()
-        sharp = [(verts[0][0], 0.0)] + [(float(s.get("z", 0.0)), float(s.get("x", 0.0)) / 2.0)
-                                         for s in segs]
+        # The sharp profile as the engine builds it (true arcs), no breaks.
+        sharp = [(zz, r) for _, pts in _engine_outline(segs, None, self._get_machining_mode(), None)
+                 for r, zz in pts]
         ghost = QColor(COLORS['text_secondary'])
         ghost.setAlpha(150)
         from pyqtgraph.Qt import QtCore as _QtCore
