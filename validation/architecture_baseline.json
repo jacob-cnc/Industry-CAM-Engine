@@ -1,7 +1,7 @@
 {
   "_comment": "Ratchet for tests/architecture/test_architecture_ratchet.py: the number of architecture-check ERRORS per category on this branch. It may only go down. When you fix violations, lower the number in the same commit; when a change would raise it, fix the layering instead. Recorded 2026-11-12 on main 01f6cf3.",
   "errors": {
-    "dependency_violation": 7,
+    "dependency_violation": 4,
     "fallback_pattern": 4,
     "hand_math": 24
   },
@@ -12,6 +12,7 @@
     "writer no longer imports planners (threading/grooving planned by the caller): dependency 43",
     "geometry/kernel.py facade (rule a) + planners import geometry only through it: dependency 32",
     "raw OCP/build123d moved from cleanup + contour roughing planners into geometry/face_ops (via geometry.kernel): dependency 8",
-    "finish_planner curve fitting -> geometry/curve_fit (OCP BRepAdaptor out of planners): dependency 7. hand_math 23 -> 24 is a counting artifact, not new math: the checker counts one finding per function, and _decompose_curve_edge's two sqrt distances were split between curve_arc_spans (direction check) and the planner (arc radius)."
+    "finish_planner curve fitting -> geometry/curve_fit (OCP BRepAdaptor out of planners): dependency 7. hand_math 23 -> 24 is a counting artifact, not new math: the checker counts one finding per function, and _decompose_curve_edge's two sqrt distances were split between curve_arc_spans (direction check) and the planner (arc radius).",
+    "staircase nose-clearance region -> validation/nose_clearance.NoseClearance built by the pipeline and injected (no Shapely / validation import in planners): dependency 4. Planners now have ZERO dependency violations."
   ]
 }

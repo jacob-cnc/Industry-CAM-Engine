@@ -253,3 +253,20 @@ Findings while reading the planners' kernel code (for 4b and the hand-math branc
   are now split between `curve_arc_spans` (direction check) and the planner (arc radius).
   Recorded in the baseline history.
 - Verification: suite 1300 passed; regression 16 SAME, 5 BOTH-REFUSE.
+
+### Step 4d — staircase nose clearance injected from the pipeline (04:50 → 05:25)
+
+- The staircase planner imported `validation.polygon_builder` and used Shapely to build the
+  nose-forbidden tip region (keep zone grown by the nose radius, shifted nose-centre → tip;
+  the 2026-11-11 fix for the nose overhanging a falling flank) and to clip each pass line.
+- Moved verbatim to `validation/nose_clearance.py`: `NoseClearance.build(zone_query, tool)`
+  (None when zone polygons are unavailable, the keep zone is empty, or the tool is sharp —
+  as before) and `free_spans(r, z_top, z_bottom)`. The pipeline builds it and passes
+  `nose_clearance=` to `StaircasePlanner.plan`; the planner only calls `free_spans`. Only the
+  pipeline (and an old debug script) calls the staircase planner.
+- **Planners now have ZERO dependency violations.** Dependency errors 7 → 4 (ratchet lowered).
+  The 4 left: outputs/gcode_writer → geometry.arc_math (arc sweep) and Shapely (comp lead-out
+  material probe), outputs/graph_adapter → geometry.adaptive_sampling (display densification),
+  gui/program_tab Shapely (union of shaded sections). See "Open decisions" below.
+- Verification: suite 1300 passed; regression 16 SAME, 5 BOTH-REFUSE (most corpus programs are
+  staircase: identical nose trimming).

@@ -31,6 +31,7 @@ from planners.finish_planner import FinishPlanner
 
 from transitions.transition_planner import TransitionPlanner
 
+from validation.nose_clearance import NoseClearance
 from validation.polygon_builder import ValidationPolygons
 from validation.pre_planning_validator import validate_profile
 from validation.post_planning_validator import validate_all_moves
@@ -149,6 +150,7 @@ def execute(
         roughing_passes = staircase.plan(
             zone_query, tool, roughing_params, stock, profile.mode,
             contour_intersect=contour_intersect,
+            nose_clearance=NoseClearance.build(zone_query, tool),
         )
     else:
         # Offset-contour roughing
