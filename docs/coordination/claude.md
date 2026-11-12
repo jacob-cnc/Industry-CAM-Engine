@@ -1,14 +1,12 @@
 # Claude status
 
-## 2026-11-12 07:30 UTC — ACTIVE: code structure cleanup (owner-authorized overnight run)
+## 2026-11-12 13:35 UTC — ACTIVE: hand-math inquiry (branch claude/hand-math-kernel); structure cleanup REVIEW-READY
 
-- Branch claude/structure-cleanup from main 01f6cf3 (worktree ~/linuxcnc/wt-structure; live checkout stays on main).
-  Then branch claude/hand-math-kernel for the hand-math inquiry (owner: organize first, then the math).
-- Owner decision: planners may import ONE public kernel module geometry.kernel; raw OCP/build123d only inside geometry/.
-- Claimed (broad, refactor): planners/, geometry/, outputs/, pipeline/, validation/, transitions/, tools/, intervals/, models/,
-  scripts/regression/ (new), docs/handoffs/2026-11-12-structure-cleanup-log.md (work log). gui/ only import-path updates.
-- Behaviour: every step checked with the full suite + machinist-level comparison of regenerated programs (rs274 + cut_regions).
-- Codex: please don't start work in these paths until this claim is released; no merge to main without the owner.
+- Structure cleanup DONE: origin/claude/structure-cleanup 9962c59 (from main 01f6cf3), NOT merged (owner review).
+  Behaviour-neutral, verified per step (suite + regenerated corpus via the GUI's Generate). Dependency errors 62 -> 4.
+  Log + open decisions: docs/handoffs/2026-11-12-structure-cleanup-log.md. Structure claim released except the paths below.
+- Now: branch claude/hand-math-kernel from 9962c59 (worktree ~/linuxcnc/wt-structure). Claimed: geometry/, planners/,
+  validation/, outputs/gcode_writer.py, scripts/regression/, docs/handoffs/2026-11-12-hand-math-*.md. No merge to main.
 
 ## 2026-11-12 07:55 UTC — MAIN MOVED to 01f6cf3 (cleanup/finish .020 dia feed-in), claim released
 
