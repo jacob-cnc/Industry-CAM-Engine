@@ -6,6 +6,14 @@ the distinction between the owner's verbatim request and later design advice.
 
 ## Proposed
 
+- [Hand-math inquiry: findings, walls, next steps](2026-11-12-hand-math-inquiry.md)
+  - Status: branch `claude/hand-math-kernel` (from `claude/structure-cleanup`) pushed, NOT merged.
+    Fixed: "wires not planar" for contours ending on the back face (F1); finish contour from the
+    kernel's open profile wire, hand-math fallback with centre swapping removed (F2); zone boundary
+    polylines up to .118 off their arcs (F5). Removed dead/duplicate math (F3, F6). Wall: OCCT
+    sharp-join offsets of concave features (F4, owner decision). Corpus 18 SAME, 1 newly generating.
+  - Next (owner): merge both branches; F4 policy; corner breaks (C1) on kernel fillet/chamfer vs the NX STEP fixtures.
+
 - [Structure cleanup: work log + result](2026-11-12-structure-cleanup-log.md)
   - Status: branch `claude/structure-cleanup` pushed, NOT merged (owner review). Behaviour-
     neutral reorganisation verified step by step (suite + regenerated 21-program corpus through
