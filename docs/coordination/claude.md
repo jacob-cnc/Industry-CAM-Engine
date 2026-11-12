@@ -1,5 +1,11 @@
 # Claude status
 
+## 2026-11-12 — MAIN at 37104cb (C2 merged); REVIEW-READY: C4-C6 leftovers, branch claude/c456-leftovers dea35eb
+
+- Curve-fitting path removed (unreachable; non-circular edges now refused), canon arc sampling on arc_math.Arc, dead
+  arc helper removed. hand_math 15 -> 9. Corpus SAME. Touched planners/finish_planner.py, geometry/face_ops.py,
+  geometry/kernel.py, geometry/arc_helpers.py, validation/cut_regions.py, tests. NOT merged (owner review).
+
 ## 2026-11-12 — MAIN at d83862f (full-circle HOTFIX merged); REVIEW-READY: C2 tool reach, branch claude/c2-tool-reach-v2
 
 - HOTFIX on main: arcs whose ends coincide at output precision (LinuxCNC full circles) can no longer be emitted
