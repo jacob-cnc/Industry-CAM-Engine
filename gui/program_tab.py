@@ -1334,6 +1334,14 @@ class ProgramTab(QWidget):
             block_count = len(active_blocks)
             ready = (f"Program ready — {block_count} block{'s' if block_count > 1 else ''}, "
                      f"{len(sim_moves)} moves")
+            # Cycle-time estimate from the program as LinuxCNC runs it (validation/cycle_time.py)
+            self._cycle_estimate = None
+            try:
+                from validation.cycle_time import estimate_for_machine
+                self._cycle_estimate = estimate_for_machine(combined_gcode)
+                ready += f" — {self._cycle_estimate.text()}"
+            except Exception:
+                logger.exception("cycle-time estimate failed")
             notes = getattr(self, "_generate_notes", [])
             if notes:
                 # Not an error: the program runs. The part differs from the
@@ -1341,12 +1349,12 @@ class ProgramTab(QWidget):
                 self._status_label.setText(
                     f"⚠ {ready} — {len(notes)} note{'s' if len(notes) > 1 else ''} "
                     f"(hover for details)")
-                self._status_label.setToolTip("\n\n".join(notes))
+                self._status_label.setToolTip("\n\n".join(notes + self._estimate_details()))
                 self._status_label.setStyleSheet(
                     f"color: {COLORS['status_warning']}; font-size: {FONTS['small_size']}pt;")
             else:
                 self._status_label.setText(ready)
-                self._status_label.setToolTip("")
+                self._status_label.setToolTip("\n\n".join(self._estimate_details()))
                 self._status_label.setStyleSheet(
                     f"color: {COLORS['text_secondary']}; font-size: {FONTS['small_size']}pt;"
                 )
@@ -1367,6 +1375,13 @@ class ProgramTab(QWidget):
             dlg.show_exception(e, tb_str, stage=stage)
 
             self.set_state(ProgramState.READY)
+
+    def _estimate_details(self) -> list:
+        est = getattr(self, "_cycle_estimate", None)
+        if est is None:
+            return []
+        from validation.cycle_time import details
+        return [details(est)]
 
     def _generate_profile_block(self, block, writer):
         """Generate a profile block through the full pipeline.

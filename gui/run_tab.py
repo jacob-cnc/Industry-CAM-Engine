@@ -218,6 +218,15 @@ class RunTab(QWidget):
         self._status_line.setMinimumWidth(80)
         bar_layout.addWidget(self._status_line)
 
+        # Cycle-time estimate (validation/cycle_time.py): total when loaded,
+        # time left while running.
+        self._status_time = QLabel("")
+        self._status_time.setStyleSheet(
+            f"color: {COLORS['text_secondary']};"
+            f" font-family: {FONTS['mono_family']}, {FONTS['fallback_mono']};")
+        self._status_time.setMinimumWidth(90)
+        bar_layout.addWidget(self._status_time)
+
         sep4 = QLabel("|")
         sep4.setStyleSheet(f"color: {COLORS['border_normal']};")
         bar_layout.addWidget(sep4)
@@ -371,6 +380,7 @@ class RunTab(QWidget):
         self._btn_preview.setEnabled(True)
         self._btn_run_from.setEnabled(True)
         self._status_file.setText(filename)
+        self._update_estimate()
         self._status_file.setToolTip(path)
         self._status_file.setStyleSheet(
             f"color: {COLORS['text_primary']}; font-size: 9pt;"
@@ -632,6 +642,8 @@ class RunTab(QWidget):
 
     def _set_idle_state(self):
         """Update UI for idle state."""
+        if getattr(self, "_estimate", None) is not None:
+            self._status_time.setText(f"Est. {self._estimate.text()}")
         self._is_running = False
         has_file = bool(self._gcode_path)
         self._btn_start.setEnabled(has_file)
@@ -653,6 +665,31 @@ class RunTab(QWidget):
     # =================================================================
     # Polling — Live Updates During Execution
     # =================================================================
+
+    def _update_estimate(self):
+        """Estimate the loaded program's cycle time (shown until it runs)."""
+        self._estimate = None
+        self._status_time.setText("")
+        self._status_time.setToolTip("")
+        if not self._gcode_text:
+            return
+        try:
+            from validation.cycle_time import details, estimate_for_machine
+            self._estimate = estimate_for_machine(self._gcode_text)
+        except Exception:
+            logger.exception("cycle-time estimate failed")
+            return
+        self._status_time.setText(f"Est. {self._estimate.text()}")
+        self._status_time.setToolTip(details(self._estimate))
+
+    def _show_time_left(self, source_line_1based: int):
+        est = getattr(self, "_estimate", None)
+        if est is None or source_line_1based <= 0:
+            return
+        from validation.cycle_time import fmt_duration
+        left = est.remaining_after_line.get(source_line_1based - 1)
+        if left is not None:
+            self._status_time.setText(f"~{fmt_duration(left)} left")
 
     def _poll(self):
         """Timer callback — update line highlighting and status from machine state."""
@@ -687,6 +724,7 @@ class RunTab(QWidget):
                 # motion_line is 1-based from LinuxCNC, sim_line_changed expects 0-based
                 self._sim_viewer.sim_line_changed.emit(motion_line - 1)
                 self._status_line.setText(f"Line: {motion_line}")
+                self._show_time_left(motion_line)
             else:
                 self._sim_viewer.sim_line_changed.emit(-1)
                 self._status_line.setText("Line: —")
