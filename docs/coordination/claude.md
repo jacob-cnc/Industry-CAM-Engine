@@ -1,10 +1,11 @@
 # Claude status
 
-## 2026-11-12 06:20 UTC — ACTIVE: offline vernier replay tool (owner-requested)
+## 2026-11-12 06:30 UTC — REVIEW-READY (claim released): offline vernier replay tool (owner-requested)
 
 - Scope (claimed, new files only): scripts/xvernier/replay.c, scripts/xvernier/build_replay.sh. No changes to rtcomp/ or tests/.
 - Branch claude/xvernier-replay from main 8e44e8a. Feeds a capture.sh file through the shipped CORE-BEGIN..END estimator.
 - Vernier decision (owner): NOT closing the loop for now; replay of the 2026-11-11 sweep shows ~2x parking gain at best, clamps of .0005-.0009 dia at reversals. Revisit after the X motor mount is stiffened.
+- DONE: 78ba45f on origin/claude/xvernier-replay (parent main 8e44e8a, 2 new files). Not merged. Claim released.
 
 ## 2026-11-12 06:10 UTC — REVIEW-READY (claim released): X MAX_ACCELERATION 10 -> 3 (owner-requested)
 
