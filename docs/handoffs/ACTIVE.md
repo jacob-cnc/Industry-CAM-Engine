@@ -7,14 +7,19 @@ the distinction between the owner's verbatim request and later design advice.
 ## Proposed
 
 - [Plan: one part model, operations on segment groups, STEP / DXF import](2026-11-12-part-model-and-import-plan.md)
-- [Plan: field-driven threading (straight + tapered, thread lists, hints)](2026-11-12-threading-workflow-plan.md)
   - Status: PLAN ONLY (owner request 2026-11-12, owner answers recorded). Profile segments move out of
-    blocks into one Part (OD / ID chains, may meet at the face); operations target segment runs; thread /
-    groove parameters come from the geometry; STEP import from faces of revolution (a boolean section gives
+    blocks into one Part (OD / ID chains, may meet at the face); operations target segment runs; groove parameters
+    come from the geometry (threads stay field-driven); STEP import from faces of revolution (a boolean section gives
     B-splines - probed on the NX fixture); DXF = the radial revolve sketch; recognised fillets / chamfers
     become corner breaks when the solver reproduces them exactly. Phases 1 (import into today's builder)
     -> 2 (v3 model + converter, corpus identical) -> 3 (Program tab) -> 4 (in-process stock, rest machining).
-  - Next (owner): phase order; thread-suggestion tolerance; whether import sets the stock.
+  - Owner 2026-11-12: no implementation yet; import does not set the stock; threads not on segments.
+
+- [Plan: field-driven threading (straight + tapered, thread lists, hints)](2026-11-12-threading-workflow-plan.md)
+  - Status: PLAN ONLY. Fields X start / end (major), Z start / end, pitch, depth, pilot (ID), RPM, passes,
+    spring passes, starts, entry angle, pull-out; UNC / UNF / metric / Tr / Acme lists + class; PD-window
+    hint (OD), drill + minor window (ID); retract major + .020 (OD), pilot - .005 (ID); tapers as G33 passes.
+  - Next (owner): metric / Tr / Acme classes (A/B is UN only); NPT keep or drop; LH needed?; ID hint content.
 
 - [Hand-math inquiry: findings, walls, next steps](2026-11-12-hand-math-inquiry.md)
   - Status: branch `claude/hand-math-kernel` (from `claude/structure-cleanup`) pushed, NOT merged.
