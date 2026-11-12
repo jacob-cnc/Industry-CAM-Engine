@@ -1134,14 +1134,26 @@ class ProgramTab(QWidget):
         shade only the uncut regions (never a guessed picture)."""
         from validation.cut_regions import compute_sections, CutRegionsUnavailable, geom_rings
         from shapely.ops import unary_union
+        from validation.rapid_collision import check_rapids, operator_findings
         parts = {k: [] for k in ("face", "rough", "cleanup", "finish", "finished", "uncut",
                                  "gouge", "not_removed")}
+        self._program_errors = []
         try:
             for gcode_text, plan_result, outlines in getattr(self, "_section_inputs", []):
                 sec = compute_sections(gcode_text, plan_result, outlines)
                 for k in parts:
                     parts[k].append(getattr(sec, k))
-                self._generate_notes.extend(sec.notes)
+                # The program as LinuxCNC runs it may not cut into the part
+                # (a gouge - incl. an arc LinuxCNC would run as a full circle)
+                # nor rapid into material that is still there (2026-11-12).
+                for note in sec.notes:
+                    (self._program_errors if "cuts into the finished part" in note
+                     else self._generate_notes).append(note)
+                reports = check_rapids(gcode_text, plan_result)
+                errors, notes = operator_findings(reports)
+                self._program_errors.extend(errors)
+                self._generate_notes.extend(notes)
+                parts["gouge"].extend(r.hit_geom for r in reports if r.hit_geom is not None)
         except CutRegionsUnavailable as exc:
             self._generate_notes.append(f"Shaded sections not shown: {exc}")
             self._sim_viewer.set_uncut_overlay(getattr(self, "_uncut_outlines", []))
@@ -1290,6 +1302,24 @@ class ProgramTab(QWidget):
             # Drawn profile (above) AND what the program cuts: shaded sections
             # from the G-code as LinuxCNC runs it (validation/cut_regions.py)
             self._show_cut_sections()
+
+            if getattr(self, "_program_errors", None):
+                # Shown (hatched red on the graph) but NOT handed on to Edit / Run.
+                self.set_state(ProgramState.DISPLAYING)
+                n = len(self._program_errors)
+                self._status_label.setText(
+                    f"✖ Program NOT sent to Edit/Run - {n} problem{'s' if n > 1 else ''} "
+                    f"(hover for details)")
+                self._status_label.setToolTip("\n\n".join(self._program_errors))
+                self._status_label.setStyleSheet(
+                    f"color: {COLORS['status_error']}; font-size: {FONTS['small_size']}pt;")
+                QMessageBox.critical(
+                    self, "Program not sent to Edit/Run",
+                    "Checking the G-code as LinuxCNC will run it found:\n\n- "
+                    + "\n- ".join(self._program_errors)
+                    + "\n\nThe places are hatched red on the graph. This is an engine fault "
+                      "or a setup the engine can't cut safely - please report it.")
+                return
 
             # Emit signals
             self._last_gcode_text = combined_gcode
