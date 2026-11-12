@@ -1,5 +1,14 @@
 # Claude status
 
+## 2026-11-12 — MAIN at edff211 (F4 merged, owner-approved); ACTIVE: C1 corner breaks via kernel
+
+- main edff211 = lathe-2026-11-12-f4 (contour roughing rounded joins). Live checkout pulled.
+- ACTIVE: branch claude/c1-corner-breaks. Corner-break solver kernel-first (OCCT 2D fillet/chamfer); NX trim rules kept
+  for line-line; arc-adjacent breaks were built off the arc (moved the operator's arc centre .008-.034 in) -> kernel.
+  Then the Program-tab preview draws the engine's break geometry. Claimed: geometry/corner_breaks_od.py,
+  geometry/zone_builder.py, gui/program_tab.py (profile preview + corner-break status only), tests/unit/test_corner_breaks_*,
+  scripts/hand_math/. No merge without owner.
+
 ## 2026-11-12 — MAIN MOVED to 72eeab4 (owner-approved merge of structure-cleanup + hand-math-kernel); ACTIVE: F4
 
 - main 72eeab4 = lathe-2026-11-12-merged (rollback tag lathe-pre-merge-2026-11-12 = 01f6cf3). Suite 1310 passed. Live checkout pulled.
