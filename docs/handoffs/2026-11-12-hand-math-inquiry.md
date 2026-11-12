@@ -115,3 +115,20 @@ branch removes: those two face_ops functions, `CleanupPlanner._compute_offset_pr
 and `_plan_from_zone_boundary`, `ZoneQueryAPI.line_zone_intersection`,
 `ThreadingPlanner.compute_pass_depths`, and three unused `Fiber` helpers. `wire_edges` loses its
 `split_arcs` flag (only the canonical split form is used).
+
+### F6 — One arc-centre implementation, checked against the kernel (DONE)
+
+"Arc centre from start, end and signed radius" was implemented five times. After F2 removed the
+two planner copies, three remained (pre_planning_validator, arc_helpers, arc_entry; the GUI's
+program_tab has a sixth, not touched tonight). Understanding tool first:
+`scripts/hand_math/arc_centre_agreement.py` compares each with the kernel's own answer,
+build123d `RadiusArc(P0, P1, R).arc_center` (the call the zone builder uses to draw profile
+arcs): 1600 random arcs, both signs, near-semicircle to nearly flat → all three agree to
+1.4e-12 in. So they were correct copies of one answer.
+
+Change: `radius_arc_centre` moved verbatim to geometry/arc_math.py (owner rule: arc math that
+remains lives only there); the validator's `_compute_arc_center` and arc_helpers'
+`_select_center` became 2-line adapters ((|R|, is_cw) → signed R). Only difference: a chord
+under 1e-10 (validator / arc_helpers) vs 1e-12 (arc_entry) is "no arc" — irrelevant for real
+profiles (the validator rejects such segments anyway). Hand-math errors 22 → 20.
+Verification: suite 1305 passed; regression 18 SAME; agreement tool still 0 disagreements.
