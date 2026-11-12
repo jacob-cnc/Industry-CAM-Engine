@@ -64,11 +64,16 @@ class ContourRoughingPlanner:
         return result
 
     def _do_offset(self, face, dist):
-        """Offset face outward by dist. Returns OCP face or None."""
-        try:
-            return first_ocp_face(offset_face(face, dist, what="contour roughing pass"))
-        except Exception:
-            return None
+        """The face offset outward by dist (OCP face), ROUNDED joins by policy
+        (F4, owner 2026-11-12): every point of the nose-centre path exactly
+        dist from the part - what a round nose keeps to the allowance - and
+        OCCT builds it where sharp joins fail on concave features.
+
+        Kernel failures raise (KernelOffsetError). Until 2026-11-12 they
+        returned None and the pass loop stopped, silently ending roughing
+        early and leaving the rest for the cleanup pass."""
+        return first_ocp_face(offset_face(face, dist, what="contour roughing pass",
+                                          joins="rounded"))
 
     def _clip_and_extract(self, ocp_face, x_min_r, x_max_r, z_top, z_bot):
         """Clip offset face to turning region, extract ordered turning edges.

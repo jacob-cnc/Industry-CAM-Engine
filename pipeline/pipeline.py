@@ -19,6 +19,7 @@ from models.results import PlanResult, TurningPass
 from models.validation import ValidationResult, PipelineResult, PipelineStatus, Severity
 from models.constants import TOLERANCE
 
+from geometry.kernel_offset import record_join_fallbacks
 from geometry.zone_builder import build_zones
 from geometry.zone_query import ZoneQueryAPI
 from geometry.contour_intersect import ContourIntersect
@@ -39,6 +40,51 @@ from validation.pre_output_validator import validate_gcode_geometry
 
 
 def execute(
+    profile: ClosedProfile,
+    stock: StockDef,
+    tool: ToolDef,
+    roughing_params: RoughingParams,
+    finishing_params: FinishingParams,
+    finish_tool: ToolDef | None = None,
+    verify_roundtrip: bool = False,
+) -> PipelineResult:
+    """Execute the full CAM pipeline (see _execute for the steps).
+
+    Any sharp-join offset the kernel could only build with rounded joins
+    during the run is reported to the operator as one WARNING (F4,
+    owner 2026-11-12) instead of only a log line.
+    """
+    with record_join_fallbacks() as fallbacks:
+        result = _execute(profile, stock, tool, roughing_params, finishing_params,
+                          finish_tool, verify_roundtrip)
+    return _with_join_fallback_note(result, fallbacks)
+
+
+def _with_join_fallback_note(result: PipelineResult, fallbacks: List[str]) -> PipelineResult:
+    """The result with one WARNING naming the offsets that used rounded joins."""
+    if not fallbacks:
+        return result
+    kinds = sorted({w.split(" by ")[0] for w in fallbacks})
+    note = ValidationResult(
+        severity=Severity.WARNING, category="geometry",
+        message=(f"The geometry kernel could not keep sharp corners on {len(fallbacks)} "
+                 f"offset(s) ({', '.join(kinds)}) and used rounded corners there."),
+        recommendation="Nothing to change unless sharp corners on those paths matter; "
+                       "check the preview at convex corners.",
+        consequence="At those convex corners the path stays exactly the offset distance "
+                    "from the part (an arc) instead of running out to a sharp point. "
+                    "No gouge; the part shape itself is unchanged.",
+    )
+    validations = list(result.validations) + [note]
+    plan_result = result.plan_result
+    if plan_result is not None:
+        plan_result = replace(plan_result, validations=validations)
+    status = (PipelineStatus.SUCCESS_WITH_WARNINGS
+              if result.status == PipelineStatus.SUCCESS else result.status)
+    return replace(result, plan_result=plan_result, validations=validations, status=status)
+
+
+def _execute(
     profile: ClosedProfile,
     stock: StockDef,
     tool: ToolDef,
