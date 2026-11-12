@@ -344,7 +344,8 @@ class MachiningGraphWidget(pg.PlotWidget):
     SECTION_STYLES = {
         "face": ("Face stock", "graph_sec_face", None),
         "rough": ("Roughing", "graph_sec_rough", None),
-        "band": ("Cleanup / finish", "graph_sec_band", None),
+        "cleanup": ("Cleanup", "graph_sec_cleanup", None),
+        "finish": ("Finish allowance", "graph_sec_finish", None),
         "finished": ("Finished part", "graph_sec_finished", None),
         "uncut": ("Left uncut", "graph_sec_uncut", "dash"),
         "gouge": ("Program error", "graph_sec_error", "hatch"),
@@ -365,7 +366,7 @@ class MachiningGraphWidget(pg.PlotWidget):
                 self.removeItem(item)
         self._section_items = {}
         visible = visible or {}
-        order = ["face", "rough", "band", "finished", "uncut", "gouge", "not_removed"]
+        order = ["face", "rough", "cleanup", "finish", "finished", "uncut", "gouge", "not_removed"]
         for z, key in enumerate(order):
             rings = sections.get(key) or []
             if not rings:
@@ -398,7 +399,6 @@ class MachiningGraphWidget(pg.PlotWidget):
             pen.setCosmetic(True)
             item.setPen(pen)
             item.setZValue(1 + z * 0.1 if key not in ("gouge", "not_removed") else 4.5)
-            item.setToolTip(_label)
             item.setVisible(visible.get(key, True) or key in ("gouge", "not_removed"))
             self.addItem(item)
             self._section_items.setdefault(key, []).append(item)
@@ -447,7 +447,6 @@ class MachiningGraphWidget(pg.PlotWidget):
             self.addItem(shade)
             for it in (shade, item):
                 it.setZValue(4)                     # under the profile line and tool dot
-                it.setToolTip("Left uncut: this tool can't reach it (see the status notes)")
                 self._uncut_overlay_items.append(it)
 
     def set_profile_visible(self, visible: bool):

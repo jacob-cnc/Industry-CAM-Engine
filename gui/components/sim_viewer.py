@@ -571,7 +571,7 @@ class SimViewerWidget(QWidget):
         bar = self._build_controls()
         layout.addWidget(bar)
 
-    _SECTION_KEYS = ("finished", "band", "rough", "face", "uncut")
+    _SECTION_KEYS = ("finished", "finish", "cleanup", "rough", "face", "uncut")
 
     def _build_section_legend(self) -> QWidget:
         """One checkbox per shaded section, colour swatch in front, remembered

@@ -91,7 +91,7 @@ def test_rs274_reports_the_imaginary_tip_even_under_comp():
     chamfer = LineString([(0.3, -0.1), (0.4, -0.2)])                # X.6 Z-.1 -> X.8 Z-.2, radius
     d = []
     for m in moves:
-        if m.section == "band" and not m.rapid:
+        if m.section in ("cleanup", "finish") and not m.rapid:
             c = [(r + off[0], z + off[1]) for r, z in m.pts]
             mid = ((c[0][0] + c[-1][0]) / 2, (c[0][1] + c[-1][1]) / 2)
             if chamfer.distance(Point(mid)) < 0.03 and abs(abs(c[-1][0] - c[0][0]) - abs(c[-1][1] - c[0][1])) < 1e-6:
@@ -103,7 +103,7 @@ def test_cleanup_is_tagged_as_the_band_not_roughing():
     tagged = tag_sections("; === CLEANUP PASS (semi-finish, roughing boundary contour) ===\n"
                           "; === ROUGHING PASSES (3 passes) ===\n; === FACE PASSES (1 passes) ===\n")
     assert [l for l in tagged.splitlines() if l.startswith("(")] == [
-        "(ICAM_SECTION band)", "(ICAM_SECTION rough)", "(ICAM_SECTION face)"]
+        "(ICAM_SECTION cleanup)", "(ICAM_SECTION rough)", "(ICAM_SECTION face)"]
 
 
 # ----------------------------------------------------------------------
@@ -111,7 +111,7 @@ def test_cleanup_is_tagged_as_the_band_not_roughing():
 # ----------------------------------------------------------------------
 
 def _partition_ok(s):
-    names = ("face", "rough", "band", "finished", "uncut")
+    names = ("face", "rough", "cleanup", "finish", "finished", "uncut")
     total = sum(getattr(s, n).area for n in names)
     assert total == pytest.approx(s.stock.area, abs=1e-7)
     for a, b in itertools.combinations(names, 2):
@@ -131,7 +131,8 @@ def test_sections_partition_the_stock_and_match_the_part(rows, tool):
     left = s.finished.union(s.uncut).intersection(behind)
     # what's left = the intended part, except nose-radius fillets in concave corners
     assert left.symmetric_difference(part).area < 2e-4
-    assert not s.band.is_empty and not s.rough.is_empty and not s.face.is_empty
+    assert not s.cleanup.is_empty and not s.finish.is_empty
+    assert not s.rough.is_empty and not s.face.is_empty
 
 
 def test_neck_uncut_section_is_the_reported_region():

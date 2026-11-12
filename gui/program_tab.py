@@ -1095,7 +1095,8 @@ class ProgramTab(QWidget):
         shade only the uncut regions (never a guessed picture)."""
         from outputs.cut_regions import compute_sections, CutRegionsUnavailable, geom_rings
         from shapely.ops import unary_union
-        parts = {k: [] for k in ("face", "rough", "band", "finished", "uncut", "gouge", "not_removed")}
+        parts = {k: [] for k in ("face", "rough", "cleanup", "finish", "finished", "uncut",
+                                 "gouge", "not_removed")}
         try:
             for gcode_text, plan_result, outlines in getattr(self, "_section_inputs", []):
                 sec = compute_sections(gcode_text, plan_result, outlines)

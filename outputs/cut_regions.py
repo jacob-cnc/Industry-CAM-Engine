@@ -121,7 +121,7 @@ def _i(a, b):
     return _op18(lambda x, y: x.intersection(y), _poly(a), _poly(b))
 
 SECTION_OF_HEADER = (         # "; === <header> ===" -> section; first match wins
-    ("CLEANUP", "band"), ("FINISH", "band"), ("SPRING", "band"),   # before ROUGH: the cleanup
+    ("CLEANUP", "cleanup"), ("FINISH", "finish"), ("SPRING", "finish"),   # before ROUGH: the cleanup
     ("FACE", "face"), ("ROUGH", "rough"),                          # header says "roughing boundary"
 )
 
@@ -303,13 +303,19 @@ def swept_regions(moves: List[CanonMove], tools: Dict[int, object], mode_id: boo
 class CutSections:
     face: object
     rough: object
-    band: object
+    cleanup: object           # removed by the cleanup (semi-finish) pass
+    finish: object            # removed by the finish pass(es): the finish allowance
     finished: object          # as cut, minus the declared uncut regions
     uncut: object
     gouge: object             # errors: should be empty
     not_removed: object
     stock: object
     notes: List[str] = field(default_factory=list)
+
+    @property
+    def band(self):
+        """Cleanup + finish together (what roughing leaves for the contour passes)."""
+        return _u([self.cleanup, self.finish])
 
     def rings(self, name: str) -> List[List[Tuple[float, float]]]:
         """Closed rings of a section for drawing, as (z, r) points: exterior and
@@ -416,11 +422,12 @@ def compute_sections(gcode: str, plan_result, uncut_outlines=()) -> CutSections:
 
     face = removed("face")
     rough = _d(removed("rough"), face)
-    band = _d(removed("band"), _u([face, rough]))
-    other = _d(removed("other"), _u([face, rough, band]))
-    if not other.is_empty:          # anything cut outside the known sections joins the band
-        band = _u([band, other])
-    taken = _u([face, rough, band])
+    cleanup = _d(removed("cleanup"), _u([face, rough]))
+    finish = _d(removed("finish"), _u([face, rough, cleanup]))
+    other = _d(removed("other"), _u([face, rough, cleanup, finish]))
+    if not other.is_empty:          # anything cut outside the known sections joins the finish
+        finish = _u([finish, other])
+    taken = _u([face, rough, cleanup, finish])
     as_cut = _d(stock, taken)
 
     uncut_polys = [Polygon([(x / 2.0, z) for x, z in o]).buffer(0) for o in uncut_outlines if len(o) >= 3]
@@ -456,8 +463,8 @@ def compute_sections(gcode: str, plan_result, uncut_outlines=()) -> CutSections:
         notes.append(f"GRAPH CHECK: material the program should remove is left near "
                      f"X{2 * b[0]:.4f}-X{2 * b[2]:.4f} Z{b[1]:.4f}-Z{b[3]:.4f} (shown hatched red).")
     # partition check (exact by construction; guards future edits)
-    total = face.area + rough.area + band.area + as_cut.area
+    total = face.area + rough.area + cleanup.area + finish.area + as_cut.area
     if abs(total - stock.area) > max(AREA_EPS, 1e-6 * stock.area):
         notes.append(f"GRAPH CHECK: shaded sections don't add up to the stock "
                      f"({total:.6f} vs {stock.area:.6f} in^2); shading may be wrong.")
-    return CutSections(face, rough, band, finished, uncut, gouge, not_removed, stock, notes)
+    return CutSections(face, rough, cleanup, finish, finished, uncut, gouge, not_removed, stock, notes)

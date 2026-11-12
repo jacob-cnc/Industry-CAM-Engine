@@ -72,7 +72,7 @@ def _close(c1, c2, tol=10):
 def test_finished_edge_is_exact_on_screen(tab, case):
     assert _generate(tab, case)                                     # preview: finished part only
     rings = tab._last_cut_rings
-    assert rings["finished"] and rings["band"] and rings["rough"]
+    assert rings["finished"] and rings["finish"] and rings["cleanup"] and rings["rough"]
     assert not rings["gouge"] and not rings["not_removed"]
     g = tab._sim_viewer._graph
     g.resize(900, 700)
@@ -86,11 +86,28 @@ def test_finished_edge_is_exact_on_screen(tab, case):
     img = g.grab().toImage()
     inside = -1 if case[0] == "od" else 1                            # finished side of r = .5
     fin_ref = _pixel(g, img, z + 0.011, 0.5 + inside * 0.012)
-    band_ref = _pixel(g, img, z + 0.011, 0.5 - inside * 0.004)
-    assert not _close(fin_ref, band_ref, 6)                          # two different colours
+    allowance_ref = _pixel(g, img, z + 0.011, 0.5 - inside * 0.004)
+    assert not _close(fin_ref, allowance_ref, 6)                          # two different colours
     for dz in (-0.017, 0.0, 0.019):
         assert _close(_pixel(g, img, z + dz, 0.5 + inside * 0.0005), fin_ref)
-        assert _close(_pixel(g, img, z + dz, 0.5 - inside * 0.0005), band_ref)
+        assert _close(_pixel(g, img, z + dz, 0.5 - inside * 0.0005), allowance_ref)
+
+
+def test_shaded_sections_have_no_hover_label(tab):
+    """Owner 2026-11-11: hovering the graph shows the coordinate readout only;
+    a 'Finished part' tooltip on the shading covered it."""
+    _generate(tab, OD)
+    for items in tab._sim_viewer._graph._section_items.values():
+        for item in items:
+            assert not item.toolTip()
+
+
+def test_cleanup_and_finish_allowance_are_separate_sections(tab):
+    _generate(tab, OD)
+    sv = tab._sim_viewer
+    assert sv._graph._section_items.get("cleanup") and sv._graph._section_items.get("finish")
+    assert sv._section_boxes["cleanup"].text() == "Cleanup"
+    assert sv._section_boxes["finish"].text() == "Finish allowance"
 
 
 def test_legend_toggles_sections(tab):
