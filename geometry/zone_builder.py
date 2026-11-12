@@ -9,14 +9,17 @@ Imports from: models/, tools/
 
 from dataclasses import dataclass
 from typing import List
+import logging
 
-from build123d import BuildSketch, BuildLine, Line, RadiusArc, ThreePointArc, make_face, Mode, Kind
+from build123d import BuildSketch, BuildLine, Line, RadiusArc, ThreePointArc, make_face
 
-from models.profile import ClosedProfile, ProfileMove, SegmentType, MachiningMode
+from models.profile import ClosedProfile, SegmentType, MachiningMode
 from models.stock import StockDef
 from models.tool import ToolDef
 from models.params import RoughingParams
 from models.constants import TOLERANCE
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -167,169 +170,23 @@ def build_zones(
 
 
 def profile_to_radius_coords(profile: ClosedProfile) -> List[dict]:
-    """Convert profile segments to radius coordinates for Build123d.
+    """Profile segments -> radius-space coordinate descriptors for Build123d,
+    with corner breaks (chamfers / fillets) applied by the vertex solver
+    (geometry/corner_breaks_od.py, OD and ID, validated against the owner's
+    NX reference parts). Non-ok vertex reports are logged here; the
+    Program tab shows them to the operator.
 
-    Applies corner breaks (chamfers/fillets) at segment junctions by inserting
-    additional geometry between profile segments. This ensures the finished part
-    face has the correct shape including all corner breaks.
-
-    Returns list of segment descriptors with coordinates in radius.
+    (Until 2026-11-12 a pre-solver chord construction followed here; it was
+    unreachable - MachiningMode is OD or ID - and has been removed.)
     """
-    import math
-
-    segments = profile.segments
-    corner_breaks = profile.corner_breaks
-
-    if not segments:
+    if not profile.segments:
         return []
-
-    # Vertex solver (geometry/corner_breaks_od.py), validated against the
-    # owner's NX reference parts for OD and ID. The legacy code below is no
-    # longer reached; kept for reference until it is removed.
-    if profile.mode in (MachiningMode.OD, MachiningMode.ID):
-        from geometry.corner_breaks_od import build_od_corner_coords
-        result = build_od_corner_coords(profile)
-        if result.reports:
-            import logging
-            log = logging.getLogger(__name__)
-            for rep in result.reports:
-                if rep.status != "ok":
-                    log.info("Corner break %s", rep.message)
-        return result.coords
-
-    # Pre-compute segment endpoints in radius for direction calculations
-    seg_endpoints = []
-    for seg in segments:
-        seg_endpoints.append((seg.x / 2.0, seg.z))
-
-    coords = []
-
-    for i, seg in enumerate(segments):
-        x_r = seg.x / 2.0
-        z = seg.z
-
-        # Check if there's a corner break AFTER this segment (at junction i → i+1)
-        cb = None
-        if corner_breaks and i < len(corner_breaks):
-            cb = corner_breaks[i]
-
-        if cb is not None and cb.break_type.value != "none" and i < len(segments) - 1:
-            # There's a corner break at the junction between segment[i] and segment[i+1]
-            # Compute arrival direction (toward this segment's endpoint)
-            if i == 0:
-                prev_x_r, prev_z = 0.0, 0.0  # implicit origin
-            else:
-                prev_x_r, prev_z = seg_endpoints[i - 1]
-
-            arr_dx = x_r - prev_x_r
-            arr_dz = z - prev_z
-            arr_len = math.sqrt(arr_dx * arr_dx + arr_dz * arr_dz)
-
-            # Departure direction (from junction toward next segment's endpoint)
-            next_x_r, next_z = seg_endpoints[i + 1]
-            dep_dx = next_x_r - x_r
-            dep_dz = next_z - z
-            dep_len = math.sqrt(dep_dx * dep_dx + dep_dz * dep_dz)
-
-            if arr_len > 1e-9 and dep_len > 1e-9:
-                arr_ux = arr_dx / arr_len
-                arr_uz = arr_dz / arr_len
-                dep_ux = dep_dx / dep_len
-                dep_uz = dep_dz / dep_len
-
-                from models.profile import CornerBreakType
-
-                if cb.break_type == CornerBreakType.CHAMFER:
-                    size = cb.size if cb.size > 0 else 0.015
-                    trim_back = min(size, arr_len * 0.4)
-                    trim_fwd = min(size, dep_len * 0.4)
-
-                    # Trim point on arriving segment (back from junction)
-                    p1_x = x_r - arr_ux * trim_back
-                    p1_z = z - arr_uz * trim_back
-                    # Trim point on departing segment (forward from junction)
-                    p2_x = x_r + dep_ux * trim_fwd
-                    p2_z = z + dep_uz * trim_fwd
-
-                    # Emit trimmed endpoint for this segment
-                    coords.append({
-                        "type": seg.segment_type,
-                        "x_radius": p1_x,
-                        "z": p1_z,
-                        "radius": seg.radius,
-                    })
-                    # Emit chamfer endpoint (line from p1 to p2)
-                    coords.append({
-                        "type": SegmentType.LINE,
-                        "x_radius": p2_x,
-                        "z": p2_z,
-                        "radius": 0.0,
-                    })
-                    continue  # Skip the normal append
-
-                elif cb.break_type == CornerBreakType.FILLET:
-                    fillet_r = cb.radius if cb.radius > 0 else 0.015
-
-                    # Half-angle between reversed arrival and departure
-                    dot = (-arr_ux) * dep_ux + (-arr_uz) * dep_uz
-                    dot = max(-1.0, min(1.0, dot))
-                    half_angle = math.acos(dot) / 2.0
-
-                    if half_angle > 1e-6:
-                        tan_dist = fillet_r / math.tan(half_angle)
-                        tan_dist_arr = min(tan_dist, arr_len * 0.4)
-                        tan_dist_dep = min(tan_dist, dep_len * 0.4)
-
-                        # Tangent points
-                        t1_x = x_r - arr_ux * tan_dist_arr
-                        t1_z = z - arr_uz * tan_dist_arr
-                        t2_x = x_r + dep_ux * tan_dist_dep
-                        t2_z = z + dep_uz * tan_dist_dep
-
-                        # Auto-detect corner type from cross product of
-                        # arrival × departure directions.
-                        # This determines which side of the chord the arc
-                        # center goes on, expressed as the Build123d RadiusArc
-                        # sign convention (passed directly, no downstream flip).
-                        cross = arr_ux * dep_uz - arr_uz * dep_ux
-
-                        # Cross product sign → Build123d RadiusArc sign:
-                        # Positive cross (left turn / inside corner for OD):
-                        #   Center on material side → negative RadiusArc radius
-                        # Negative cross (right turn / outside corner for OD):
-                        #   Center on material side → positive RadiusArc radius
-                        if cross > 0:
-                            signed_fillet_r = -fillet_r
-                        else:
-                            signed_fillet_r = fillet_r
-
-                        # Emit trimmed endpoint for this segment
-                        coords.append({
-                            "type": seg.segment_type,
-                            "x_radius": t1_x,
-                            "z": t1_z,
-                            "radius": seg.radius,
-                        })
-                        # Emit fillet arc with signed radius (same as segment arcs)
-                        coords.append({
-                            "type": SegmentType.ARC,
-                            "x_radius": t2_x,
-                            "z": t2_z,
-                            "radius": signed_fillet_r,
-                        })
-                        continue  # Skip the normal append
-
-        # Normal case: no corner break, emit segment as-is
-        coords.append({
-            "type": seg.segment_type,
-            "x_radius": x_r,
-            "z": z,
-            "radius": seg.radius,
-            "quadrant": seg.quadrant,
-            "quadrant_sign": seg.quadrant_sign,
-        })
-
-    return coords
+    from geometry.corner_breaks_od import build_od_corner_coords
+    result = build_od_corner_coords(profile)
+    for rep in result.reports:
+        if rep.status != "ok":
+            logger.info("Corner break %s", rep.message)
+    return result.coords
 
 
 def _compute_closure_coords(profile: ClosedProfile, stock: StockDef,
@@ -397,6 +254,39 @@ def _compute_closure_coords(profile: ClosedProfile, stock: StockDef,
     return closure
 
 
+def edge_from_coords(current: dict, target: dict):
+    """The kernel edge from one coordinate descriptor to the next (radius
+    space, sketch X = radius, Y = Z), or None for a zero-length step.
+
+    Created in the caller's BuildLine context when one is active (that is how
+    _build_face_from_coords adds it to its outline); a plain Edge otherwise.
+
+    Arc segments use RadiusArc with the signed radius passed directly:
+    ProfileMove.radius sign (+ = centre right of travel) is RadiusArc's
+    side-of-chord convention. Quadrant arcs (Q / -Q) are true circular
+    quarters (geometry/arc_entry.py), built through their exact end points.
+    """
+    cx, cz = current["x_radius"], current["z"]
+    tx, tz = target["x_radius"], target["z"]
+    if abs(cx - tx) < 1e-10 and abs(cz - tz) < 1e-10:
+        return None
+    if target.get("quadrant", False):
+        # Ellipses are retired (owner, 2026-11-11); same-X quadrants are split
+        # into two by normalize_profile before they get here.
+        from geometry.arc_entry import quadrant_mid, quadrant_problem
+        quadrant_sign = target.get("quadrant_sign", 1)
+        problem = quadrant_problem(2 * cx, cz, 2 * tx, tz)
+        if problem is None and abs(cx - tx) < 1e-5:
+            problem = ("A same-X quadrant arc must be split into two quadrants "
+                       "(geometry/arc_entry.normalize_profile).")
+        if problem:
+            raise ValueError(problem)
+        return ThreePointArc((cx, cz), quadrant_mid((cx, cz), (tx, tz), quadrant_sign), (tx, tz))
+    if target["type"] == SegmentType.ARC and target.get("radius", 0.0) != 0.0:
+        return RadiusArc((cx, cz), (tx, tz), target["radius"])
+    return Line((cx, cz), (tx, tz))
+
+
 def _build_face_from_coords(coords: List[dict], profile: ClosedProfile, *, closed: bool = True) -> object:
     """Build a Build123d Face from coordinate descriptors.
 
@@ -412,49 +302,13 @@ def _build_face_from_coords(coords: List[dict], profile: ClosedProfile, *, close
     Quadrant arc segments (Q / -Q) are true circular quarters (ThreePointArc);
     see geometry/arc_entry.py.
     """
-    import math
-
     with BuildSketch() as sketch:
         with BuildLine() as contour:
             if not coords:
                 raise ValueError("Empty coordinate list for face construction")
 
             for i in range(len(coords) if closed else len(coords) - 1):
-                next_i = (i + 1) % len(coords)
-                current = coords[i]
-                target = coords[next_i]
-
-                cx, cz = current["x_radius"], current["z"]
-                tx, tz = target["x_radius"], target["z"]
-
-                # Skip zero-length segments
-                if abs(cx - tx) < 1e-10 and abs(cz - tz) < 1e-10:
-                    continue
-
-                if target.get("quadrant", False):
-                    # Circular quadrant arc (geometry/arc_entry.py): a true quarter
-                    # circle centred on the bounding-box corner, built through the
-                    # exact end points. Ellipses are retired (owner, 2026-11-11);
-                    # same-X quadrants are split into two by normalize_profile
-                    # before they get here.
-                    from geometry.arc_entry import quadrant_mid, quadrant_problem
-                    quadrant_sign = target.get("quadrant_sign", 1)
-                    problem = quadrant_problem(2 * cx, cz, 2 * tx, tz)
-                    if problem is None and abs(cx - tx) < 1e-5:
-                        problem = ("A same-X quadrant arc must be split into two quadrants "
-                                   "(geometry/arc_entry.normalize_profile).")
-                    if problem:
-                        raise ValueError(problem)
-                    ThreePointArc((cx, cz), quadrant_mid((cx, cz), (tx, tz), quadrant_sign), (tx, tz))
-
-                elif target["type"] == SegmentType.ARC and target.get("radius", 0.0) != 0.0:
-                    # Arc segment: pass signed radius directly to Build123d.
-                    # ProfileMove.radius sign (+CW/-CCW) matches RadiusArc's
-                    # side-of-chord convention for this engine's geometry.
-                    b3d_radius = target["radius"]
-                    RadiusArc((cx, cz), (tx, tz), b3d_radius)
-                else:
-                    Line((cx, cz), (tx, tz))
+                edge_from_coords(coords[i], coords[(i + 1) % len(coords)])
 
         if not closed:
             return contour.line

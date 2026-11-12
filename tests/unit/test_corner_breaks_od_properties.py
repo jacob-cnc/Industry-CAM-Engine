@@ -164,7 +164,9 @@ def test_exact_breaks_at_90_degree_corners(size, kind):
     assert [r.corner for r in result.reports] == ["convex", "concave", "convex"]
     els = _walk(pts, result)
     breaks = [e for e in els if (e[0] == "arc") == (kind == "fillet")
-              and not (kind == "chamfer" and (e[1][0] == e[2][0] or e[1][1] == e[2][1]))]
+              and not (kind == "chamfer" and (abs(e[1][0] - e[2][0]) < 1e-12
+                                              or abs(e[1][1] - e[2][1]) < 1e-12))]
+    # (axis-parallel within 1e-12: the kernel's break points carry ~1e-17 noise)
     assert len(breaks) == 3
     for kind_, s, e, r in breaks:
         if kind == "chamfer":
