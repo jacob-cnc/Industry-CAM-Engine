@@ -27,3 +27,9 @@ corner-break set, the T4 regenerations), and four "(T4 derived)" copies of old
 reference programs whose T1 is now a boring bar (roughing/finishing tool 1 -> 4,
 as the owner did for the T4 copies). Generation is deterministic: two runs of
 the same code compare SAME for all of them.
+
+The list is `corpus.txt` (paths relative to the repo, or absolute for the owner's
+Desktop programs); the derived copies are in `corpus/`. Run with:
+
+    mapfile -t P < scripts/regression/corpus.txt
+    regen.py --tool-table ... --out DIR "${P[@]}"
