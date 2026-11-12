@@ -3,7 +3,7 @@
   "errors": {
     "dependency_violation": 4,
     "fallback_pattern": 4,
-    "hand_math": 20
+    "hand_math": 19
   },
   "_history": [
     "2026-11-12 main 01f6cf3: dependency 62, fallback 4, hand_math 22",
@@ -15,6 +15,7 @@
     "finish_planner curve fitting -> geometry/curve_fit (OCP BRepAdaptor out of planners): dependency 7. hand_math 23 -> 24 is a counting artifact, not new math: the checker counts one finding per function, and _decompose_curve_edge's two sqrt distances were split between curve_arc_spans (direction check) and the planner (arc radius).",
     "staircase nose-clearance region -> validation/nose_clearance.NoseClearance built by the pipeline and injected (no Shapely / validation import in planners): dependency 4. Planners now have ZERO dependency violations.",
     "hand-math branch F2: finish contour = kernel open profile wire; removed the hand-math fallback chain (finish _moves_from_segments/_moves_from_expanded_coords/_find_arc_center/_split_edge_at_point, cleanup's dead _find_arc_center): hand_math 24 -> 22",
-    "hand-math branch F6: one arc-centre implementation (geometry/arc_math.radius_arc_centre, kernel-checked to 1.4e-12); validator and arc_helpers delegate: hand_math 22 -> 20"
+    "hand-math branch F6: one arc-centre implementation (geometry/arc_math.radius_arc_centre, kernel-checked to 1.4e-12); validator and arc_helpers delegate: hand_math 22 -> 20",
+    "2026-11-12 C1 (claude/c1-corner-breaks): hand_math 20 -> 19. Corner breaks built by the kernel (OCCT 2D fillet/chamfer); the legacy arc-adjacent chord construction (_legacy_vertex) and the unreachable pre-solver code in zone_builder.profile_to_radius_coords removed."
   ]
 }
