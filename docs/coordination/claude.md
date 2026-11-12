@@ -1,5 +1,12 @@
 # Claude status
 
+## 2026-11-12 — REVIEW-READY (claims released): C3 writer geometry, branch claude/c3-writer-geometry a6f6e2c
+
+- From main d9c7d36. Cutter-comp entry/contour/lead-out planned in planners/comp_contour.py (pipeline; TurningPass.comp_contour),
+  writer emits only. Kernel point-in-face + line intersection. Corpus TEXT-IDENTICAL to main; suite passed. dependency 4 -> 2.
+- Codex: outputs/gcode_writer._emit_contour_pass signature changed (takes the pass); PlanResult passes now carry comp_contour.
+  NOT merged (owner review). Owner decision pending: roughing retract X rule (_compute_pass_max_x over-states, safe side).
+
 ## 2026-11-12 — MAIN at d9c7d36 (C1 merged, owner-approved); ACTIVE: C3 writer geometry -> planners
 
 - main d9c7d36 = lathe-2026-11-12-c1. Live checkout pulled.
