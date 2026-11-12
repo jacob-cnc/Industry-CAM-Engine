@@ -34,6 +34,46 @@ class SweptRegion:
 
 
 @dataclass(frozen=True)
+class SharpenedCorner:
+    """A concave arc no larger than the nose radius, cut as the sharp corner
+    of its neighbouring lines (owner 2026-11-10). Points (X dia, Z)."""
+    radius: float
+    corner: Tuple[float, float]
+
+
+@dataclass(frozen=True)
+class CompContour:
+    """How one cleanup / finish contour is cut under cutter comp: entry,
+    contour and lead-out, decided by planners/comp_contour.py; the G-code
+    writer only emits it. Points are (X diameter, Z).
+
+        comp_code   "G41" | "G42" | "G40" (no nose radius / neutral tool)
+        nose_radius the tool's nose radius the decisions were made for
+        feed        feed of the first contour move (entry and lead-out feed)
+        start       contour start (approach artefacts at the pass head skipped)
+        entry       end of the comp-off approach = start of the comp entry move
+        z_clear     approach clearance Z (comp off)
+        collinear   entry runs in line with a sloped first cut
+        face_entry  OD face / centre entry: one nose radius before the start
+        contour     the moves to cut (arc pieces re-joined, small concave arcs
+                    sharpened)
+        sharpened   the sharpened arcs (reported to the operator)
+        lead_out    end of the comp lead-out move, or None (no material beyond)
+    """
+    comp_code: str
+    nose_radius: float
+    feed: float
+    start: Tuple[float, float]
+    entry: Tuple[float, float]
+    z_clear: float
+    collinear: bool
+    face_entry: bool
+    contour: Tuple[ToolMove, ...]
+    sharpened: Tuple[SharpenedCorner, ...] = ()
+    lead_out: Optional[Tuple[float, float]] = None
+
+
+@dataclass(frozen=True)
 class TurningPass:
     """A single roughing, cleanup, or finish pass.
 
@@ -52,6 +92,7 @@ class TurningPass:
     is_spring_pass: bool = False
     retract_moves: Optional[Tuple[ToolMove, ...]] = None  # Planned exit, including terminal finish.
     approach_moves: Tuple[ToolMove, ...] = ()  # Pipeline-planned, validated incoming link.
+    comp_contour: Optional[CompContour] = None  # Cleanup/finish: planned comp entry/contour/lead-out.
 
 
 @dataclass(frozen=True)

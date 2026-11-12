@@ -88,9 +88,10 @@ def test_cleanup_entry_ends_in_air_high_enough_for_the_corner():
 
 
 def test_check_rejects_short_line_before_concave_corner():
+    from planners.comp_contour import check_concave_corners
     path = [(3.1127, 0.1), (3.1127, 0.0015), (3.1127, 0.0009), (3.0960, -0.0095)]
     with pytest.raises(ValueError, match="concave corner"):
-        GCodeWriter._check_concave_corners(path, 0.0157, "G41", "Cleanup move")
+        check_concave_corners(path, 0.0157, "G41", "Cleanup move")
     # same geometry is convex for G42 -> no error; arcs (None) are skipped
-    GCodeWriter._check_concave_corners(path, 0.0157, "G42", "x")
-    GCodeWriter._check_concave_corners([path[0], path[1], None, path[3]], 0.0157, "G41", "x")
+    check_concave_corners(path, 0.0157, "G42", "x")
+    check_concave_corners([path[0], path[1], None, path[3]], 0.0157, "G41", "x")

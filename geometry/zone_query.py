@@ -339,6 +339,20 @@ class ZoneQueryAPI:
             raise RuntimeError("Kernel produced no profile offset contour.")
         return edges
 
+    def contains(self, zone_name: str, x_dia: float, z: float) -> bool:
+        """Is (x_dia, z) strictly INSIDE the zone (not on its boundary)?
+        Kernel face classification (BRepClass_FaceClassifier, 1e-7)."""
+        from OCP.BRepClass import BRepClass_FaceClassifier
+        from OCP.TopAbs import TopAbs_IN
+        from OCP.gp import gp_Pnt
+        ocp = self._get_ocp_face(self._get_face(zone_name))
+        if ocp is None:
+            return False
+        # Sketch plane X = radius, Y = Z. Classified by the 3D point (the
+        # face's UV parameters are not (r, z) in general).
+        cls = BRepClass_FaceClassifier(ocp, gp_Pnt(x_dia / 2.0, z, 0.0), 1e-7)
+        return cls.State() == TopAbs_IN
+
     def _get_face(self, zone_name: str) -> Optional[object]:
         """Get the Build123d Face/Sketch for a named zone."""
         zone_map = {
