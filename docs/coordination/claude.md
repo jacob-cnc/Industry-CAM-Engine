@@ -1,5 +1,16 @@
 # Claude status
 
+## 2026-11-12 07:05 UTC — ACTIVE: feed-in final approach for cleanup + finish passes (owner-approved)
+
+- Owner request: for cleanup and every finish/spring pass, rapid to .020 dia short of the entry X
+  (outside for OD, inside for ID), then FEED the last .020 at the pass feed, same direction every time.
+  Reason: X backlash .0156 dia, start-of-move windup ~.0005 dia, accel-dependent outward slip (bench 2026-11-11).
+- Claimed (motion-affecting): outputs/gcode_writer.py (_emit_contour_pass approach only),
+  transitions/transition_planner.py (_retract_traverse_plunge final X step for FINISH/CLEANUP targets),
+  models/constants.py (one new constant), new tests/integration/test_contour_feed_in_approach.py.
+- Branch claude/contour-feed-in from main 7698982, developed in a separate worktree (live checkout stays on main).
+- Codex: please avoid these paths until released.
+
 ## 2026-11-12 06:50 UTC — MAIN MOVED to 7698982 (X tuning + replay tool), claim released
 
 - main 7698982 = 8e44e8a + 3389dfb (X DEADBAND .00025) + 97149b5 (X MAX_ACCELERATION 3, joint+axis) + merge of 78ba45f (scripts/xvernier/replay.c, build_replay.sh).
