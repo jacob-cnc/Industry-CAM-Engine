@@ -1,0 +1,79 @@
+# Structure cleanup: work log (overnight 2026-11-11 → 12, autonomous)
+
+Branch `claude/structure-cleanup` from main `01f6cf3`, worktree `~/linuxcnc/wt-structure`
+(the live checkout `~/linuxcnc/configs/industry-cam` stays on main; the GUI runs from it).
+Afterwards: branch `claude/hand-math-kernel` for the hand-math inquiry.
+
+This log is written as I go so every change can be traced back. Newest entries at the
+bottom of each section. Times are PST.
+
+## Owner direction (2026-11-11 ~23:00)
+
+- Organize the code first (best practice), then hunt hand math on its own branch.
+- Layering decision (a): planners may import ONE public kernel module, `geometry.kernel`;
+  raw OCP / build123d stay inside `geometry/`.
+- G-code need NOT be byte-identical. The baseline is regenerated from current main (it
+  already has the .020 feed-in). Every difference is judged like a machinist: does the
+  geometry make sense, is the tool described well enough, will it gouge, where is the
+  material at each stage. Use build123d, shapely, STEP files and the GCH programs the
+  owner has run. If understanding is lacking, build a basic tool/test first.
+- No GUI approval tonight: GUI files only get import-path updates; nothing merges to main.
+
+## Baseline (before any change)
+
+- Full suite on main 01f6cf3, lathe runtime: 1310 passed, 0 failed.
+- `python -m validation.architecture_check`: 88 errors (62 dependency, 22 hand math,
+  4 import fallbacks), 197 warnings (150 dead code, 10 dual implementation, …).
+
+## Survey (2026-11-11 ~23:00)
+
+- Kernel work leaked out of geometry/: planners/cleanup_planner, contour_roughing_planner,
+  finish_planner call OCP directly (23 OCP + 4 build123d imports); outputs/ uses Shapely
+  and imports geometry internals and planners; geometry/tool_reach imports pipeline/.
+- Misplaced: pipeline/ holds tool-table I/O, the GUI tool-card model and insert data;
+  outputs/ holds verification (cut_regions, material_sim).
+- Dead: planners/offset_contour_planner.py (OffsetContourPlanner) — not used by the
+  pipeline or any test, untouched since the initial commit.
+- Arc math spread over geometry/arc_helpers, arc_math, arc_entry, adaptive_sampling.
+- Large files: gui/program_tab.py 2821, outputs/gcode_writer.py 1487.
+
+## Plan
+
+1. Guardrails: `scripts/regression/` — regenerate the program corpus headlessly through
+   the GUI's own Generate, record G-code + cut sections (rs274 + cut_regions); compare
+   two runs like a machinist. Architecture-check gate (error count must not rise).
+2. Remove confirmed dead code.
+3. Move misplaced modules (moves + import updates only).
+4. Kernel boundary: `geometry/kernel.py` public facade; OCP/build123d out of planners.
+5. Split large non-GUI files where it clarifies.
+
+## Steps
+
+(entries follow)
+
+### Step 1 — guardrails (2026-11-11 23:30 → 2026-11-12 00:40)
+
+- `scripts/regression/regen.py`: headless GUI Generate (real ProgramTab, offscreen) +
+  cut sections via `outputs/cut_regions` → `<name>.ngc` + `<name>.result.json` (status,
+  notes, dialogs, section areas, section geometry as WKT in radius space).
+  - First full run hung on "Hemisphere Test": a modal GenerationErrorDialog waits for a
+    click offscreen. Fix: record every dialog (title + text, incl. custom dialogs' labels)
+    and answer with its default. Never a choice the GUI wouldn't make by default.
+- `scripts/regression/compare.py`: SAME / COMMENTS / MOTION-PART-OK / PART-CHANGED /
+  BOTH-REFUSE / MISSING. Machinist metrics: finished-part symmetric difference + Hausdorff,
+  gouge and not-removed growth, band (face/rough/cleanup/finish) area shifts.
+- Corpus (21): 13 owner/reference programs that generate; 4 old reference programs refuse
+  because T1 is now a boring bar (Q3) — correct GUI behaviour; their "(T4 derived)" copies
+  (tool 1→4 like the owner's own T4 copies) add coverage incl. the only threading program
+  (Quarter-20 Cap Screw). "Test Program Tab (T4 derived)" still refuses: "Cannot build
+  face(s): wires not planar" — a kernel/profile issue to look at in the hand-math phase.
+- Sanity check against what the owner ran (GCH Boring Test Ring Bore NEW, saved 11-10):
+  differences are exactly the 11-11 mouth-chamfer collinear entry and the .020 feed-ins.
+  Observation (not changed): in the collinear-entry case the outward feed-in is followed
+  by an inward entry along the chamfer, so the nut is loaded by the entry move (.080 dia)
+  — harmless, but the feed-in does no work there. Candidate refinement for later.
+- Determinism: baseline generated twice from a detached worktree of main 01f6cf3 →
+  21/21 SAME. Baseline = scratchpad `base_v2` (16 generate, 5 refuse identically; no
+  program has gouge or left material).
+- Architecture ratchet: `tests/architecture/test_architecture_ratchet.py` +
+  `validation/architecture_baseline.json` (dependency 62, fallback 4, hand_math 22).

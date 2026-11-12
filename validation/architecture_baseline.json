@@ -1,0 +1,8 @@
+{
+  "_comment": "Ratchet for tests/architecture/test_architecture_ratchet.py: the number of architecture-check ERRORS per category on this branch. It may only go down. When you fix violations, lower the number in the same commit; when a change would raise it, fix the layering instead. Recorded 2026-11-12 on main 01f6cf3.",
+  "errors": {
+    "dependency_violation": 62,
+    "fallback_pattern": 4,
+    "hand_math": 22
+  }
+}
