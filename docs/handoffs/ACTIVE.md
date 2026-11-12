@@ -7,6 +7,7 @@ the distinction between the owner's verbatim request and later design advice.
 ## Proposed
 
 - [Plan: one part model, operations on segment groups, STEP / DXF import](2026-11-12-part-model-and-import-plan.md)
+- [Plan: field-driven threading (straight + tapered, thread lists, hints)](2026-11-12-threading-workflow-plan.md)
   - Status: PLAN ONLY (owner request 2026-11-12, owner answers recorded). Profile segments move out of
     blocks into one Part (OD / ID chains, may meet at the face); operations target segment runs; thread /
     groove parameters come from the geometry; STEP import from faces of revolution (a boolean section gives

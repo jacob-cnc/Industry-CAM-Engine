@@ -22,6 +22,14 @@ Owner answers to the open questions (2026-11-12):
    confusing for the converter; keeping them as plain geometry is not an issue.
 5. **Op1 / Op2 stay separate programs** - no setup integration.
 
+Follow-up answers (2026-11-12, second round):
+
+6. **No implementation yet** - plan documents only until the owner says go.
+7. **Threads do not use profile segments**: a field-driven operation (X start / end, Z start / end,
+   pitch, ...; straight and tapered) with standard thread lists and tolerance hints - planned
+   separately in `2026-11-12-threading-workflow-plan.md`.
+8. **Import does not set the stock** - stock stays the user's entry.
+
 Everything below the line is design advice, to be confirmed phase by phase.
 
 ---
@@ -80,7 +88,7 @@ Operation
 |---|---|---|---|
 | Turn (OD / ID; rough + cleanup + finish) | any run on one chain | the profile for the pipeline (today's ClosedProfile, unchanged planners) | strategy, DOC, feeds, allowances, tools |
 | Groove (OD / ID) | a recess: wall - bottom - wall | Z start / end, width, depth, bottom Ø | blade, pecks, feeds |
-| Thread (OD / ID) | ONE straight Z segment | major Ø (OD) / minor Ø (ID), Z range | standard, pitch, class, passes; warns if the segment Ø doesn't suit the class (e.g. .2448 vs 1/4-20 2A) |
+| Thread (OD / ID) | **none - field-driven** (owner 2026-11-12) | - | everything; see `2026-11-12-threading-workflow-plan.md` |
 | Part-off | the back of the part | Z | blade, feeds |
 
 - **Operations may overlap** (owner answer 2). The list order is the machining order.
@@ -93,8 +101,8 @@ Operation
 ### 2.3 Engine adapter
 
 A Turn operation becomes today's `ClosedProfile` (its run of segments + corner breaks, the engine
-adds the closure) and today's pipeline runs **unchanged**. Groove / thread operations fill today's
-`GroovingParams` / `ThreadingParams` from the geometry. So phases 2-3 are a data-model and UI change;
+adds the closure) and today's pipeline runs **unchanged**. Groove operations fill today's `GroovingParams`
+from the geometry; thread operations keep their own fields. So phases 2-3 are a data-model and UI change;
 the planners don't move.
 
 ### 2.4 File format v3 and migration
@@ -166,8 +174,8 @@ unambiguous; otherwise keep it as plain geometry (no harm):
 
 ### 3.5 Suggested operations after import
 
-From the shapes: "Turn OD, segments 1-6"; "Groove, segments 3-5 (.060 wide, Ø.19)" for a recess; "Thread?
-segment 1, Ø.2448 fits 1/4-20 2A" for a straight segment whose Ø matches a standard major. The user
+From the shapes: "Turn OD, segments 1-6"; "Groove, segments 3-5 (.060 wide, Ø.19)" for a recess; (no thread suggestions - threads are
+field-driven). The user
 accepts, edits or deletes each.
 
 ## 4. Program tab workflow (phase 3)
@@ -185,7 +193,7 @@ accepts, edits or deletes each.
 |---|---|---|
 | 1 | **Import into today's segment builder**: STEP / DXF -> the active OD or ID block's segments (+ corner breaks), preview + Z0 choice. No restructure - the user assigns blocks by hand, as today. | Import the NX fixtures (sharp / broken / id_*) and compare with their known profiles (the NX tests' element match); a DXF of the same parts; refusal messages for splines / no axis. |
 | 2 | **Data model v3** (Part + Operations) + v1/v2 converter + engine adapter. No UI change. | Corpus regenerates text-identical through v3; round trip v2 -> v3 -> save -> load. |
-| 3 | **Program tab**: part editor + operation list with targets; thread / groove params from geometry; suggested operations after import. | GUI tests offscreen (as the preview / run-control tests); the Cap Screw rebuilt as Turn + Groove + Thread operations gives the same thread and a proper groove. |
+| 3 | **Program tab**: part editor + operation list with targets; groove params from geometry; suggested operations after import. | GUI tests offscreen (as the preview / run-control tests); the Cap Screw rebuilt as Turn + Groove + Thread operations gives a proper groove. |
 | 4 | **In-process stock between operations**; rest machining of tool-reach regions; collision / gouge checks against the real remaining material. | rapid / cut-section checks per operation against the accumulated material; corpus; owner first-article. |
 
 Phase 1 is small and independent. Phases 2-3 are the restructure. Phase 4 is where the extra machining
@@ -202,10 +210,8 @@ value is (and needs owner review: it changes motion).
 - **Architecture** - import code lives in `geometry/` (kernel reads STEP, faces of revolution) and a
   new `tools`-level or `geometry/` DXF reader; the GUI only calls them (rule (a) unchanged).
 
-## 7. Still to decide (owner)
+## 7. Decided / still to decide (owner)
 
-- Phase order: start with phase 1 alone (quick value), or go straight to 2-3?
-- Thread suggestion tolerance: how far off the standard major may a segment be before the suggestion
-  is dropped (class 2A / 3A limits from the thread tables)?
-- Should an import also set the stock (bar Ø = next size up from the part's max Ø + a margin), or
-  leave stock to the user?
+- Phase order: **no implementation yet** (owner 2026-11-12); the owner picks the start.
+- Thread suggestion tolerance: **moot** - threads are field-driven (separate plan).
+- Import sets the stock: **no** - left to the user.
