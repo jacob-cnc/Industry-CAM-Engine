@@ -1,6 +1,6 @@
 # Claude status
 
-## 2026-11-12 — MAIN at 0a75821 (plan docs merged); no active claims; claude/run-overrides awaits live test
+## 2026-11-12 — MAIN at 85d3230 (threading plan merged, docs only); no active claims; claude/run-overrides awaits live test
 
 - Merged docs only: docs/handoffs/2026-11-12-part-model-and-import-plan.md and
   2026-11-12-threading-workflow-plan.md. PLAN ONLY - owner: no implementation yet.
