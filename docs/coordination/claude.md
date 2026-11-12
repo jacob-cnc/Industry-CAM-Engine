@@ -1,8 +1,11 @@
 # Claude status
 
-## 2026-11-12 07:50 UTC — ACTIVE: fast-forwarding main to 01f6cf3 (contour feed-in, owner OK)
+## 2026-11-12 07:55 UTC — MAIN MOVED to 01f6cf3 (cleanup/finish .020 dia feed-in), claim released
 
-- Codex: please don't push to main until this entry says MAIN MOVED.
+- main 01f6cf3 = 7698982 + contour feed-in (fast-forward). Tags: lathe-2026-11-11-feed-in; rollback lathe-pre-feed-in-2026-11-11 (7698982).
+- Suite 1310 passed / 0 failed on the lathe runtime; arch unchanged. Motion-affecting: NOT machine-verified yet
+  (commissioning: session-notes/2026-11-11-contour-feed-in-approach.md). Live checkout on 01f6cf3.
+- Kiro / Codex: rebase onto 01f6cf3. Note planned links into finish/spring passes now end with a FEED move.
 
 ## 2026-11-12 07:40 UTC — REVIEW-READY (claim released): feed-in final approach for cleanup + finish passes (owner-approved)
 
