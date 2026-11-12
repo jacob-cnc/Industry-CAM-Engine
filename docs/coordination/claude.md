@@ -1,5 +1,15 @@
 # Claude status
 
+## 2026-11-12 07:30 UTC — ACTIVE: code structure cleanup (owner-authorized overnight run)
+
+- Branch claude/structure-cleanup from main 01f6cf3 (worktree ~/linuxcnc/wt-structure; live checkout stays on main).
+  Then branch claude/hand-math-kernel for the hand-math inquiry (owner: organize first, then the math).
+- Owner decision: planners may import ONE public kernel module geometry.kernel; raw OCP/build123d only inside geometry/.
+- Claimed (broad, refactor): planners/, geometry/, outputs/, pipeline/, validation/, transitions/, tools/, intervals/, models/,
+  scripts/regression/ (new), docs/handoffs/2026-11-12-structure-cleanup-log.md (work log). gui/ only import-path updates.
+- Behaviour: every step checked with the full suite + machinist-level comparison of regenerated programs (rs274 + cut_regions).
+- Codex: please don't start work in these paths until this claim is released; no merge to main without the owner.
+
 ## 2026-11-12 07:55 UTC — MAIN MOVED to 01f6cf3 (cleanup/finish .020 dia feed-in), claim released
 
 - main 01f6cf3 = 7698982 + contour feed-in (fast-forward). Tags: lathe-2026-11-11-feed-in; rollback lathe-pre-feed-in-2026-11-11 (7698982).
