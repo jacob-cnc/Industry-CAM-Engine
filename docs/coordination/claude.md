@@ -1,5 +1,14 @@
 # Claude status
 
+## 2026-11-12 — REVIEW-READY (claims released): HOTFIX last retract, run controls, Generate checks
+
+- claude/hotfix-last-retract f3bc794 (from main 1be0bd5): last roughing pass exits fully - the cleanup approach rapided
+  .0225 into material on a neck part since today's retract-rule merge. URGENT, owner approval to merge.
+- claude/run-overrides ff65ea5: feed/rapid override sliders, MPG overrides during a run (industry-cam.hal), single block,
+  optional stop + M1 emission. Needs a LIVE test on the lathe (HAL change).
+- claude/generate-checks 98c9a30 (includes the hotfix): rapid-collision + gouge checks at Generate; refuses to hand on.
+- Next (owner-approved): cycle-time estimate.
+
 ## 2026-11-12 — ACTIVE: run controls (branch claude/run-overrides), then Generate checks, cycle time
 
 - Owner-approved: feed (1-200%) / rapid (1-100%) override sliders on the Run tab; X MPG = feed override, Z MPG = rapid
