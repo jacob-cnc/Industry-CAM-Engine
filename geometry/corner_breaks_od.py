@@ -97,6 +97,10 @@ class OdCornerResult:
     # point index -> geometry, for every vertex with a break applied (not
     # skipped vertices).
     geometry: dict = field(default_factory=dict)
+    # Parallel to coords: the profile point index the element ENDING at each
+    # entry belongs to (segment i's pieces -> i; the break at vertex i, which
+    # starts segment i+1 -> i+1). For drawing per segment.
+    sources: List[int] = field(default_factory=list)
 
     @property
     def trims(self) -> List[VertexReport]:
@@ -189,22 +193,49 @@ def _face_start(pts, is_id: bool):
 # Kernel queries
 # ----------------------------------------------------------------------
 
-def _sharp_edges(pts, segs, is_id):
+class _SharpEdges:
     """The kernel edge INTO every point (index 0: the implied front face),
-    built exactly like the finished part's outline; None for zero length."""
-    from geometry.zone_builder import edge_from_coords
-    s0 = _face_start(pts, is_id)
-    prev = {"x_radius": s0[0], "z": s0[1]}
-    edges = []
-    for i, seg in enumerate(segs):
-        target = {"type": seg.segment_type if i else SegmentType.LINE,
-                  "x_radius": pts[i][0], "z": pts[i][1],
-                  "radius": seg.radius if i else 0.0,
-                  "quadrant": bool(seg.quadrant) if i else False,
-                  "quadrant_sign": seg.quadrant_sign}
-        edges.append(edge_from_coords(prev, target))
-        prev = target
-    return edges
+    built exactly like the finished part's outline; None for zero length.
+    Built on first use, so a profile with no breaks (or a row that is
+    invalid while being edited, away from any break) needs no kernel edge."""
+
+    def __init__(self, pts, segs, is_id):
+        self._pts, self._segs, self._is_id, self._cache = pts, segs, is_id, {}
+
+    def _coord(self, i):
+        if i < 0:
+            s0 = _face_start(self._pts, self._is_id)
+            return {"x_radius": s0[0], "z": s0[1]}
+        seg = self._segs[i]
+        return {"type": seg.segment_type if i else SegmentType.LINE,
+                "x_radius": self._pts[i][0], "z": self._pts[i][1],
+                "radius": seg.radius if i else 0.0,
+                "quadrant": bool(seg.quadrant) if i else False,
+                "quadrant_sign": seg.quadrant_sign}
+
+    def __getitem__(self, i):
+        if i not in self._cache:
+            from geometry.zone_builder import edge_from_coords
+            self._cache[i] = edge_from_coords(self._coord(i - 1), self._coord(i))
+        return self._cache[i]
+
+
+def _sharp_edges(pts, segs, is_id):
+    return _SharpEdges(pts, segs, is_id)
+
+
+class _Into:
+    """into[i]: what is left of the edge into point i after the break at
+    point i-1 (the sharp edge until a break replaces it; None if used up)."""
+
+    def __init__(self, sharp):
+        self._sharp, self._set = sharp, {}
+
+    def __getitem__(self, i):
+        return self._set[i] if i in self._set else self._sharp[i]
+
+    def __setitem__(self, i, edge):
+        self._set[i] = edge
 
 
 def _travel_dir(edge, at, arriving: bool):
@@ -335,7 +366,7 @@ def build_od_corner_coords(profile: ClosedProfile) -> OdCornerResult:
     # into[i] = what is left of it after the break at point i-1 (None when
     # that break used it up).
     sharp = _sharp_edges(pts, segs, is_id)
-    into = list(sharp)
+    into = _Into(sharp)
 
     def accept_kernel(i, kind, kb):
         """Record a kernel-built break at point i."""
@@ -579,6 +610,7 @@ def build_od_corner_coords(profile: ClosedProfile) -> OdCornerResult:
     # end a break moved is no longer a quarter: it is emitted as a plain arc
     # of the same circle (the kernel's), keeping its centre and radius.
     coords: List[dict] = []
+    sources: List[int] = []
     for i, seg in enumerate(segs):
         entry = {"type": seg.segment_type if i > 0 else SegmentType.LINE,
                  "radius": seg.radius, "quadrant": seg.quadrant,
@@ -591,9 +623,11 @@ def build_od_corner_coords(profile: ClosedProfile) -> OdCornerResult:
             trim_in, element = plan[i]
             coords.append({**entry, "x_radius": trim_in[0], "z": trim_in[1]})
             coords.append(element)
+            sources += [i, i + 1]
         else:
             coords.append({**entry, "x_radius": pts[i][0], "z": pts[i][1]})
-    return OdCornerResult(coords, reports, geometry)
+            sources.append(i)
+    return OdCornerResult(coords, reports, geometry, sources)
 
 
 def _break_length(g: "VertexGeometry") -> float:

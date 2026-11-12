@@ -8,6 +8,7 @@ This tab is usable in offline mode (no LinuxCNC dependency).
 
 from enum import Enum, auto
 from typing import Optional, List
+import math
 import logging
 import os
 
@@ -33,43 +34,82 @@ from outputs.graph_adapter import convert as graph_convert
 from outputs.gcode_parser import parse as parse_gcode
 from models.tool import ToolDef, ToolOrientation, ToolDirection, ToolType
 from models.validation import PipelineStatus
-from geometry.arc_helpers import is_arc_within_x_bounds
 
 logger = logging.getLogger(__name__)
 
 
-def _quadrant_arc_kernel_points(
-    x_start_r: float, z_start: float,
-    x_end_r: float, z_end: float,
-    quadrant_sign: int = 1,
-    num_points: int = 48,
-    mode_od: bool = True,
-) -> list:
-    """Display points for a Q / -Q arc: a true circular quarter (ellipses are
-    retired, owner 2026-11-11; geometry/arc_entry.py is the single definition).
+def _profile_point_rows(profile, segments) -> list:
+    """Program-tab row of every profile point. Normally one to one; a row the
+    engine splits in two (a same-X arc, an arc past its own X extreme -
+    geometry/arc_entry.normalize_profile) gives an extra point that belongs to
+    that row."""
+    rows, j = [], 0
+    for m in profile.segments:
+        j = min(j, len(segments) - 1)
+        rows.append(j)
+        try:
+            same = (abs(float(segments[j].get("x", 0.0)) - m.x) < 1e-9
+                    and abs(float(segments[j].get("z", 0.0)) - m.z) < 1e-9)
+        except (TypeError, ValueError):
+            same = True
+        if same:
+            j += 1
+    return rows
 
-    +Q: centre (x_start_r, z_end), leaves radially, arrives along Z.
-    -Q: centre (x_end_r, z_start), leaves along Z, arrives radially.
-    Same X: drawn as the two quadrants it will be cut as (+Q bulges toward the
-    tool: OD outward, ID into the bore). Same Z or unequal legs are invalid (the
-    row is flagged); they are drawn through the end points as a guide only.
-    Points are (x_r, z) from start to end; the end points are exact.
+
+def _engine_outline(segments, corner_breaks, mode, result) -> list:
+    """[(row, [(r, z), ...])]: the engine's own profile outline (what is
+    machined: corner breaks, quadrant arcs, arc sides from the kernel),
+    sampled per Program-tab row; a corner break belongs to the row after
+    its vertex. `result` is the corner solver's result for these rows, or
+    None if it could not be solved.
+
+    While a row is being edited the profile may not build:
+      * a break that cannot be solved -> the outline without breaks;
+      * an element the kernel cannot build (e.g. a radius shorter than
+        half its chord) -> a straight guide line for that element;
+      * fields that do not parse -> straight lines through the rows.
+    Those rows are flagged by validation; only finished rows are exact.
     """
-    from geometry.arc_entry import SAME_TOL, quadrant_points
+    def straight():
+        out, prev = [], None
+        for row, seg in enumerate(segments):
+            try:
+                p = (float(seg.get("x", 0.0)) / 2.0, float(seg.get("z", 0.0)))
+            except (TypeError, ValueError):
+                continue
+            out.append((row, [prev, p] if prev else [p]))
+            prev = p
+        return out
 
-    p0, p1 = (x_start_r, z_start), (x_end_r, z_end)
-    dx, dz = x_end_r - x_start_r, z_end - z_start
-    if abs(dx) < SAME_TOL and abs(dz) < SAME_TOL:
-        return [p0, p1]
-    if abs(dz) < SAME_TOL:
-        return [(x_start_r + dx * i / num_points, z_start) for i in range(num_points + 1)]
-    if abs(dx) < SAME_TOL:
-        R = abs(dz) / 2.0
-        out = 1.0 if (quadrant_sign > 0) == mode_od else -1.0
-        apex = (x_start_r + out * R, z_start + dz / 2.0)
-        half = max(2, num_points // 2)
-        return quadrant_points(p0, apex, 1, half) + quadrant_points(apex, p1, -1, half)[1:]
-    return quadrant_points(p0, p1, quadrant_sign, num_points)
+    try:
+        from dataclasses import replace
+        from pipeline.model_builder import profile_from_fields
+        from geometry.corner_breaks_od import build_od_corner_coords
+        from geometry.zone_builder import sample_outline
+        profile = profile_from_fields(segments, mode, corner_breaks)
+        if result is None:
+            result = build_od_corner_coords(replace(
+                profile, corner_breaks=[None] * len(profile.corner_breaks)))
+        pieces = sample_outline(result.coords)
+    except Exception:
+        logger.debug("Engine outline unavailable for preview", exc_info=True)
+        return straight()
+
+    rows = _profile_point_rows(profile, segments)
+    out, prev_end = [], None
+    for k, (src, pts) in enumerate(zip(result.sources, pieces)):
+        end = (result.coords[k]["x_radius"], result.coords[k]["z"])
+        if pts is None:                       # kernel cannot build it yet
+            pts = [prev_end, end] if prev_end is not None else [end]
+        out.append((rows[min(src, len(rows) - 1)], pts))
+        prev_end = end
+    # The profile starts at Z0 on the first row's X (the face); the engine
+    # outline starts at the first point, or where a V1 break starts.
+    first = (float(segments[0].get("x", 0.0)) / 2.0, 0.0)
+    if out and 0 not in result.geometry and math.dist(first, out[0][1][0]) > 1e-9:
+        out[0] = (out[0][0], [first] + out[0][1])
+    return out
 
 
 class ProgramState(Enum):
@@ -1932,22 +1972,27 @@ class ProgramTab(QWidget):
             corner_breaks = self._segment_list.get_corner_breaks()
         if not segments:
             return None
+        # One edit asks for this several times (preview, vertex status); the
+        # kernel solve costs ~3 ms per break, so keep the last one.
+        key = repr((mode, segments, corner_breaks))
+        cached = getattr(self, "_od_corner_cache", None)
+        if cached is not None and cached[0] == key:
+            return cached[1]
         try:
             from pipeline.model_builder import profile_from_fields
             from geometry.corner_breaks_od import build_od_corner_coords
             profile = profile_from_fields(segments, mode, corner_breaks)
-            return build_od_corner_coords(profile)
+            result = build_od_corner_coords(profile)
         except Exception:
             logger.debug("Corner-break solve failed for preview", exc_info=True)
-            return None
+            result = None
+        self._od_corner_cache = (key, result)
+        return result
 
-    def _od_corner_geometry(self, segments, corner_breaks) -> dict:
-        result = self._od_corner_result(segments, corner_breaks)
-        return result.geometry if result is not None else {}
-
-    # ------------------------------------------------------------------
-    # Corner-break tool (vertex model)
-    # ------------------------------------------------------------------
+    def _outline_rows(self, segments, corner_breaks) -> list:
+        """The active block's outline per row (see _engine_outline)."""
+        return _engine_outline(segments, corner_breaks, self._get_machining_mode(),
+                               self._od_corner_result(segments, corner_breaks))
 
     def _sharp_vertex_points(self):
         """(points, prev, next) in graph coordinates (z, r) for every vertex
@@ -2251,11 +2296,11 @@ class ProgramTab(QWidget):
     # ------------------------------------------------------------------
 
     def _update_preview(self):
-        """Real-time profile preview — draw segments as lines/arcs on graph.
-
-        Pure Qt geometry, no kernel call. Target < 16ms.
-        Only draws when in BUILDING or READY state (no toolpath loaded).
-        Renders corner breaks (chamfers/fillets) at segment junctions.
+        """Real-time profile preview: the engine's own outline (see
+        _outline_rows), corner breaks included, plus stock, finished part and
+        the selected-row highlight. Only draws in BUILDING or READY state (no
+        toolpath loaded). The kernel solve is ~1-2 ms without breaks, ~3 ms
+        per corner break (2026-11-12, lathe PC).
         """
         if self._state not in (ProgramState.BUILDING, ProgramState.READY):
             return
@@ -2270,341 +2315,33 @@ class ProgramTab(QWidget):
 
         corner_breaks = self._segment_list.get_corner_breaks()
 
-        # Corner breaks (OD and ID) come from the engine's validated vertex
-        # solver, so the preview shows exactly what is machined (incl. V1 at
-        # the face and NX-style trims). Point index -> VertexGeometry.
-        # Arc-adjacent vertices are not in it and keep the legacy preview math.
-        od_geom = self._od_corner_geometry(segments, corner_breaks)
-
-        # Build per-segment polylines for drawing (avoids pyqtgraph bounding-box
-        # rendering artifacts that occur with a single large PlotCurveItem containing
-        # many arc interpolation points).
-        # Each entry: (list_of_z, list_of_x) for one continuous sub-path.
+        # The profile line is the ENGINE's own outline (2026-11-12): the kernel
+        # edges the zone builder machines - corner breaks, quadrant arcs, arc
+        # sides - sampled by geometry.zone_builder.sample_outline. The preview
+        # does no geometry of its own, so it cannot disagree with the cut.
         segments_to_draw: List[tuple] = []
         current_z: List[float] = []
         current_x: List[float] = []
         all_z: List[float] = []
         all_x: List[float] = []
-
-        # Track point-index boundaries per segment for highlight rendering.
-        # Each entry is (start_idx, end_idx) into current_x/current_z.
+        # Per Program-tab row: (start_idx, end_idx) into current_x/current_z,
+        # for highlighting the selected row.
+        ranges: dict = {}
+        for row, pts in self._outline_rows(segments, corner_breaks):
+            first_new = len(current_x)
+            for k, (r, zz) in enumerate(pts):
+                if k == 0 and current_x and abs(current_x[-1] - r) < 1e-12 \
+                        and abs(current_z[-1] - zz) < 1e-12:
+                    continue                      # piece starts where the last ended
+                current_x.append(r)
+                current_z.append(zz)
+            all_x.extend(r for r, _ in pts)
+            all_z.extend(zz for _, zz in pts)
+            lo, hi = ranges.get(row, (first_new, len(current_x)))
+            ranges[row] = (min(lo, first_new), len(current_x))
         seg_point_ranges: List[tuple] = []
-
-        # Pre-compute segment endpoints (radius coords) for corner break geometry
-        # The profile implicitly starts at (first_segment_X, Z=0) — NOT at the origin.
-        # Use the first segment's X as the starting point (profile always starts at Z=0).
-        first_x_dia = float(segments[0].get("x", 0.0))
-        first_x_r = first_x_dia / 2.0
-        seg_endpoints = [(first_x_r, 0.0)]  # Profile start = first segment X at Z=0
-
-        for seg in segments:
-            seg_endpoints.append((float(seg.get("x", 0.0)) / 2.0,
-                                  float(seg.get("z", 0.0))))
-
-        prev_x_r = first_x_r
-        prev_z = 0.0
-
-        for seg_idx, seg in enumerate(segments):
-            # Record where this segment's points start
-            _seg_start_idx = len(current_x)
-
-            x_dia = float(seg.get("x", 0.0))
-            z = float(seg.get("z", 0.0))
-            x_r = x_dia / 2.0
-            raw_radius = seg.get("radius", 0.0)
-            if isinstance(raw_radius, str) and raw_radius.strip().upper() in ("Q", "-Q"):
-                radius = raw_radius.strip().upper()  # "Q" or "-Q"
-            else:
-                radius = float(raw_radius)
-            seg_type = seg.get("type", "line")
-
-            # Determine if there's a corner break BEFORE this segment
-            # (i.e., at the junction between seg_idx-1 and seg_idx)
-            cb_before = None
-            if seg_idx > 0 and corner_breaks and seg_idx - 1 < len(corner_breaks):
-                cb_before = corner_breaks[seg_idx - 1]
-
-            # Compute arrival point (may be trimmed by corner break)
-            # and departure point for this segment
-            trim_start_x = prev_x_r
-            trim_start_z = prev_z
-            trim_end_x = x_r
-            trim_end_z = z
-
-            # Apply corner break at the START of this segment (junction with previous)
-            vg = od_geom.get(seg_idx - 1) if seg_idx > 0 else None
-            if vg is not None:
-                # Engine geometry: trim the arriving path to t_in, draw the
-                # break element, continue this segment from t_out.
-                (tin_r, tin_z), (tout_r, tout_z) = vg.t_in, vg.t_out
-                if seg_idx - 1 == 0:
-                    # V1 is on the (undrawn) face: the drawn outline starts
-                    # where the break starts, not at the sharp first point.
-                    current_x[:] = [tin_r]
-                    current_z[:] = [tin_z]
-                    if seg_point_ranges:
-                        seg_point_ranges[0] = (0, 1)
-                    _seg_start_idx = 0
-                elif current_z:
-                    current_x[-1] = tin_r
-                    current_z[-1] = tin_z
-                else:
-                    current_x.append(tin_r)
-                    current_z.append(tin_z)
-                if vg.kind == "fillet" and vg.center is not None:
-                    fc_x, fc_z = vg.center
-                    a_start = math.atan2(tin_z - fc_z, tin_r - fc_x)
-                    a_end = math.atan2(tout_z - fc_z, tout_r - fc_x)
-                    sweep = a_end - a_start
-                    if sweep > math.pi:
-                        sweep -= 2 * math.pi
-                    elif sweep < -math.pi:
-                        sweep += 2 * math.pi
-                    n_fillet = max(16, int(abs(sweep) * vg.radius * 200))
-                    for fi in range(1, n_fillet):
-                        a = a_start + sweep * fi / float(n_fillet)
-                        current_x.append(fc_x + vg.radius * math.cos(a))
-                        current_z.append(fc_z + vg.radius * math.sin(a))
-                current_x.append(tout_r)
-                current_z.append(tout_z)
-                all_x.append(tout_r)
-                all_z.append(tout_z)
-                trim_start_x, trim_start_z = tout_r, tout_z
-            elif cb_before and cb_before.get("type", "none") != "none":
-                cb_type = cb_before["type"]
-                # Compute direction vectors at the junction point (prev_x_r, prev_z)
-                # Arrival direction: from previous segment's start toward junction
-                prev_seg_start_x, prev_seg_start_z = seg_endpoints[seg_idx - 1]
-                arr_dx = prev_x_r - prev_seg_start_x
-                arr_dz = prev_z - prev_seg_start_z
-                arr_len = math.sqrt(arr_dx * arr_dx + arr_dz * arr_dz)
-
-                # Departure direction: from junction toward this segment's end
-                dep_dx = x_r - prev_x_r
-                dep_dz = z - prev_z
-                dep_len = math.sqrt(dep_dx * dep_dx + dep_dz * dep_dz)
-
-                if arr_len > 1e-9 and dep_len > 1e-9:
-                    # Normalize
-                    arr_ux = arr_dx / arr_len
-                    arr_uz = arr_dz / arr_len
-                    dep_ux = dep_dx / dep_len
-                    dep_uz = dep_dz / dep_len
-
-                    if cb_type == "chamfer":
-                        size = float(cb_before.get("size", 0.015))
-                        # Trim point on arriving segment (back from junction)
-                        trim_back = min(size, arr_len * 0.4)
-                        trim_fwd = min(size, dep_len * 0.4)
-                        p1_x = prev_x_r - arr_ux * trim_back
-                        p1_z = prev_z - arr_uz * trim_back
-                        # Trim point on departing segment (forward from junction)
-                        p2_x = prev_x_r + dep_ux * trim_fwd
-                        p2_z = prev_z + dep_uz * trim_fwd
-
-                        # Truncate the current path at p1 (trim arriving segment)
-                        if current_z:
-                            # Replace last point with trimmed point
-                            current_x[-1] = p1_x
-                            current_z[-1] = p1_z
-                        else:
-                            current_x.append(p1_x)
-                            current_z.append(p1_z)
-                        # Draw chamfer line from p1 to p2
-                        current_x.append(p2_x)
-                        current_z.append(p2_z)
-                        all_x.append(p2_x)
-                        all_z.append(p2_z)
-                        # Update start of this segment to p2
-                        trim_start_x = p2_x
-                        trim_start_z = p2_z
-
-                    elif cb_type == "fillet":
-                        fillet_r = float(cb_before.get("radius", 0.015))
-                        # Compute fillet tangent points
-                        # Half-angle between the two directions (reversed arrival)
-                        dot = (-arr_ux) * dep_ux + (-arr_uz) * dep_uz
-                        dot = max(-1.0, min(1.0, dot))
-                        half_angle = math.acos(dot) / 2.0
-                        if half_angle > 1e-6:
-                            # Distance from junction to tangent point
-                            tan_dist = fillet_r / math.tan(half_angle)
-                            tan_dist_arr = min(tan_dist, arr_len * 0.4)
-                            tan_dist_dep = min(tan_dist, dep_len * 0.4)
-                            # Tangent points
-                            t1_x = prev_x_r - arr_ux * tan_dist_arr
-                            t1_z = prev_z - arr_uz * tan_dist_arr
-                            t2_x = prev_x_r + dep_ux * tan_dist_dep
-                            t2_z = prev_z + dep_uz * tan_dist_dep
-
-                            # Truncate arriving path at t1
-                            if current_z:
-                                current_x[-1] = t1_x
-                                current_z[-1] = t1_z
-                            else:
-                                current_x.append(t1_x)
-                                current_z.append(t1_z)
-
-                            # Interpolate fillet arc from t1 to t2
-                            # Find arc center (offset from junction along bisector)
-                            bis_x = (-arr_ux + dep_ux)
-                            bis_z = (-arr_uz + dep_uz)
-                            bis_len = math.sqrt(bis_x * bis_x + bis_z * bis_z)
-                            if bis_len > 1e-9:
-                                bis_x /= bis_len
-                                bis_z /= bis_len
-                                center_dist = fillet_r / math.sin(half_angle)
-                                fc_x = prev_x_r + bis_x * center_dist
-                                fc_z = prev_z + bis_z * center_dist
-
-                                a_start = math.atan2(t1_z - fc_z, t1_x - fc_x)
-                                a_end = math.atan2(t2_z - fc_z, t2_x - fc_x)
-                                sweep = a_end - a_start
-                                # Take the short arc (< pi)
-                                if sweep > math.pi:
-                                    sweep -= 2 * math.pi
-                                elif sweep < -math.pi:
-                                    sweep += 2 * math.pi
-
-                                n_fillet = max(16, int(abs(sweep) * fillet_r * 200))
-                                for fi in range(1, n_fillet):
-                                    t = fi / float(n_fillet)
-                                    a = a_start + sweep * t
-                                    current_x.append(fc_x + fillet_r * math.cos(a))
-                                    current_z.append(fc_z + fillet_r * math.sin(a))
-                                current_x.append(t2_x)
-                                current_z.append(t2_z)
-                                all_x.append(t2_x)
-                                all_z.append(t2_z)
-                            # Update start of this segment to t2
-                            trim_start_x = t2_x
-                            trim_start_z = t2_z
-                        # else: angle too small, skip fillet
-
-            if seg_type == "arc" and radius in ("Q", "-Q"):
-                # Circular quadrant arc (geometry/arc_entry.py).
-                quadrant_sign = -1 if radius == "-Q" else 1
-                points = _quadrant_arc_kernel_points(
-                    trim_start_x, trim_start_z, x_r, z, quadrant_sign,
-                    mode_od=(self._get_machining_mode().lower() != "id"),
-                )
-                if not current_z:
-                    current_x.append(points[0][0])
-                    current_z.append(points[0][1])
-                for px_r, pz in points[1:]:
-                    current_x.append(px_r)
-                    current_z.append(pz)
-                all_x.append(x_r)
-                all_z.append(z)
-
-            elif seg_type == "arc" and isinstance(radius, (int, float)) and abs(radius) > 0.0001:
-                # Interpolate arc from trim_start to current endpoint
-                # Signed radius: +R = CW on screen, -R = CCW on screen
-                r_abs = abs(radius)
-                is_cw = radius > 0
-
-                dx_r = x_r - trim_start_x
-                dz = z - trim_start_z
-                chord = math.sqrt(dx_r * dx_r + dz * dz)
-
-                if chord > 0.0001 and r_abs >= chord / 2.0 - 1e-9:
-                    if r_abs < chord / 2.0:
-                        r_abs = chord / 2.0
-
-                    mid_x_r = (trim_start_x + x_r) / 2.0
-                    mid_z = (trim_start_z + z) / 2.0
-                    h = math.sqrt(max(0.0, r_abs * r_abs - (chord / 2.0) ** 2))
-
-                    px = -dz / chord
-                    pz = dx_r / chord
-
-                    # Compute both candidate centers
-                    c1_x = mid_x_r + h * px
-                    c1_z = mid_z + h * pz
-                    c2_x = mid_x_r - h * px
-                    c2_z = mid_z - h * pz
-
-                    # Pick center based on CW/CCW direction on screen.
-                    def _cross(cx, cz):
-                        ax = trim_start_x - cx
-                        az = trim_start_z - cz
-                        bx = x_r - cx
-                        bz = z - cz
-                        return ax * bz - az * bx
-
-                    cr1 = _cross(c1_x, c1_z)
-                    if is_cw:
-                        cx_r, cz_arc = (c1_x, c1_z) if cr1 < 0 else (c2_x, c2_z)
-                        other_cx, other_cz = (c2_x, c2_z) if cr1 < 0 else (c1_x, c1_z)
-                    else:
-                        cx_r, cz_arc = (c1_x, c1_z) if cr1 > 0 else (c2_x, c2_z)
-                        other_cx, other_cz = (c2_x, c2_z) if cr1 > 0 else (c1_x, c1_z)
-
-                    # Bounds-aware center selection
-                    if not is_arc_within_x_bounds(
-                        cx_r, cz_arc, r_abs,
-                        trim_start_x, trim_start_z, x_r, z, is_cw
-                    ):
-                        if is_arc_within_x_bounds(
-                            other_cx, other_cz, r_abs,
-                            trim_start_x, trim_start_z, x_r, z, is_cw
-                        ):
-                            cx_r, cz_arc = other_cx, other_cz
-
-                    # Compute sweep angle
-                    angle_start = math.atan2(trim_start_z - cz_arc, trim_start_x - cx_r)
-                    angle_end = math.atan2(z - cz_arc, x_r - cx_r)
-                    diff = angle_end - angle_start
-
-                    if is_cw:
-                        if diff > 0:
-                            diff -= 2 * math.pi
-                    else:
-                        if diff < 0:
-                            diff += 2 * math.pi
-
-                    r_display = math.sqrt((trim_start_x - cx_r) ** 2 + (trim_start_z - cz_arc) ** 2)
-
-                    n_pts = max(32, int(abs(diff) * r_display * 200))
-                    if not current_z:
-                        current_x.append(trim_start_x)
-                        current_z.append(trim_start_z)
-                    for i in range(1, n_pts):
-                        t = i / float(n_pts)
-                        angle = angle_start + diff * t
-                        ax = cx_r + r_display * math.cos(angle)
-                        az = cz_arc + r_display * math.sin(angle)
-                        current_x.append(ax)
-                        current_z.append(az)
-                    current_x.append(x_r)
-                    current_z.append(z)
-                    all_x.extend([x_r])
-                    all_z.extend([z])
-                else:
-                    # Degenerate arc — draw as line
-                    if not current_z:
-                        current_x.append(trim_start_x)
-                        current_z.append(trim_start_z)
-                    current_x.append(x_r)
-                    current_z.append(z)
-                    all_x.append(x_r)
-                    all_z.append(z)
-            else:
-                # LINE segment — from trim_start to endpoint
-                if not current_z:
-                    current_z.append(trim_start_z)
-                    current_x.append(trim_start_x)
-                current_z.append(z)
-                current_x.append(x_r)
-                all_z.append(z)
-                all_x.append(x_r)
-
-            prev_x_r = x_r
-            prev_z = z
-
-            # Record where this segment's points end
-            seg_point_ranges.append((_seg_start_idx, len(current_x)))
-
+        for row in range(len(segments)):
+            seg_point_ranges.append(ranges.get(row, (len(current_x), len(current_x))))
         # Flush remaining line sub-path
         if len(current_z) > 1:
             segments_to_draw.append((current_z, current_x))
@@ -2690,13 +2427,29 @@ class ProgramTab(QWidget):
         except Exception:
             pass  # Preview is best-effort, never block UI
 
+    def _other_block_outline(self, segments, breaks, mode) -> list:
+        """_engine_outline for a block that is not being edited (cached)."""
+        cache = self.__dict__.setdefault("_other_outline_cache", {})
+        key = repr((mode, segments, breaks))
+        if key not in cache:
+            result = None
+            try:
+                from pipeline.model_builder import profile_from_fields
+                from geometry.corner_breaks_od import build_od_corner_coords
+                result = build_od_corner_coords(profile_from_fields(segments, mode, breaks))
+            except Exception:
+                logger.debug("Corner-break solve failed for another block", exc_info=True)
+            if len(cache) > 32:
+                cache.clear()
+            cache[key] = _engine_outline(segments, breaks, mode, result)
+        return cache[key]
+
     def _draw_other_block_profiles(self, pg):
         """Draw profile lines for all OTHER visible profile blocks (dimmer style).
 
         Called during _update_preview to show all visible profiles simultaneously,
         not just the active block's.
         """
-        import math
         from PyQt5.QtGui import QColor
 
         blocks = self._block_list.get_blocks()
@@ -2724,54 +2477,16 @@ class ProgramTab(QWidget):
             if not segments:
                 continue
 
-            # Build simple polyline from segments (no corner break rendering for non-active)
-            first_x_dia = float(segments[0].get("x", 0.0))
-            prev_x_r = first_x_dia / 2.0
-            prev_z = 0.0
-            z_pts = [prev_z]
-            x_pts = [prev_x_r]
-
-            for seg in segments:
-                x_dia = float(seg.get("x", 0.0))
-                z = float(seg.get("z", 0.0))
-                x_r = x_dia / 2.0
-                seg_type = seg.get("type", "line")
-                raw_radius = seg.get("radius", 0.0)
-
-                if seg_type == "arc" and raw_radius:
-                    # Simple arc interpolation for display
-                    try:
-                        if isinstance(raw_radius, str):
-                            radius_val = 0.0
-                        else:
-                            radius_val = float(raw_radius)
-                        if abs(radius_val) > 0.001:
-                            r = abs(radius_val)
-                            dx = x_r - prev_x_r
-                            dz = z - prev_z
-                            chord = math.sqrt(dx*dx + dz*dz)
-                            if chord < 2 * r:
-                                n_pts = max(8, int(chord / r * 16))
-                                for i in range(1, n_pts + 1):
-                                    t = i / n_pts
-                                    # Linear interpolation (approximate for preview)
-                                    z_pts.append(prev_z + dz * t)
-                                    x_pts.append(prev_x_r + dx * t)
-                            else:
-                                z_pts.append(z)
-                                x_pts.append(x_r)
-                        else:
-                            z_pts.append(z)
-                            x_pts.append(x_r)
-                    except (ValueError, TypeError):
-                        z_pts.append(z)
-                        x_pts.append(x_r)
-                else:
-                    z_pts.append(z)
-                    x_pts.append(x_r)
-
-                prev_x_r = x_r
-                prev_z = z
+            # The block's own engine outline (corner breaks, arcs), like the
+            # active block's; cached per block content.
+            mode = (data.get("stock") or {}).get("mode", "od")
+            breaks = data.get("corner_breaks") or [None] * (len(segments) - 1)
+            z_pts, x_pts = [], []
+            for _, pts in self._other_block_outline(segments, breaks, mode):
+                for r, zz in pts:
+                    if not z_pts or (zz, r) != (z_pts[-1], x_pts[-1]):
+                        z_pts.append(zz)
+                        x_pts.append(r)
 
             if len(z_pts) > 1:
                 self._graph_widget.plot(z_pts, x_pts, pen=dim_pen)

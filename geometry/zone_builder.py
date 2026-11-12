@@ -287,6 +287,36 @@ def edge_from_coords(current: dict, target: dict):
     return Line((cx, cz), (tx, tz))
 
 
+def sample_outline(coords: List[dict], per_inch: float = 200.0, min_arc_points: int = 16) -> List[list]:
+    """Points (r, z) along the outline the coords describe, ON the kernel's
+    own edges (edge_from_coords), one list per entry: [coords[0]] for entry 0,
+    then the element ending at entry k (lines: its two ends; arcs: sampled
+    about `per_inch` points per inch, at least `min_arc_points`). For drawing
+    exactly what the engine builds.
+
+    An element the kernel cannot build (an arc whose radius is shorter than
+    half its chord, an invalid quadrant - e.g. a row half-typed in the editor)
+    is None: the caller decides how to show it. Generation never gets here
+    with one; the zone builder raises."""
+    if not coords:
+        return []
+    out = [[(coords[0]["x_radius"], coords[0]["z"])]]
+    for a, b in zip(coords, coords[1:]):
+        try:
+            edge = edge_from_coords(a, b)
+        except ValueError:
+            out.append(None)
+            continue
+        end = (b["x_radius"], b["z"])
+        if edge is None or edge.geom_type.name == "LINE":
+            out.append([(a["x_radius"], a["z"]), end])
+            continue
+        n = max(min_arc_points, int(edge.length * per_inch))
+        pts = [edge.position_at(k / n) for k in range(n + 1)]
+        out.append([(p.X, p.Y) for p in pts[:-1]] + [end])
+    return out
+
+
 def _build_face_from_coords(coords: List[dict], profile: ClosedProfile, *, closed: bool = True) -> object:
     """Build a Build123d Face from coordinate descriptors.
 
