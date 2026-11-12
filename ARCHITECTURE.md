@@ -33,7 +33,7 @@ The system runs in two modes:
 │    models → tools → geometry → intervals → planners             │
 │                                          → transitions          │
 │                              → validation                       │
-│    → outputs (gcode, graph, dxf, svg, material sim)             │
+│    → outputs (gcode, graph, dxf, svg)                           │
 ├─────────────────────────────────────────────────────────────────┤
 │  HAL Layer (machine abstraction)                                │
 │    LiveBackend ←→ linuxcnc Python module                        │
@@ -52,18 +52,25 @@ The system runs in two modes:
 models → tools → geometry → intervals → planners → transitions → validation → outputs → pipeline → gui
 ```
 
-Each module may ONLY import from modules to its LEFT. No exceptions. This is enforced by `validation/architecture_check.py`.
+Each module may ONLY import from modules to its LEFT, with one exception (owner rule (a),
+2026-11-11): **planners may use the geometry kernel through `geometry/kernel.py` and nothing
+else from `geometry/`**. Raw build123d / OCP stay inside `geometry/`; Shapely stays inside
+`validation/`. Enforced by `validation/architecture_check.py` (`ALLOWED_IMPORTS`,
+`ALLOWED_SUBMODULE_IMPORTS`) and, as a ratchet, by
+`tests/architecture/test_architecture_ratchet.py` + `validation/architecture_baseline.json`:
+the error count per category may only go down. Remaining known violations and their
+history are in that baseline file.
 
 | Module | Imports From | External Deps | Responsibility |
 |--------|-------------|---------------|----------------|
 | `models/` | Nothing | None | Pure dataclasses: ClosedProfile, StockDef, ToolDef, ToolMove, PlanResult |
-| `tools/` | models/ | None | Tool geometry, reach analysis, TNR computation |
-| `geometry/` | models/, tools/ | **build123d, OCP** | Zone construction, boundary extraction, ZoneQueryAPI |
+| `tools/` | models/ | None | Tool data: tool-table .tbl I/O (`tool_table_io`), the tool editor record (`tool_card_data`), type→orientation/insert filters, insert edge angles |
+| `geometry/` | models/, tools/ | **build123d, OCP** | Zone construction, ZoneQueryAPI, offsets, face ops, curve fitting, arc identity. Public API for planners: `geometry/kernel.py` |
 | `intervals/` | models/, geometry/ | None | Fiber/Interval classes wrapping kernel queries |
-| `planners/` | models/, tools/, intervals/ | None | Pass planning: staircase, face, finish, cleanup, offset-contour |
+| `planners/` | models/, tools/, intervals/, **geometry.kernel only** | None | Pass planning: face, staircase, contour roughing, cleanup, finish, threading, grooving |
 | `transitions/` | models/, intervals/ | None | Retract/approach/link logic between passes |
-| `validation/` | models/, geometry/ | **shapely** | Polygon construction, runtime safety checking (3 gates) |
-| `outputs/` | models/ | ezdxf, matplotlib | G-code writer, graph adapter, DXF/SVG export, material sim |
+| `validation/` | models/, geometry/ | **shapely** | Polygon construction, the 3 gates, `cut_regions` (what the G-code cuts, via rs274), `nose_clearance` (injected into the staircase planner), the architecture check |
+| `outputs/` | models/ | ezdxf, matplotlib | G-code writer (emits only; threading/grooving are planned by the caller), graph adapter, DXF/SVG export, run-from-line |
 | `pipeline/` | All above | None | Orchestration: `execute()` wires modules together |
 | `gui/` | outputs/, pipeline/, models/ | **PyQt5, pyqtgraph** | All Qt UI, visualization, user interaction |
 | `hal/` | None (standalone) | linuxcnc (optional) | Machine control abstraction |
@@ -89,7 +96,8 @@ pipeline.execute()
     ├── planners.plan_face() → FaceZoneResult (face passes)
     │
     ├── planners.plan_turning() → TurningStaircaseResult (roughing passes)
-    │     Uses: staircase_planner or offset_contour_planner
+    │     Uses: staircase_planner (+ validation.NoseClearance built here)
+    │           or contour_roughing_planner
     │
     ├── planners.plan_cleanup() → List[ToolMove] (cleanup passes)
     │
@@ -107,7 +115,8 @@ pipeline.execute()
             ├── outputs.graph_adapter.convert() → GraphData
             │     (plain coordinate arrays + metadata for PyQtGraph)
             │
-            └── outputs.material_sim → per-move material states for animation
+            └── validation.cut_regions.compute_sections() → shaded sections
+                  (from the G-code through LinuxCNC's rs274: gouge / not-removed checks)
 ```
 
 ---
@@ -175,12 +184,20 @@ If any gate fails, the pipeline raises — no degraded output, no silent fallbac
 
 ## Geometry Kernel (Build123d / OCCT)
 
-The `geometry/` module is the ONLY place that imports Build123d or OpenCASCADE. It provides:
+The `geometry/` module is the ONLY place that imports Build123d or OpenCASCADE. Planners
+reach it only through `geometry/kernel.py`, which names every kernel service they use (one
+readable list = the boundary between "what the CAM decides" and "what the geometry is").
+Kernel shapes handed to planners are opaque handles: planners pass them back to kernel
+functions and never call methods on them. It provides:
 
 - **ZoneBuilder**: Constructs 2D zones (Finished Part, Material to Rough, etc.) as OCCT shapes
 - **ZoneQueryAPI**: Answers geometric queries (boundary at X, crossing points, fiber intervals)
 - **ContourIntersect**: Finds where toolpath crosses zone boundaries
 - **adaptive_sampling**: Densifies arcs into point arrays for display and validation
+- **kernel_offset**: Offsets with sharp joins and an explicit, logged rounded-join fallback
+- **face_ops**: Build a face from profile coords, offset, translate, clip to a box, walk a wire into line/arc records
+- **curve_fit**: Arc pieces approximating a non-circular edge within a chord error
+- **arc_math / arc_entry**: One arc identity end to end (sweep, canonical ≤90° pieces, quadrant arcs)
 
 All other modules receive geometric answers as plain numbers (floats, lists of coordinates). They never touch OCCT directly.
 
@@ -427,9 +444,8 @@ joint.1.motor-pos-cmd ──→ pid.z.command
 
 ## File Naming Conventions
 
-- One class per file (major classes): `staircase_planner.py`, `offset_contour_planner.py`
+- One class per file (major classes): `staircase_planner.py`, `contour_roughing_planner.py`
 - Shared utilities: `_helpers.py` suffix (private to module)
-- Protocols/interfaces: `protocols.py` in each module
 - Tests mirror source: `tests/planners/test_staircase_planner.py`
 
 ---

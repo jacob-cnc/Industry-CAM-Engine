@@ -135,17 +135,17 @@ Triggered = `.in` HIGH = `.in_not` LOW (sourcing type)
 
 ```
 Industry CAM Engine/
-├── geometry/          CAM geometry kernel (Build123d/OCCT)
+├── geometry/          CAM geometry kernel (Build123d/OCCT); planners use geometry/kernel.py only
 ├── gui/               PyQt5 GUI application
 ├── hal/               LinuxCNC HAL abstraction
 ├── intervals/         Fiber/interval classes
 ├── models/            Pure dataclasses (ClosedProfile, ToolDef, etc.)
-├── outputs/           G-code writer, graph adapter, DXF/SVG export
+├── outputs/           G-code writer (emits only), graph adapter, DXF/SVG export
 ├── pipeline/          Orchestration (execute() wires modules)
 ├── planners/          Pass planning (staircase, face, finish, etc.)
-├── tools/             Tool geometry, reach analysis
+├── tools/             Tool data: .tbl I/O, tool editor record, insert angles
 ├── transitions/       Retract/approach/link logic
-├── validation/        Safety checking (3 gates)
+├── validation/        Safety checking (3 gates), cut_regions (rs274), architecture check + ratchet
 ├── tests/             All tests (unit/, properties/, integration/, etc.)
 ├── scripts/           Debug, export, and visual test scripts (not imported)
 ├── session-notes/     AI session checkpoints, commissioning logs
