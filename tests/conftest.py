@@ -19,6 +19,7 @@ whole-window test files segfaulted or hung, yet passed alone.
 """
 
 import os
+import subprocess
 import sys
 import warnings
 
@@ -26,6 +27,33 @@ import pytest
 
 if sys.platform == "win32":
     os.environ.setdefault("QT_FONT_DPI", "96")
+
+# --- The suite never talks to the machine (lathe, 2026-11-11) -------------------
+# Tests run on the lathe's own Python (requirements-lathe.txt), which has
+# LinuxCNC's `linuxcnc` and `hal` bindings. Without this, whole-window tests
+# reached hal.live_backend and ran real `halcmd net ...` commands, and the Tools
+# tab can send controller commands. Make those bindings unimportable - exactly
+# the conditions every test was written under - and refuse to run at all while
+# LinuxCNC is up (the standing rule: no test suite with the machine running).
+sys.modules["linuxcnc"] = None          # import linuxcnc -> ImportError
+sys.modules["_hal"] = None              # Debian hal.py (loaded by file path) needs it
+
+
+def _linuxcnc_running() -> str:
+    for name in ("milltask", "rtapi_app", "linuxcncsvr", "linuxcnc"):
+        try:
+            if subprocess.run(["pgrep", "-x", name], capture_output=True).returncode == 0:
+                return name
+        except FileNotFoundError:        # no pgrep (Windows dev box)
+            return ""
+    return ""
+
+
+def pytest_configure(config):
+    running = _linuxcnc_running()
+    if running:
+        pytest.exit(f"LinuxCNC is running ({running}): the test suite must not run while the "
+                    f"machine is up. Shut LinuxCNC down first.", returncode=3)
 
 
 @pytest.fixture(autouse=True)

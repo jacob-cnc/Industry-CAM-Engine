@@ -102,9 +102,23 @@ Use the smallest relevant verification set, then expand with risk:
 Current standard commands:
 
 ```bash
-python -m pytest -q
-python -m validation.architecture_check
+scripts/run_tests.sh                     # whole suite on the lathe runtime
+scripts/run_tests.sh tests/unit -x       # any pytest arguments
+/usr/bin/python3 -m validation.architecture_check
 ```
+
+Tests run on the **lathe's runtime**, version for version (owner, 2026-11-11):
+Debian's `/usr/bin/python3` 3.11 (LinuxCNC 2.9.6's bindings are built for it) with
+the packages pinned in `requirements-lathe.txt`, plus Debian's PyQt5 5.15.9.
+`tests/test_runtime_env.py` fails if the interpreter or any version differs. If
+the lathe's packages change, update `requirements-lathe.txt` in the same change.
+(A miniforge Python 3.13 / Shapely 2 environment was used until 2026-11-11.
+Shapely-2-only calls passed every test there and broke Generate on the lathe,
+which then had Shapely 1.8.)
+
+The suite never talks to the machine. `tests/conftest.py` makes `linuxcnc` and
+the HAL bindings unimportable, so the backend is always the MockBackend, and it
+refuses to run while LinuxCNC is up.
 
 If dependencies or commands are unavailable, report that clearly. Do not claim
 tests passed based only on older session notes.
