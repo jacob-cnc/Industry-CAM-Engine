@@ -238,7 +238,8 @@ class StaircasePlanner:
             return None
         off = nose_centre_offset(tool)
         # nose centre must stay >= R from keep: centre not in keep (+) R; tip = centre - off
-        return translate(keep.buffer(tool.nose_radius, quad_segs=32), -off[0], -off[1])
+        # buffer's 2nd argument positionally: resolution (Shapely 1.8) = quad_segs (2.x)
+        return translate(keep.buffer(tool.nose_radius, 32), -off[0], -off[1])
 
     @staticmethod
     def _nose_safe(intervals, x_dia, forbidden, z_cap):

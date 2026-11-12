@@ -75,21 +75,50 @@ def _poly(g):
     return MultiPolygon(parts) if len(parts) > 1 else (parts[0] if parts else Polygon())
 
 
+# The lathe GUI runs the system Python with Shapely 1.8 (no grid_size, no
+# union_all); the test environment has Shapely 2. Both must work.
+try:
+    import shapely as _shp
+    _SHAPELY2 = hasattr(_shp, "union_all")
+except Exception:                                  # pragma: no cover
+    _SHAPELY2 = False
+
+
+def _snap(g):
+    """Coordinates rounded to GRID (Shapely 1.8 retry after an overlay failure)."""
+    from shapely.ops import transform
+    return _poly(transform(lambda x, y, z=None: (
+        __import__("numpy").round(__import__("numpy").asarray(x) / GRID) * GRID,
+        __import__("numpy").round(__import__("numpy").asarray(y) / GRID) * GRID), g).buffer(0))
+
+
+def _op18(fn, *gs):
+    try:
+        return _poly(fn(*gs))
+    except Exception:                              # GEOS robustness: snap and retry once
+        return _poly(fn(*[_snap(g) for g in gs]))
+
+
 def _u(geoms):
-    import shapely
     geoms = [_poly(g) for g in geoms if g is not None and not g.is_empty]
     geoms = [g for g in geoms if not g.is_empty]
-    return _poly(shapely.union_all(geoms, grid_size=GRID)) if geoms else Polygon()
+    if not geoms:
+        return Polygon()
+    if _SHAPELY2:
+        return _poly(_shp.union_all(geoms, grid_size=GRID))
+    return _op18(lambda *gs: unary_union(list(gs)), *geoms)
 
 
 def _d(a, b):
-    import shapely
-    return _poly(shapely.difference(_poly(a), _poly(b), grid_size=GRID))
+    if _SHAPELY2:
+        return _poly(_shp.difference(_poly(a), _poly(b), grid_size=GRID))
+    return _op18(lambda x, y: x.difference(y), _poly(a), _poly(b))
 
 
 def _i(a, b):
-    import shapely
-    return _poly(shapely.intersection(_poly(a), _poly(b), grid_size=GRID))
+    if _SHAPELY2:
+        return _poly(_shp.intersection(_poly(a), _poly(b), grid_size=GRID))
+    return _op18(lambda x, y: x.intersection(y), _poly(a), _poly(b))
 
 SECTION_OF_HEADER = (         # "; === <header> ===" -> section; first match wins
     ("CLEANUP", "band"), ("FINISH", "band"), ("SPRING", "band"),   # before ROUGH: the cleanup
@@ -232,7 +261,7 @@ def _wedge(tool, mode_id: bool) -> Optional[Polygon]:
         a = math.radians(ang)
         d = (sr * math.sin(a), sz * -math.cos(a))           # edge direction from the nose
         pts.append((d[0] * WEDGE_LEN, d[1] * WEDGE_LEN))
-    circle = Point(0, 0).buffer(max(R, 1e-6), quad_segs=NOSE_QUAD_SEGS)
+    circle = Point(0, 0).buffer(max(R, 1e-6), NOSE_QUAD_SEGS)
     return unary_union([circle, Polygon([(0, 0)] + pts)]).convex_hull
 
 
@@ -254,8 +283,8 @@ def swept_regions(moves: List[CanonMove], tools: Dict[int, object], mode_id: boo
         cpts = [(r + off[0], z + off[1]) for r, z in mv.pts]
         R = max(t.nose_radius, 1e-6)
         nose.setdefault(mv.section, []).append(
-            LineString(cpts).buffer(R, quad_segs=NOSE_QUAD_SEGS) if len(cpts) > 1
-            else Point(cpts[0]).buffer(R, quad_segs=NOSE_QUAD_SEGS))
+            LineString(cpts).buffer(R, NOSE_QUAD_SEGS) if len(cpts) > 1
+            else Point(cpts[0]).buffer(R, NOSE_QUAD_SEGS))
         w = _wedge(t, mode_id)
         if w is not None:
             hulls = []
