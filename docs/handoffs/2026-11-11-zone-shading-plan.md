@@ -372,3 +372,17 @@ near-coincident edges that made plain GEOS overlay fail.
 - **Still open (item 3):** facing off with stock left in front of Z0 (Z start >
   allowance, X start = stock OD). The passes still come in on the inward lead and
   the graph flags the chamfer top red.
+
+## 11. Item 3 closed by owner decision (2026-11-11)
+
+"A user would not set Z0 as their datum if they do not intend to face the part."
+Z0 is the faced surface. Stock proud of Z0 means the part will be faced (X start at
+or below the first X segment on OD). A tiny skin is loaded at, say, Z.005 and faced.
+X start > the first X segment together with stock proud of Z0 is not a real
+scenario, so no change is made for it. (Example used to evaluate: Ø1.4 stock,
+X start 1.4, Z start .050, profile X1.0 Z0 → X1.0 Z-.4 → X1.2 Z-.4 → X1.2 Z-1.0.)
+
+Remaining from 3, only if the owner wants it: the graph could judge the faced range
+in front of Z0 (X start → stock OD, when Z start > allowance) as "should be
+removed", to catch a facing regression in red. Item 4 (Hemisphere cleanup refused
+by LinuxCNC at a .010–.020 allowance) is next.
