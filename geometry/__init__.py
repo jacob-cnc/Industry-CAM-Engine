@@ -2,9 +2,7 @@
 
 The ONLY module that imports Build123d or OCCT.
 Imports from: models/, tools/
-"""
 
-from geometry.adaptive_sampling import adaptive_densify_arc, flatness_predicate, arc_midpoint
-from geometry.zone_builder import ZoneSet, build_zones
-from geometry.zone_query import ZoneQueryAPI, EdgeData
-from geometry.contour_intersect import ContourIntersect
+Import submodules directly (e.g. `from geometry.<module> import X`); this
+package re-exports nothing, so importing one light module never loads the rest.
+"""

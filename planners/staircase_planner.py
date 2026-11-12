@@ -34,6 +34,7 @@ from models.constants import TOLERANCE
 if TYPE_CHECKING:
     from geometry.zone_query import ZoneQueryAPI
     from geometry.contour_intersect import ContourIntersect
+    from validation.nose_clearance import NoseClearance
 
 
 class StaircasePlanner:
@@ -52,6 +53,7 @@ class StaircasePlanner:
         stock: StockDef,
         mode: MachiningMode,
         contour_intersect: 'ContourIntersect' = None,
+        nose_clearance: 'NoseClearance' = None,
     ) -> List[TurningPass]:
         """Generate staircase roughing passes.
 
@@ -63,6 +65,8 @@ class StaircasePlanner:
             mode: OD or ID
             contour_intersect: ContourIntersect instance for wire-based interval finding.
                                If None, falls back to Fiber (legacy behavior).
+            nose_clearance: validation.nose_clearance.NoseClearance for this tool
+                            (built by the pipeline), or None: no nose trimming.
 
         Returns:
             Ordered list of TurningPass objects.
@@ -90,7 +94,7 @@ class StaircasePlanner:
         # diameters it coincides with the zone, so ordinary turning is unchanged.
         # Found by the G-code section check (2026-11-11): .0125 into a 60 deg
         # flank with a VNMG against a .005 allowance.
-        forbidden = self._nose_forbidden_region(zone_query, tool)
+        forbidden = nose_clearance
 
         # Generate passes at each X level
         passes = []
@@ -223,46 +227,18 @@ class StaircasePlanner:
         return moves
 
     @staticmethod
-    def _nose_forbidden_region(zone_query, tool):
-        """Tip positions that would put the nose into the keep zone, (r, z), or
-        None if the zone polygons aren't available."""
-        from shapely.affinity import translate
-        from models.tool import nose_centre_offset
-        try:
-            from validation.polygon_builder import ValidationPolygons
-            vp = ValidationPolygons.from_zone_query(zone_query)
-            keep = vp.finished_part_poly.union(vp.finish_allowance_poly)
-        except Exception:
-            return None
-        if keep.is_empty or tool.nose_radius <= 0:
-            return None
-        off = nose_centre_offset(tool)
-        # nose centre must stay >= R from keep: centre not in keep (+) R; tip = centre - off
-        # buffer's 2nd argument positionally: resolution (Shapely 1.8) = quad_segs (2.x)
-        return translate(keep.buffer(tool.nose_radius, 32), -off[0], -off[1])
-
-    @staticmethod
     def _nose_safe(intervals, x_dia, forbidden, z_cap):
         """Sub-intervals of each (z_begin, z_terminate) the tip can feed along at
         this diameter without the nose entering the keep zone. Z descending."""
         if forbidden is None:
             return list(intervals)
-        from shapely.geometry import LineString
         out = []
         r = x_dia / 2.0
         for zb, zt in intervals:
             top = min(zb, z_cap)
             if top - zt < TOLERANCE:
                 continue
-            free = LineString([(r, top), (r, zt)]).difference(forbidden)
-            parts = [free] if free.geom_type == "LineString" else list(getattr(free, "geoms", []))
-            pieces = []
-            for g in parts:
-                if g.is_empty or g.length < TOLERANCE:
-                    continue
-                zs = [c[1] for c in g.coords]
-                pieces.append((max(zs), min(zs)))
-            out.extend(sorted(pieces, key=lambda p: -p[0]))
+            out.extend(forbidden.free_spans(r, top, zt))
         return out
 
     def _get_intervals(

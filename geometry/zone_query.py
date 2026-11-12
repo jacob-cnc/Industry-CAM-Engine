@@ -18,15 +18,10 @@ from OCP.BRep import BRep_Tool
 from OCP.TopExp import TopExp_Explorer
 from OCP.TopAbs import TopAbs_EDGE, TopAbs_VERTEX
 from OCP.TopoDS import TopoDS
-from OCP.gp import gp_Pnt, gp_Dir, gp_Lin, gp_Ax1
+from OCP.gp import gp_Pnt
 from OCP.BRepAdaptor import BRepAdaptor_Curve
-from OCP.GeomAbs import (
-    GeomAbs_Line, GeomAbs_Circle, GeomAbs_Ellipse,
-    GeomAbs_BSplineCurve, GeomAbs_BezierCurve, GeomAbs_OtherCurve,
-)
+from OCP.GeomAbs import GeomAbs_Line, GeomAbs_Circle
 from OCP.BRepTools import BRepTools
-from OCP.BRepClass import BRepClass_FaceClassifier
-from OCP.TopLoc import TopLoc_Location
 
 from build123d import Face, Wire, Edge, Sketch
 
@@ -331,11 +326,11 @@ class ZoneQueryAPI:
         This is a contour query, not a complete removal-pocket or access model.
         See docs/handoffs/2026-11-08-id-pocket-removal-model.md.
         """
-        from build123d import Kind, Side, Vertex
-        from geometry.zone_builder import _profile_to_radius_coords, _build_face_from_coords
+        from build123d import Side, Vertex
+        from geometry.zone_builder import profile_to_radius_coords, _build_face_from_coords
         if not math.isfinite(remaining_allowance_dia) or remaining_allowance_dia < 0:
             raise ValueError("Profile allowance must be finite and nonnegative.")
-        coords = _profile_to_radius_coords(profile)
+        coords = profile_to_radius_coords(profile)
         original = _build_face_from_coords(coords, profile, closed=False)
         wires = original.wires()
         if len(wires) != 1:

@@ -10,16 +10,13 @@ Imports from: models/ only
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Tuple, Optional, TYPE_CHECKING
+from typing import List, Tuple, Optional
 
 import numpy as np
 
 from models.results import PlanResult
 from models.moves import ToolMove, MoveType, PassType
 from models.profile import MachiningMode
-
-if TYPE_CHECKING:
-    from outputs.material_sim import MaterialSimData
 
 
 @dataclass
@@ -76,17 +73,16 @@ class GraphData:
     centerline_z_range: Tuple[float, float] = (0, 0)
     playback_frames: List[PlaybackFrame] = field(default_factory=list)
     warning_regions: List[Tuple[List[float], List[float]]] = field(default_factory=list)
-    material_states: Optional[MaterialStateData] = None
+    material_states: Optional[MaterialStateData] = None  # dormant: material_sim removed 2026-11-12; gui/ still reads it (always None)
 
 
-def convert(plan_result: PlanResult, material_sim_data: Optional['MaterialSimData'] = None) -> GraphData:
+def convert(plan_result: PlanResult) -> GraphData:
     """Convert PlanResult into PyQtGraph-ready coordinate arrays.
 
     - Converts all X from DIAMETER to RADIUS (÷ 2.0)
     - Groups moves by type for color-coded rendering
     - Constructs playback frame sequence
     - Extracts zone boundaries as polygon coordinate arrays
-    - Optionally serializes material simulation data into coordinate arrays
 
     Performance budget: < 50ms for typical profiles.
     """
@@ -166,10 +162,6 @@ def convert(plan_result: PlanResult, material_sim_data: Optional['MaterialSimDat
         ))
         n_number += 10
 
-    # Material simulation data serialization
-    if material_sim_data:
-        data.material_states = _convert_material_sim(material_sim_data)
-
     return data
 
 
@@ -195,41 +187,6 @@ def convert_from_moves(moves: List[ToolMove]) -> GraphData:
         n_number += 10
 
     return data
-
-
-def _convert_material_sim(material_sim_data: 'MaterialSimData') -> MaterialStateData:
-    """Convert MaterialSimData into MaterialStateData coordinate arrays.
-
-    Extracts pre-computed numpy arrays from the simulation data and packages
-    them into the rendering-ready MaterialStateData structure.
-
-    No Shapely operations here — all data arrives as pre-computed numpy arrays
-    from material_sim.py.
-
-    Args:
-        material_sim_data: Pre-computed material simulation data from material_sim.compute().
-
-    Returns:
-        MaterialStateData with stock, pass_states, and final state coordinate arrays.
-    """
-    # Extract stock polygon coordinates (already numpy arrays)
-    stock_x, stock_z = material_sim_data.stock_polygon
-
-    # Pass through pass_states directly — they already contain coordinate arrays
-    pass_states = material_sim_data.pass_states
-
-    # Extract final state coordinate arrays (list of (x_arr, z_arr) tuples)
-    final_x = [coords[0] for coords in material_sim_data.final_state]
-    final_z = [coords[1] for coords in material_sim_data.final_state]
-
-    return MaterialStateData(
-        stock_x=stock_x,
-        stock_z=stock_z,
-        pass_states=pass_states,
-        final_x=final_x,
-        final_z=final_z,
-        move_states=material_sim_data.move_states,
-    )
 
 
 def _build_toolpath_segments(moves: List[ToolMove], data: GraphData) -> None:

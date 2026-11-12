@@ -27,9 +27,9 @@ from PyQt5.QtGui import QFont, QMouseEvent
 from gui.colors import COLORS, FONTS
 from gui.components.numeric_field import NumericField, NumericFieldConfig
 from gui.components.orientation_graphic import OrientationGraphicWidget
-from pipeline.tool_card_data import ToolCardData, TOOL_TYPES, TYPE_ORIENTATIONS, TYPE_INSERTS
-from pipeline.filter_cascade import get_valid_orientations, get_valid_inserts
-from pipeline.insert_geometry_lookup import get_angles
+from tools.tool_card_data import ToolCardData, TOOL_TYPES, TYPE_ORIENTATIONS, TYPE_INSERTS
+from tools.filter_cascade import get_valid_orientations, get_valid_inserts
+from tools.insert_geometry_lookup import get_angles
 
 
 # All possible insert codes (union of all TYPE_INSERTS values)

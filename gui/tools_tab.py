@@ -32,8 +32,8 @@ from gui.colors import COLORS
 from gui.components.top_button_bar import TopButtonBar
 from gui.components.tool_geometry_row import ToolGeometryRow
 from gui.unit_state import unit_state
-from pipeline.tool_card_data import ToolCardData
-from pipeline.tool_table_io import load_tool_table, save_tool_table, create_backup
+from tools.tool_card_data import ToolCardData
+from tools.tool_table_io import load_tool_table, save_tool_table, create_backup
 
 # LinuxCNC detection — offline mode when unavailable
 try:

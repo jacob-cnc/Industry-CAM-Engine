@@ -8,8 +8,8 @@ from PyQt5.QtWidgets import QApplication
 
 from gui import tools_tab
 from gui.components.tool_geometry_row import ToolGeometryRow
-from pipeline.tool_card_data import ToolCardData, tool_card_to_tool_def
-from pipeline.tool_table_io import (
+from tools.tool_card_data import ToolCardData, tool_card_to_tool_def
+from tools.tool_table_io import (
     LegacyToolTableError, create_backup, deserialize_tool, load_tool_table, save_tool_table, serialize_tool,
 )
 
@@ -81,17 +81,6 @@ def test_explicit_legacy_migration_preserves_original_and_versions_new_file(tmp_
     second_backup = create_backup(str(original))
     assert second_backup != backup
     assert "X1" in open(backup).read()
-
-
-def test_public_file_io_uses_same_radius_serializer(tmp_path):
-    from pipeline import file_io
-    path = str(tmp_path / "public.tbl")
-    original = tool_card_to_tool_def(tool())
-    file_io.save_tool_table([original], path)
-    assert "X+0.501000" in open(path).read()
-    recovered = file_io.load_tool_table(path)[0]
-    assert recovered.x_offset == pytest.approx(original.x_offset)
-    assert recovered.x_wear == pytest.approx(original.x_wear)
 
 
 @pytest.fixture

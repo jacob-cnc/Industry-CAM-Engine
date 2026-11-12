@@ -19,11 +19,10 @@ from models.results import PlanResult, TurningPass
 from models.validation import ValidationResult, PipelineResult, PipelineStatus, Severity
 from models.constants import TOLERANCE
 
-from geometry.zone_builder import build_zones, ZoneSet
+from geometry.zone_builder import build_zones
 from geometry.zone_query import ZoneQueryAPI
 from geometry.contour_intersect import ContourIntersect
 
-from intervals.fiber import Fiber
 
 from planners.face_planner import FacePlanner
 from planners.staircase_planner import StaircasePlanner
@@ -32,6 +31,7 @@ from planners.finish_planner import FinishPlanner
 
 from transitions.transition_planner import TransitionPlanner
 
+from validation.nose_clearance import NoseClearance
 from validation.polygon_builder import ValidationPolygons
 from validation.pre_planning_validator import validate_profile
 from validation.post_planning_validator import validate_all_moves
@@ -150,6 +150,7 @@ def execute(
         roughing_passes = staircase.plan(
             zone_query, tool, roughing_params, stock, profile.mode,
             contour_intersect=contour_intersect,
+            nose_clearance=NoseClearance.build(zone_query, tool),
         )
     else:
         # Offset-contour roughing

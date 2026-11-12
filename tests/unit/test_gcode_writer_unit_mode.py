@@ -55,13 +55,18 @@ def test_block_generators_select_diameter_mode_before_motion(operation):
             "UNC", "1/2-13", 0.5, 1 / 13, 0.04, 0.1, -0.5,
             "radial", 8, 1, 0.0, False, 200, 1,
         )
-        lines = writer.write_threading_block(params, tool, 1.0)
+        from planners.threading_planner import ThreadingPlanner
+        g76 = ThreadingPlanner().compute_g76_params(params)
+        lines = writer.write_threading_block(params, g76, tool, 1.0)
     elif operation == "grooving":
         params = GroovingParams(
             "single", False, -0.2, -0.3, 0.1, 1.0,
             False, 0.02, 0.01, 0.002, 200, 1, 0.05,
         )
-        lines = writer.write_grooving_block(params, tool, 1.0)
+        from planners.grooving_planner import GroovingPlanner
+        positions = GroovingPlanner().compute_plunge_positions(
+            params.z_start, params.z_end, params.blade_width)
+        lines = writer.write_grooving_block(params, positions, tool, 1.0)
     else:
         lines = writer.write_tool_change(tool, 200)
     _assert_diameter_mode_before_motion("\n".join(lines))

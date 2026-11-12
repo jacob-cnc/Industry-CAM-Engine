@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 from geometry.arc_entry import quadrant_centre, radius_arc_centre, radius_arc_sweep
 
@@ -52,7 +52,7 @@ class ReachProblem:
 
 def _tangents_of(c0: dict, c1: dict) -> List[Tuple[Tuple[float, float], Tuple[float, float]]]:
     """[(point (r, z), unit travel direction)] along one contour piece c0 -> c1
-    (coords from geometry.zone_builder._profile_to_radius_coords)."""
+    (coords from geometry.zone_builder.profile_to_radius_coords)."""
     p0 = (c0["x_radius"], c0["z"])
     p1 = (c1["x_radius"], c1["z"])
     d = (p1[0] - p0[0], p1[1] - p0[1])
@@ -93,8 +93,8 @@ def contour_tangents(profile) -> List[Tuple[Tuple[float, float], Tuple[float, fl
     """Every (point, unit direction) the finished contour has, in profile order,
     corner breaks included. Radius space."""
     from geometry.arc_entry import normalize_profile
-    from geometry.zone_builder import _profile_to_radius_coords
-    coords = _profile_to_radius_coords(normalize_profile(profile))
+    from geometry.zone_builder import profile_to_radius_coords
+    coords = profile_to_radius_coords(normalize_profile(profile))
     out = []
     for c0, c1 in zip(coords, coords[1:]):
         out.extend(_tangents_of(c0, c1))
@@ -185,7 +185,7 @@ def reach_messages(profile, tool) -> List[str]:
 # contour again. Everything downstream (roughing, finish, validation, G-code)
 # runs unchanged on that contour, so the unreachable material is simply left on
 # the part, and each region is reported with its X/Z range, why, and which
-# inserts from pipeline/insert_geometry_lookup.py would reach it. The operator
+# inserts from tools/insert_geometry_lookup.py would reach it. The operator
 # cuts it in its own block with a suitable tool. Multi-tool segment builds that
 # know what is already cut are future work.
 #
@@ -216,7 +216,7 @@ def _piece_geom(c0, c1):
     return None
 
 
-def _densify(coords):
+def densify_coords(coords):
     """Polyline of the contour in radius space, and for each polyline segment
     the coord piece k (coords[k] -> coords[k+1]) it lies on."""
     pts = [(coords[0]["x_radius"], coords[0]["z"])]
@@ -412,7 +412,7 @@ def _reaches(dirs, front, back, mode_id, left, tol=REACH_TOL_DEG):
 def suggest_tools(region_dirs, all_dirs, mode_id: bool):
     """(whole_part, this_region_only): insert names (with hand) from the insert
     table that reach the whole contour / only this region."""
-    from pipeline.insert_geometry_lookup import INSERT_GEOMETRY
+    from tools.insert_geometry_lookup import INSERT_GEOMETRY
     whole, region = [], []
     seen = set()
     for code in _TURNING_INSERTS:
@@ -469,7 +469,7 @@ def make_reachable(profile, tool, tol_deg: float = REACH_TOL_DEG):
     from models.profile import MachiningMode, ProfileMove, SegmentType
     from models.tool import ToolDirection
     from geometry.arc_entry import normalize_profile
-    from geometry.zone_builder import _profile_to_radius_coords
+    from geometry.zone_builder import profile_to_radius_coords
 
     if not tool_applies(tool) or not reach_problems(profile, tool, tol_deg):
         return profile, []
@@ -477,12 +477,12 @@ def make_reachable(profile, tool, tol_deg: float = REACH_TOL_DEG):
     mode_id = profile.mode == MachiningMode.ID
     left = tool.direction == ToolDirection.LEFT
     s = -1.0 if (mode_id != left) else 1.0              # r mirror (ID, LH) - see _phi
-    coords = _profile_to_radius_coords(normalize_profile(profile))
+    coords = profile_to_radius_coords(normalize_profile(profile))
     line_type = coords[0]["type"]
     regions_raw = []
 
     for kind, mirror_z, max_fall in (("fall", False, 180.0 - B), ("rise", True, F)):
-        pts, seg_piece = _densify(coords)
+        pts, seg_piece = densify_coords(coords)
         cp = _canon(pts, s, mirror_z)
         # rise: Z mirrored + order reversed turns "climb <= F" into "fall <= F"
         cpiece = list(reversed(seg_piece)) if mirror_z else seg_piece

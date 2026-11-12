@@ -1,4 +1,4 @@
-"""Shaded sections from the G-code as LinuxCNC runs it (outputs/cut_regions.py;
+"""Shaded sections from the G-code as LinuxCNC runs it (validation/cut_regions.py;
 docs/handoffs/2026-11-11-zone-shading-plan.md). The graph must be trustworthy:
 sections partition the stock exactly, their edges are where the tool cuts, and
 a program that leaves material or cuts into the part shows it."""
@@ -13,7 +13,7 @@ import pytest
 from PyQt5.QtWidgets import QApplication
 from shapely.geometry import LineString, Point
 
-from outputs.cut_regions import (
+from validation.cut_regions import (
     compute_sections, nose_offset, parse_canon, part_polygon, run_rs274, tag_sections,
 )
 from outputs.gcode_writer import GCodeWriter
@@ -246,7 +246,7 @@ def test_program_cutting_into_the_part_shows_a_gouge():
 def test_tool_without_nose_or_angles_is_not_guessed():
     """A sharp tool with no edge angles (e.g. the QCTP master tool, T99 D0 I0 J0)
     sweeps no area we can model: say so instead of painting it all as an error."""
-    from outputs.cut_regions import CutRegionsUnavailable
+    from validation.cut_regions import CutRegionsUnavailable
     bare = replace(CNMG, nose_radius=0.0, front_angle=0.0, back_angle=0.0)
     res = _run(STEPPED, bare)
     with pytest.raises(CutRegionsUnavailable, match="no nose radius or edge angles"):
@@ -275,11 +275,11 @@ def test_owner_reference_programs_check_clean(path, block):
     runs in LinuxCNC's interpreter, sections partition the stock, no gouge and
     nothing left that should go (or, for a tool with no nose radius or angles,
     an honest 'can't tell')."""
-    from outputs.cut_regions import CutRegionsUnavailable
+    from validation.cut_regions import CutRegionsUnavailable
     from pipeline.model_builder import build_from_fields
     from pipeline.pipeline import execute
-    from pipeline.tool_card_data import tool_card_to_tool_def
-    from pipeline.tool_table_io import load_tool_table
+    from tools.tool_card_data import tool_card_to_tool_def
+    from tools.tool_table_io import load_tool_table
     repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     tools = {c.tool_number: tool_card_to_tool_def(c) for c in load_tool_table(os.path.join(repo, "tool.tbl"))}
     pdata = block.get("params_data", block)

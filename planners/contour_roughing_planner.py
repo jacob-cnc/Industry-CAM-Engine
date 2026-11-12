@@ -1,24 +1,8 @@
 """Offset-contour roughing planner for Industry CAM Engine (OD mode)."""
-import math
-from typing import List, TYPE_CHECKING
-from build123d import BuildSketch, BuildLine, Line, RadiusArc, make_face
-from build123d import offset as b3d_offset, Kind
-from OCP.TopExp import TopExp_Explorer
-from OCP.TopAbs import TopAbs_FACE
-from OCP.TopoDS import TopoDS
-from OCP.BRepAdaptor import BRepAdaptor_Curve
-from OCP.GeomAbs import GeomAbs_Line, GeomAbs_Circle
-from OCP.BRepTools import BRepTools
-from OCP.BRepAlgoAPI import BRepAlgoAPI_Common
+from geometry.kernel import clip_to_box, first_ocp_face, offset_face, translate_face, wire_edges
 from models.results import TurningPass
 from models.moves import ToolMove, MoveType, PassType
-from models.params import RoughingParams
-from models.stock import StockDef
-from models.profile import ClosedProfile, ProfileMove, SegmentType, MachiningMode
-from models.constants import TOLERANCE
-if TYPE_CHECKING:
-    from geometry.zone_query import ZoneQueryAPI
-    from geometry.zone_builder import ZoneSet
+from models.profile import MachiningMode
 
 
 class ContourRoughingPlanner:
@@ -38,12 +22,13 @@ class ContourRoughingPlanner:
         # applied). Until 2026-11-10 this planner built its own face from the
         # raw segments: no corner breaks and RadiusArc(-radius), i.e. every
         # arc bulged the wrong way (the "offset_contour gouges concave
-        # fillets" symptom). _build_face is kept only as a fallback.
+        # fillets" symptom). That builder was kept as a fallback until
+        # 2026-11-12; it could only run without a zone set (the pipeline always
+        # has one) and would have produced exactly those gouges, so it is gone.
         face = getattr(zone_set, "finished_part", None) if zone_set is not None else None
         if face is None:
-            face = self._build_face(segments)
-        if face is None:
-            return []
+            raise ValueError("Contour roughing needs the zone builder's finished part "
+                             "(zone_set.finished_part); none was given.")
         passes_inside_out = []
         offset = fin_r + doc_r
         # Roughing is uncompensated: LinuxCNC drives the imaginary tip and the
@@ -58,7 +43,7 @@ class ContourRoughingPlanner:
         for idx in range(100):
             ocp_face = self._do_offset(face, offset + R)
             if ocp_face is not None and R > 0:
-                ocp_face = self._translate(ocp_face, -off[0], -off[1])
+                ocp_face = translate_face(ocp_face, -off[0], -off[1])
             if ocp_face is None:
                 break
             edges = self._clip_and_extract(ocp_face, fin_r, stock_r, z_begin, stock.z_end)
@@ -78,89 +63,10 @@ class ContourRoughingPlanner:
                 pass_index=i, pass_type=p.pass_type, moves=p.moves, swept_region=p.swept_region))
         return result
 
-    def _build_face(self, segments):
-        """Build finished part face (profile + closure to centerline)."""
-        try:
-            coords = [{"type": s.segment_type, "x_radius": s.x / 2.0,
-                       "z": s.z, "radius": s.radius,
-                       "quadrant": s.quadrant, "quadrant_sign": s.quadrant_sign} for s in segments]
-            lx, lz = segments[-1].x / 2.0, segments[-1].z
-            fx, fz = segments[0].x / 2.0, segments[0].z
-            if abs(lx) > 1e-10:
-                coords.append({"type": SegmentType.LINE, "x_radius": 0.0, "z": lz, "radius": 0.0})
-            coords.append({"type": SegmentType.LINE, "x_radius": 0.0, "z": 0.0, "radius": 0.0})
-            if abs(fx) > 1e-10 or abs(fz) > 1e-10:
-                coords.append({"type": SegmentType.LINE, "x_radius": fx, "z": fz, "radius": 0.0})
-            with BuildSketch() as sk:
-                with BuildLine():
-                    for i in range(len(coords)):
-                        ni = (i + 1) % len(coords)
-                        c, t = coords[i], coords[ni]
-                        cx, cz = c["x_radius"], c["z"]
-                        tx, tz = t["x_radius"], t["z"]
-                        if abs(cx - tx) < 1e-10 and abs(cz - tz) < 1e-10:
-                            continue
-                        if t.get("quadrant", False):
-                            # Quadrant arc: polyline ellipse approximation
-                            from models.constants import TOLERANCE as _TOL
-                            _qs = t.get("quadrant_sign", 1)
-                            _dx = tx - cx
-                            _dz = tz - cz
-                            if abs(_dx) < _TOL or abs(_dz) < _TOL:
-                                _arc_r = abs(_dz) if abs(_dx) < _TOL else abs(_dx)
-                                RadiusArc((cx, cz), (tx, tz), -_arc_r * _qs)
-                            else:
-                                _b, _a = abs(_dx), abs(_dz)
-                                if _qs == 1:
-                                    _ecx, _ecz = cx, tz
-                                    _sx = 1.0 if _dx > 0 else -1.0
-                                    _sz = -1.0 if _dz > 0 else 1.0
-                                else:
-                                    _ecx, _ecz = tx, cz
-                                    _sx = -1.0 if _dx > 0 else 1.0
-                                    _sz = 1.0 if _dz > 0 else -1.0
-                                _npts = 64
-                                for _j in range(_npts):
-                                    _t0 = (math.pi / 2.0) * _j / _npts
-                                    _t1 = (math.pi / 2.0) * (_j + 1) / _npts
-                                    if _qs == 1:
-                                        _x0 = _ecx + _sx * _b * math.sin(_t0)
-                                        _z0 = _ecz + _sz * _a * math.cos(_t0)
-                                        _x1 = _ecx + _sx * _b * math.sin(_t1)
-                                        _z1 = _ecz + _sz * _a * math.cos(_t1)
-                                    else:
-                                        _x0 = _ecx + _sx * _b * math.cos(_t0)
-                                        _z0 = _ecz + _sz * _a * math.sin(_t0)
-                                        _x1 = _ecx + _sx * _b * math.cos(_t1)
-                                        _z1 = _ecz + _sz * _a * math.sin(_t1)
-                                    if abs(_x0 - _x1) > 1e-10 or abs(_z0 - _z1) > 1e-10:
-                                        Line((_x0, _z0), (_x1, _z1))
-                        elif t["type"] == SegmentType.ARC and t["radius"] != 0.0:
-                            RadiusArc((cx, cz), (tx, tz), -t["radius"])
-                        else:
-                            Line((cx, cz), (tx, tz))
-                make_face()
-            return sk.sketch
-        except Exception:
-            return None
-
-    @staticmethod
-    def _translate(ocp_face, dr, dz):
-        """The face moved by (dr, dz) in the sketch plane (X = radius, Y = Z)."""
-        from OCP.gp import gp_Trsf, gp_Vec
-        from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
-        from OCP.TopoDS import TopoDS
-        tr = gp_Trsf()
-        tr.SetTranslation(gp_Vec(dr, dz, 0.0))
-        return TopoDS.Face_s(BRepBuilderAPI_Transform(ocp_face, tr, True).Shape())
-
     def _do_offset(self, face, dist):
         """Offset face outward by dist. Returns OCP face or None."""
-        from geometry.kernel_offset import offset_face
         try:
-            r = offset_face(face, dist, what="contour roughing pass")
-            fs = r.faces() if hasattr(r, 'faces') else []
-            return fs[0].wrapped if fs else None
+            return first_ocp_face(offset_face(face, dist, what="contour roughing pass"))
         except Exception:
             return None
 
@@ -174,31 +80,11 @@ class ContourRoughingPlanner:
         Retract goes to stock OD + 0.005" clearance (safe from arc bulge).
         """
         try:
-            with BuildSketch() as cs:
-                with BuildLine():
-                    Line((x_min_r, z_top), (x_max_r, z_top))
-                    Line((x_max_r, z_top), (x_max_r, z_bot))
-                    Line((x_max_r, z_bot), (x_min_r, z_bot))
-                    Line((x_min_r, z_bot), (x_min_r, z_top))
-                make_face()
-            cf = cs.sketch.faces()
-            if not cf:
-                return []
-            op = BRepAlgoAPI_Common(ocp_face, cf[0].wrapped)
-            op.Build()
-            if not op.IsDone():
-                return []
-            shape = op.Shape()
-            # Collect ALL faces from the clip result
-            fe = TopExp_Explorer(shape, TopAbs_FACE)
             all_face_edges = []
-            while fe.More():
-                face = TopoDS.Face_s(fe.Current())
-                wire = BRepTools.OuterWire_s(face)
+            for wire in clip_to_box(ocp_face, x_min_r, x_max_r, z_top, z_bot):
                 edges = self._wire_to_edges(wire, x_min_r * 2, x_max_r * 2, z_top, z_bot)
                 if edges:
                     all_face_edges.append(edges)
-                fe.Next()
         except Exception:
             return []
 
@@ -217,41 +103,8 @@ class ContourRoughingPlanner:
 
     def _wire_to_edges(self, wire, xmin_d, xmax_d, z_top, z_bot):
         """Extract edges from wire, filter clip boundaries, order top-to-bottom."""
-        from OCP.BRepTools import BRepTools_WireExplorer
-        from OCP.BRep import BRep_Tool
         try:
-            exp = BRepTools_WireExplorer(wire)
-            raw = []
-            while exp.More():
-                edge = exp.Current()
-                cur = BRepAdaptor_Curve(edge)
-                pf = cur.Value(cur.FirstParameter())
-                pl = cur.Value(cur.LastParameter())
-                v = exp.CurrentVertex()
-                vp = BRep_Tool.Pnt_s(v)
-                df = ((vp.X() - pf.X())**2 + (vp.Y() - pf.Y())**2)**0.5
-                dl = ((vp.X() - pl.X())**2 + (vp.Y() - pl.Y())**2)**0.5
-                ps, pe = (pf, pl) if df <= dl else (pl, pf)
-                sd, sz = ps.X() * 2, ps.Y()
-                ed, ez = pe.X() * 2, pe.Y()
-                ct = cur.GetType()
-                if ct == GeomAbs_Line:
-                    raw.append(((sd, sz), (ed, ez), "LINE", None, 0.0))
-                elif ct == GeomAbs_Circle:
-                    # Canonical <= 90 deg pieces with the kernel's true sweep
-                    # (geometry/arc_math.py), so _to_moves' short-sweep label
-                    # is always right, even after _order flips an edge.
-                    from geometry.arc_math import arc_from_kernel, split_at_quadrants
-                    ci = cur.Circle()
-                    loc = ci.Location()
-                    pm = cur.Value(0.5 * (cur.FirstParameter() + cur.LastParameter()))
-                    arc = arc_from_kernel((ps.X(), ps.Y()), (pm.X(), pm.Y()), (pe.X(), pe.Y()),
-                                          (loc.X(), loc.Y()), ci.Radius())
-                    for piece in split_at_quadrants(arc):
-                        raw.append(((piece.start[0] * 2, piece.start[1]),
-                                    (piece.end[0] * 2, piece.end[1]), "ARC",
-                                    (loc.X() * 2, loc.Y()), ci.Radius()))
-                exp.Next()
+            raw = wire_edges(wire, split_arcs=True)
         except Exception:
             return []
         tol = 1e-4
@@ -338,7 +191,7 @@ class ContourRoughingPlanner:
                 # the rule every other planner uses: since the 2026-11-10
                 # G-code dialect fix LinuxCNC ran these arcs the long way
                 # round (e.g. -359 deg instead of +1 deg).
-                from geometry.arc_math import short_sweep
+                from geometry.kernel import short_sweep
                 sw = short_sweep((s[0] / 2.0, s[1]), (en[0] / 2.0, en[1]), (ctr[0] / 2.0, ctr[1]))
                 mt = MoveType.ARC_CW if sw < 0 else MoveType.ARC_CCW
                 moves.append(ToolMove(mt, en[0], en[1], feed=params.feed,

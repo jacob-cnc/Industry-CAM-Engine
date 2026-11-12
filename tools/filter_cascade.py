@@ -10,7 +10,7 @@ Zero Qt dependencies — pure data layer.
 
 from typing import List
 
-from pipeline.tool_card_data import TYPE_ORIENTATIONS, TYPE_INSERTS
+from tools.tool_card_data import TYPE_ORIENTATIONS, TYPE_INSERTS
 
 
 def get_valid_orientations(tool_type: str) -> List[int]:

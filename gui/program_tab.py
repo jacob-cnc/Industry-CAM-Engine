@@ -31,7 +31,6 @@ from pipeline.model_builder import build_from_fields
 from outputs.gcode_writer import GCodeWriter
 from outputs.graph_adapter import convert as graph_convert
 from outputs.gcode_parser import parse as parse_gcode
-from outputs import material_sim
 from models.tool import ToolDef, ToolOrientation, ToolDirection, ToolType
 from models.validation import PipelineStatus
 from geometry.arc_helpers import is_arc_within_x_bounds
@@ -1093,7 +1092,7 @@ class ProgramTab(QWidget):
         profile block, computed from its G-code through LinuxCNC's interpreter,
         plus any program error the check finds. If that can't run, say so and
         shade only the uncut regions (never a guessed picture)."""
-        from outputs.cut_regions import compute_sections, CutRegionsUnavailable, geom_rings
+        from validation.cut_regions import compute_sections, CutRegionsUnavailable, geom_rings
         from shapely.ops import unary_union
         parts = {k: [] for k in ("face", "rough", "cleanup", "finish", "finished", "uncut",
                                  "gouge", "not_removed")}
@@ -1249,7 +1248,7 @@ class ProgramTab(QWidget):
             if hasattr(self, '_profile_contour_segments') and self._profile_contour_segments:
                 self._sim_viewer.set_profile_overlay(self._profile_contour_segments)
             # Drawn profile (above) AND what the program cuts: shaded sections
-            # from the G-code as LinuxCNC runs it (outputs/cut_regions.py)
+            # from the G-code as LinuxCNC runs it (validation/cut_regions.py)
             self._show_cut_sections()
 
             # Emit signals
@@ -1456,8 +1455,10 @@ class ProgramTab(QWidget):
         tool_def = self._resolve_tool_for_block(block)
         # Use a reasonable stock diameter for safe_x calculation
         stock_dia = data.get("major_diameter", 0.5) + 0.1
+        from planners.threading_planner import ThreadingPlanner
+        g76 = ThreadingPlanner().compute_g76_params(params)
         lines.extend(writer.write_threading_block(
-            params, tool_def, stock_dia=stock_dia,
+            params, g76, tool_def, stock_dia=stock_dia,
             unit_mode=unit_state.mode.value,
         ))
         return lines
@@ -1496,8 +1497,11 @@ class ProgramTab(QWidget):
 
         tool_def = self._resolve_tool_for_block(block)
         stock_dia = data.get("start_diameter", 1.0) + 0.25
+        from planners.grooving_planner import GroovingPlanner
+        plunge_positions = GroovingPlanner().compute_plunge_positions(
+            params.z_start, params.z_end, params.blade_width)
         lines.extend(writer.write_grooving_block(
-            params, tool_def, stock_dia=stock_dia,
+            params, plunge_positions, tool_def, stock_dia=stock_dia,
             unit_mode=unit_state.mode.value,
         ))
         return lines

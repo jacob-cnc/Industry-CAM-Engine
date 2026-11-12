@@ -13,7 +13,7 @@ Only used with staircase strategy — offset-contour's last pass IS the cleanup.
 Imports from: models/, geometry/ (for offset computation)
 """
 
-from typing import List, Tuple, TYPE_CHECKING
+from typing import List, TYPE_CHECKING
 
 from models.results import TurningPass
 from models.moves import ToolMove, MoveType, PassType
@@ -22,8 +22,10 @@ from models.params import RoughingParams
 from models.stock import StockDef
 from models.profile import ClosedProfile, ProfileMove, SegmentType, MachiningMode
 from models.constants import TOLERANCE
-from geometry.arc_helpers import is_arc_within_x_bounds
-from geometry.zone_builder import _profile_to_radius_coords
+from geometry.kernel import (
+    clip_to_box, face_from_coords_polyline_quadrants, first_ocp_face, is_arc_within_x_bounds,
+    offset_face_sharp_only, profile_to_radius_coords, wire_edges,
+)
 
 if TYPE_CHECKING:
     from geometry.zone_query import ZoneQueryAPI, EdgeData
@@ -236,16 +238,6 @@ class CleanupPlanner:
 
         Returns empty list if offset fails (triggers fallback to zone boundary).
         """
-        from build123d import (
-            BuildSketch, BuildLine, Line, RadiusArc, make_face,
-            offset as b3d_offset, Kind,
-        )
-        from OCP.TopExp import TopExp_Explorer
-        from OCP.TopAbs import TopAbs_EDGE, TopAbs_WIRE, TopAbs_FACE
-        from OCP.TopoDS import TopoDS
-        from OCP.BRepAdaptor import BRepAdaptor_Curve
-        from OCP.GeomAbs import GeomAbs_Line, GeomAbs_Circle
-        from OCP.BRepTools import BRepTools
 
         if len(segments) < 2:
             return []
@@ -254,7 +246,7 @@ class CleanupPlanner:
         try:
             # Use corner-break-aware coords if profile is available
             if profile is not None:
-                coords = _profile_to_radius_coords(profile)
+                coords = profile_to_radius_coords(profile)
             else:
                 coords = []
                 for seg in segments:
@@ -290,68 +282,8 @@ class CleanupPlanner:
             if abs(closure_x - first_x_r) > 1e-10 or abs(0.0 - first_z) > 1e-10:
                 coords.append({"type": SegmentType.LINE, "x_radius": first_x_r, "z": first_z, "radius": 0.0})
 
-            # Build face
-            with BuildSketch() as sketch:
-                with BuildLine():
-                    for i in range(len(coords)):
-                        next_i = (i + 1) % len(coords)
-                        current = coords[i]
-                        target = coords[next_i]
-
-                        cx, cz = current["x_radius"], current["z"]
-                        tx, tz = target["x_radius"], target["z"]
-
-                        if abs(cx - tx) < 1e-10 and abs(cz - tz) < 1e-10:
-                            continue
-
-                        if target.get("quadrant", False):
-                            # Quadrant arc: polyline ellipse approximation
-                            import math as _math
-                            from models.constants import TOLERANCE as _TOL
-                            quadrant_sign = target.get("quadrant_sign", 1)
-                            _dx = tx - cx
-                            _dz = tz - cz
-                            _same_x = abs(_dx) < _TOL
-                            _same_z = abs(_dz) < _TOL
-
-                            if _same_x or _same_z:
-                                _arc_r = abs(_dz) if _same_x else abs(_dx)
-                                _signed_r = -_arc_r * quadrant_sign
-                                RadiusArc((cx, cz), (tx, tz), _signed_r)
-                            else:
-                                _b, _a = abs(_dx), abs(_dz)
-                                if quadrant_sign == 1:
-                                    _ecx, _ecz = cx, tz
-                                    _sx = 1.0 if _dx > 0 else -1.0
-                                    _sz = -1.0 if _dz > 0 else 1.0
-                                else:
-                                    _ecx, _ecz = tx, cz
-                                    _sx = -1.0 if _dx > 0 else 1.0
-                                    _sz = 1.0 if _dz > 0 else -1.0
-                                _npts = 64
-                                for _j in range(_npts):
-                                    _t0 = (_math.pi / 2.0) * _j / _npts
-                                    _t1 = (_math.pi / 2.0) * (_j + 1) / _npts
-                                    if quadrant_sign == 1:
-                                        _x0 = _ecx + _sx * _b * _math.sin(_t0)
-                                        _z0 = _ecz + _sz * _a * _math.cos(_t0)
-                                        _x1 = _ecx + _sx * _b * _math.sin(_t1)
-                                        _z1 = _ecz + _sz * _a * _math.cos(_t1)
-                                    else:
-                                        _x0 = _ecx + _sx * _b * _math.cos(_t0)
-                                        _z0 = _ecz + _sz * _a * _math.sin(_t0)
-                                        _x1 = _ecx + _sx * _b * _math.cos(_t1)
-                                        _z1 = _ecz + _sz * _a * _math.sin(_t1)
-                                    if abs(_x0 - _x1) > 1e-10 or abs(_z0 - _z1) > 1e-10:
-                                        Line((_x0, _z0), (_x1, _z1))
-                        elif target["type"] == SegmentType.ARC and target["radius"] != 0.0:
-                            b3d_radius = target["radius"]
-                            RadiusArc((cx, cz), (tx, tz), b3d_radius)
-                        else:
-                            Line((cx, cz), (tx, tz))
-                make_face()
-
-            finished_part_face = sketch.sketch
+            # Build face (kernel: geometry/face_ops)
+            finished_part_face = face_from_coords_polyline_quadrants(coords)
         except Exception:
             return []
         # Keep zone is ALWAYS larger than finished part (protective buffer)
@@ -359,28 +291,21 @@ class CleanupPlanner:
         try:
             offset_amount = fin_allowance_radius
 
-            offset_face = b3d_offset(finished_part_face, amount=offset_amount, kind=Kind.INTERSECTION)
+            offset_face = offset_face_sharp_only(finished_part_face, offset_amount)
         except Exception:
             return []
 
         # Step 3: Extract boundary wire from the offset face
         try:
-            # Get the OCP face from the offset result
-            offset_faces = offset_face.faces() if hasattr(offset_face, 'faces') else []
-            if not offset_faces:
+            ocp_face = first_ocp_face(offset_face)
+            if ocp_face is None:
                 return []
-
-            ocp_face = offset_faces[0].wrapped
-            outer_wire = BRepTools.OuterWire_s(ocp_face)
         except Exception:
             return []
 
         # Step 4: Clip the offset wire to the turning region
         # Build a clipping face and intersect with the offset face to get only the turning portion
         try:
-            from build123d import BuildSketch, BuildLine, Line, make_face
-            from OCP.BRepAlgoAPI import BRepAlgoAPI_Common
-
             z_top = z0_fin  # Use the same Z start as the cleanup pass itself
             # If the profile has corner breaks near Z=0 (chamfer at face/turning
             # junction), extend the clip to include that geometry.
@@ -412,92 +337,16 @@ class CleanupPlanner:
                 x_min_r = pilot_r
                 x_max_r = roughing_boundary_r + fin_allowance_radius * 2  # Include the boundary edge
 
-            with BuildSketch() as clip_sketch:
-                with BuildLine():
-                    Line((x_min_r, z_top), (x_max_r, z_top))
-                    Line((x_max_r, z_top), (x_max_r, z_bot))
-                    Line((x_max_r, z_bot), (x_min_r, z_bot))
-                    Line((x_min_r, z_bot), (x_min_r, z_top))
-                make_face()
-
-            clip_faces = clip_sketch.sketch.faces()
-            if not clip_faces:
+            wires = clip_to_box(ocp_face, x_min_r, x_max_r, z_top, z_bot)
+            if not wires:
                 return []
-
-            # Intersect offset face with clip face
-            common_op = BRepAlgoAPI_Common(ocp_face, clip_faces[0].wrapped)
-            common_op.Build()
-            if not common_op.IsDone():
-                return []
-
-            # Extract the outer wire of the clipped result
-            clipped_shape = common_op.Shape()
-
-            # Get the face from the clipped result
-            face_explorer = TopExp_Explorer(clipped_shape, TopAbs_FACE)
-            if not face_explorer.More():
-                return []
-            clipped_face = TopoDS.Face_s(face_explorer.Current())
-            clipped_wire = BRepTools.OuterWire_s(clipped_face)
+            clipped_wire = wires[0]
         except Exception:
             return []
 
         # Step 5: Extract edges from the clipped wire in order
         try:
-            from OCP.BRepTools import BRepTools_WireExplorer
-            from OCP.BRep import BRep_Tool
-
-            wire_explorer = BRepTools_WireExplorer(clipped_wire)
-            all_edges = []
-
-            while wire_explorer.More():
-                edge = wire_explorer.Current()
-                curve = BRepAdaptor_Curve(edge)
-
-                p_first = curve.Value(curve.FirstParameter())
-                p_last = curve.Value(curve.LastParameter())
-
-                # Determine edge direction from wire traversal
-                vertex = wire_explorer.CurrentVertex()
-                v_pnt = BRep_Tool.Pnt_s(vertex)
-                dist_to_first = ((v_pnt.X() - p_first.X())**2 + (v_pnt.Y() - p_first.Y())**2)**0.5
-                dist_to_last = ((v_pnt.X() - p_last.X())**2 + (v_pnt.Y() - p_last.Y())**2)**0.5
-
-                if dist_to_first <= dist_to_last:
-                    p_start, p_end = p_first, p_last
-                else:
-                    p_start, p_end = p_last, p_first
-
-                start_x_dia = p_start.X() * 2.0
-                start_z = p_start.Y()
-                end_x_dia = p_end.X() * 2.0
-                end_z = p_end.Y()
-
-                curve_type = curve.GetType()
-
-                if curve_type == GeomAbs_Line:
-                    all_edges.append((
-                        (start_x_dia, start_z),
-                        (end_x_dia, end_z),
-                        "LINE",
-                        None,
-                        0.0,
-                    ))
-                elif curve_type == GeomAbs_Circle:
-                    circle = curve.Circle()
-                    center = circle.Location()
-                    center_x_dia = center.X() * 2.0
-                    center_z = center.Y()
-                    radius = circle.Radius()
-                    all_edges.append((
-                        (start_x_dia, start_z),
-                        (end_x_dia, end_z),
-                        "ARC",
-                        (center_x_dia, center_z),
-                        radius,
-                    ))
-
-                wire_explorer.Next()
+            all_edges = wire_edges(clipped_wire, split_arcs=False)
 
             # The clipped wire is a closed polygon. We need to extract just the
             # turning portion (the profile-following edges), not the clip boundary edges.
@@ -686,7 +535,7 @@ class CleanupPlanner:
                 if direction in ("cw", "ccw"):
                     sweep = -1.0 if direction == "cw" else 1.0
                 else:                                   # legacy 5-tuple callers
-                    from geometry.arc_math import short_sweep
+                    from geometry.kernel import short_sweep
                     sweep = short_sweep((start[0] / 2.0, start[1]), (end[0] / 2.0, end[1]),
                                         (center[0] / 2.0, center[1]))
 

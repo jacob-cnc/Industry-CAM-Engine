@@ -149,7 +149,7 @@ def test_skipped_without_edge_angles_or_for_other_tool_types():
 
 
 def test_tool_table_angles_reach_the_tool_def():
-    from pipeline.tool_card_data import tool_card_to_tool_def, tool_def_to_tool_card
+    from tools.tool_card_data import tool_card_to_tool_def, tool_def_to_tool_card
     card = tool_def_to_tool_card(CNMG)
     assert (card.front_angle, card.back_angle) == (95.0, 175.0)
     back = tool_card_to_tool_def(card)

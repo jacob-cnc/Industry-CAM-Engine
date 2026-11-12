@@ -242,7 +242,7 @@ class MainWindow(QMainWindow):
         Args:
             tool_number: The tool number that was modified.
         """
-        from pipeline.tool_card_data import tool_card_to_tool_def
+        from tools.tool_card_data import tool_card_to_tool_def
         logger.info("Tool T%d modified in tool table", tool_number)
         # If the modified tool is the active tool, mark program stale
         if hasattr(self._program_tab, '_active_tool'):
@@ -258,7 +258,7 @@ class MainWindow(QMainWindow):
         Prevents the Program tab from falling back to a hardcoded T1 default
         when the user generates without explicitly selecting a tool first.
         """
-        from pipeline.tool_card_data import tool_card_to_tool_def
+        from tools.tool_card_data import tool_card_to_tool_def
         tools = self._tools_tab.get_tools()
         if tools:
             # Use the first non-reference tool (skip T99 master reference)
@@ -280,7 +280,7 @@ class MainWindow(QMainWindow):
         Args:
             tool_def: The ToolCardData that was selected.
         """
-        from pipeline.tool_card_data import tool_card_to_tool_def
+        from tools.tool_card_data import tool_card_to_tool_def
         converted = tool_card_to_tool_def(tool_def)
         logger.info("Tool T%d selected in tool table", converted.tool_number)
         self._program_tab.set_active_tool(converted)
@@ -294,7 +294,7 @@ class MainWindow(QMainWindow):
         Returns:
             ToolDef or None if tool not found.
         """
-        from pipeline.tool_card_data import tool_card_to_tool_def
+        from tools.tool_card_data import tool_card_to_tool_def
         card = self._tools_tab.get_tool(tool_number)
         if card is not None:
             return tool_card_to_tool_def(card)

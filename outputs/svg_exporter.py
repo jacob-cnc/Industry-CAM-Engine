@@ -20,13 +20,6 @@ _PROFILE_STROKE = "#FFFFFF"
 _STOCK_STROKE = "#6B7B8A"
 
 
-def _boundary_to_radius_coords(
-    boundary: List[Tuple[float, float]],
-) -> List[Tuple[float, float]]:
-    """Boundary points are already (radius, Z). Return as-is."""
-    return boundary
-
-
 def _svg_polygon(
     points: List[Tuple[float, float]],
     fill: str,

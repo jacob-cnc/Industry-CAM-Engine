@@ -2,8 +2,7 @@
 
 Imports from: models/ only
 Does NOT import PyQtGraph, Qt, Build123d, or Shapely.
-"""
 
-from outputs.gcode_writer import GCodeWriter
-from outputs.gcode_parser import parse as parse_gcode
-from outputs.graph_adapter import convert as convert_to_graph_data, GraphData
+Import submodules directly (e.g. `from outputs.<module> import X`); this
+package re-exports nothing, so importing one light module never loads the rest.
+"""

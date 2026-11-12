@@ -55,7 +55,7 @@ COLORS = {
     "graph_warning_region": "#E56E7233",
     "graph_roundtrip": "#A8D8CC80",
     "graph_tool_dot": "#FFFFFF",
-    # Shaded sections after Generate (outputs/cut_regions.py; owner: finished = steel)
+    # Shaded sections after Generate (validation/cut_regions.py; owner: finished = steel)
     "graph_sec_finished": "#8DA4BC70",
     "graph_sec_face": "#9A7FD045",
     "graph_sec_rough": "#4C7FB845",

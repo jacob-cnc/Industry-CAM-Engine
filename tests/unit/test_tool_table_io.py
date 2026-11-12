@@ -1,4 +1,4 @@
-"""Unit tests for pipeline.tool_table_io — ToolTableSerializer module.
+"""Unit tests for tools.tool_table_io — ToolTableSerializer module.
 
 Tests serialization, deserialization, file I/O, and backup creation.
 """
@@ -8,8 +8,8 @@ import tempfile
 
 import pytest
 
-from pipeline.tool_card_data import ToolCardData
-from pipeline.tool_table_io import (
+from tools.tool_card_data import ToolCardData
+from tools.tool_table_io import (
     serialize_tool,
     deserialize_tool,
     save_tool_table,

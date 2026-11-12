@@ -6,6 +6,14 @@ the distinction between the owner's verbatim request and later design advice.
 
 ## Proposed
 
+- [Structure cleanup: work log + result](2026-11-12-structure-cleanup-log.md)
+  - Status: branch `claude/structure-cleanup` pushed, NOT merged (owner review). Behaviour-
+    neutral reorganisation verified step by step (suite + regenerated 21-program corpus through
+    the GUI's own Generate, machinist compare: 16 SAME, 5 identical refusals). Dependency
+    errors 62 → 4 (planners 0); geometry/kernel.py facade (owner rule (a)); architecture
+    ratchet test. Open owner decisions listed at the end of the log.
+  - Next: `claude/hand-math-kernel` (hand-math inquiry, from this branch).
+
 - Architecture check debt from the 2026-11-11 work (merged to main as-is, owner OK)
   - Status: `python -m validation.architecture_check` failed on main before the
     merge (62 errors) and fails after it (88). The 26 new ones come from the
