@@ -1,5 +1,7 @@
 # Claude status
 
+## 2026-11-12 — MAIN at G76 merge (tag lathe-2026-11-12-g76); claude/run-overrides awaits live test; no active claims
+
 ## 2026-11-12 — MAIN at ee4331b (cycle time merged); REVIEW-READY: claude/g76-fix, claude/run-overrides (live test)
 
 - claude/g76-fix: G76 per LinuxCNC semantics (drive line .020 outside crest, diameter J/K, lead, safe ID approach/retract).
