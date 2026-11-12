@@ -15,8 +15,13 @@ writer's, unchanged (each one's history is in its comment):
   * arc pieces are re-joined (the kernel splits arcs <= 90 deg);
   * concave arcs no larger than the nose radius are cut as sharp corners;
   * a comp lead-out stops the nose at the contour end when material lies
-    beyond it;
+    beyond it (kernel point-in-face queries, supplied by the pipeline);
   * line-line corners LinuxCNC comp cannot reach are refused here.
+
+Geometry answers come from the kernel (a sharpened corner = the kernel's
+line intersection); what remains is move arithmetic (directions, back-off
+along a move) and check_concave_corners, which predicts LinuxCNC's OWN comp
+arithmetic (R*tan(turn/2)) rather than part geometry.
 
 Points are (X diameter, Z).
 """
@@ -26,7 +31,7 @@ import math
 from dataclasses import replace
 from typing import Callable, List, Optional, Tuple
 
-from geometry.kernel import short_sweep
+from geometry.kernel import line_intersection, short_sweep
 from models.constants import CONTOUR_FEED_IN_DIA  # noqa: F401  (documented: the writer's feed-in)
 from models.moves import MoveType
 from models.results import CompContour, SharpenedCorner
@@ -293,20 +298,6 @@ def sharpen_small_concave_arcs(moves, start: Point, r: float, comp_code: str,
         del mv[i]
         done.append(SharpenedCorner(radius=radius, corner=corner))
     return mv, done
-
-
-def line_intersection(p0: Point, p1: Point, q0: Point, q1: Point) -> Optional[Point]:
-    """Intersection of line p0-p1 with line q0-q1; points are (X dia, Z).
-    Solved in (X radius, Z). None if parallel."""
-    ax, az = p0[0] / 2.0, p0[1]
-    dx, dz = p1[0] / 2.0 - ax, p1[1] - az
-    bx, bz = q0[0] / 2.0, q0[1]
-    ex, ez = q1[0] / 2.0 - bx, q1[1] - bz
-    den = dx * ez - dz * ex
-    if abs(den) < 1e-12 * max(1.0, math.hypot(dx, dz) * math.hypot(ex, ez)):
-        return None
-    s = ((bx - ax) * ez - (bz - az) * ex) / den
-    return (2.0 * (ax + s * dx), az + s * dz)
 
 
 def check_concave_corners(path, r: float, comp_code: str, label: str) -> None:

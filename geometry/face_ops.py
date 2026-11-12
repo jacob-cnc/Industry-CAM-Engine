@@ -110,3 +110,28 @@ def wire_edges(wire) -> list:
                             (loc.X() * 2, loc.Y()), ci.Radius()))
         exp.Next()
     return out
+
+
+def line_intersection(p0, p1, q0, q1):
+    """Where the infinite line through p0, p1 meets the one through q0, q1,
+    or None if they are parallel (or a line is degenerate). Points are
+    (X diameter, Z); solved by the kernel (IntAna2d) in radius space."""
+    from OCP.IntAna2d import IntAna2d_AnaIntersection
+    from OCP.gp import gp_Dir2d, gp_Lin2d, gp_Pnt2d
+
+    def lin(a, b):
+        d = (b[0] / 2.0 - a[0] / 2.0, b[1] - a[1])
+        if abs(d[0]) < 1e-15 and abs(d[1]) < 1e-15:
+            return None
+        return gp_Lin2d(gp_Pnt2d(a[0] / 2.0, a[1]), gp_Dir2d(*d))
+
+    la, lb = lin(p0, p1), lin(q0, q1)
+    if la is None or lb is None:
+        return None
+    inter = IntAna2d_AnaIntersection(la, lb)
+    if not inter.IsDone() or inter.ParallelElements() or inter.IdenticalElements() \
+            or inter.NbPoints() != 1:
+        return None
+    pt = inter.Point(1).Value()
+    return (2.0 * pt.X(), pt.Y())
+
