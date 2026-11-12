@@ -1134,7 +1134,7 @@ class ProgramTab(QWidget):
         shade only the uncut regions (never a guessed picture)."""
         from validation.cut_regions import compute_sections, CutRegionsUnavailable, geom_rings
         from shapely.ops import unary_union
-        from validation.rapid_collision import check_rapids, operator_findings
+        from validation.rapid_collision import HIT_ERROR, check_rapids, operator_findings
         parts = {k: [] for k in ("face", "rough", "cleanup", "finish", "finished", "uncut",
                                  "gouge", "not_removed")}
         self._program_errors = []
@@ -1153,7 +1153,9 @@ class ProgramTab(QWidget):
                 errors, notes = operator_findings(reports)
                 self._program_errors.extend(errors)
                 self._generate_notes.extend(notes)
-                parts["gouge"].extend(r.hit_geom for r in reports if r.hit_geom is not None)
+                # only the errors are hatched red; harmless brushes are a note
+                parts["gouge"].extend(r.hit_geom for r in reports
+                                      if r.hit_geom is not None and r.hit_depth > HIT_ERROR)
         except CutRegionsUnavailable as exc:
             self._generate_notes.append(f"Shaded sections not shown: {exc}")
             self._sim_viewer.set_uncut_overlay(getattr(self, "_uncut_outlines", []))

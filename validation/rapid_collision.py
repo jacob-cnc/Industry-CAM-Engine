@@ -163,7 +163,7 @@ def operator_findings(reports: List[RapidReport]):
     if brushes:
         deep = max(r.hit_depth for r in brushes)
         notes.append(f"{len(brushes)} rapid(s) brush material up to {deep:.4f} deep (e.g. the "
-                     f"nose-radius scallops on a free bar end) - harmless, shown hatched.")
+                     f"nose-radius scallops on a free bar end) - harmless.")
     return errors, notes
 
 
