@@ -618,7 +618,7 @@ class SimViewerWidget(QWidget):
         self._graph.set_section_visible(key, on)
 
     def set_sections(self, sections: dict):
-        """Shaded sections after Generate (outputs/cut_regions.py)."""
+        """Shaded sections after Generate (validation/cut_regions.py)."""
         visible = {k: b.isChecked() for k, b in self._section_boxes.items()}
         self._graph.set_sections(sections, visible)
         present = {k for k, v in sections.items() if v}

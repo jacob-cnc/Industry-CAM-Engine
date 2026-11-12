@@ -144,3 +144,19 @@ from contour_roughing_planner) — ratchet lowered.
 - regen.py imports the tool modules from tools/ or pipeline/, whichever the checkout has,
   so it can still regenerate baselines from checkouts before the move.
 - Verification: suite 1297 passed; regression 16 SAME, 5 BOTH-REFUSE.
+
+### Step 3b — cut_regions outputs/ → validation/ (2026-11-12 02:00 → 02:25)
+
+- It checks what the G-code does (rs274 + Shapely sections, gouge / not removed): a
+  validation, not an output. Its imports (geometry/, Shapely) are what validation/ may use.
+  Importers updated: gui/program_tab (one import line + location comments in gui files),
+  tests/integration/test_cut_regions.py, regen.py (both locations supported).
+- Dependency errors 55 → 45 (outputs/ no longer imports Shapely or geometry internals).
+- Hand-math errors 22 → 23: the ratchet caught it. Not new code — validation/ is scanned
+  for hand math and outputs/ is not, so `parse_canon`'s existing arc densification
+  (atan2 + cos/sin of rs274 ARC_FEED) became visible. Baseline raised to 23 with the reason
+  recorded in architecture_baseline.json "_history"; it goes on the hand-math list.
+- Also noted for the kernel step: cut_regions calls PRIVATE geometry helpers
+  (`tool_reach._densify`, `zone_builder._profile_to_radius_coords`) — they should be public
+  geometry API.
+- Verification: suite 1297 passed; regression 16 SAME, 5 BOTH-REFUSE.

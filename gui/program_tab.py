@@ -1092,7 +1092,7 @@ class ProgramTab(QWidget):
         profile block, computed from its G-code through LinuxCNC's interpreter,
         plus any program error the check finds. If that can't run, say so and
         shade only the uncut regions (never a guessed picture)."""
-        from outputs.cut_regions import compute_sections, CutRegionsUnavailable, geom_rings
+        from validation.cut_regions import compute_sections, CutRegionsUnavailable, geom_rings
         from shapely.ops import unary_union
         parts = {k: [] for k in ("face", "rough", "cleanup", "finish", "finished", "uncut",
                                  "gouge", "not_removed")}
@@ -1248,7 +1248,7 @@ class ProgramTab(QWidget):
             if hasattr(self, '_profile_contour_segments') and self._profile_contour_segments:
                 self._sim_viewer.set_profile_overlay(self._profile_contour_segments)
             # Drawn profile (above) AND what the program cuts: shaded sections
-            # from the G-code as LinuxCNC runs it (outputs/cut_regions.py)
+            # from the G-code as LinuxCNC runs it (validation/cut_regions.py)
             self._show_cut_sections()
 
             # Emit signals

@@ -11,7 +11,7 @@ ProgramTab (Qt offscreen), resolves tools from a tool table, runs
                               uncut / gouge / not_removed) as rings in (z, r), plus areas
 
 The cut sections come from LinuxCNC's own interpreter (rs274) through
-outputs/cut_regions.py: the nose circle and insert wedge swept along the path
+validation/cut_regions.py: the nose circle and insert wedge swept along the path
 LinuxCNC will really run. That is the machinist-level record compare.py uses.
 
 Nothing here talks to the machine. Refuses to run while LinuxCNC is up (the
@@ -55,8 +55,12 @@ SECTION_KEYS = ("face", "rough", "cleanup", "finish", "finished", "uncut", "goug
 
 def _sections(section_inputs) -> dict:
     """Union per section over all profile blocks, exactly as the GUI shades them,
-    from outputs/cut_regions.compute_sections. Geometry in radius space (r, z)."""
-    from outputs.cut_regions import compute_sections, CutRegionsUnavailable
+    from validation/cut_regions.compute_sections. Geometry in radius space (r, z)."""
+    # cut_regions moved outputs/ -> validation/ on 2026-11-12; support both checkouts.
+    import importlib, importlib.util
+    mod = importlib.import_module("validation.cut_regions" if importlib.util.find_spec("validation.cut_regions")
+                                  else "outputs.cut_regions")
+    compute_sections, CutRegionsUnavailable = mod.compute_sections, mod.CutRegionsUnavailable
     from shapely.ops import unary_union
     parts = {k: [] for k in SECTION_KEYS}
     notes = []

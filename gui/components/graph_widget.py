@@ -340,7 +340,7 @@ class MachiningGraphWidget(pg.PlotWidget):
             item.setZValue(5)  # Above zones, below tool dot
             self._profile_overlay_items.append(item)
 
-    # Shaded sections (outputs/cut_regions.py): key -> (label, colour key, edge style)
+    # Shaded sections (validation/cut_regions.py): key -> (label, colour key, edge style)
     SECTION_STYLES = {
         "face": ("Face stock", "graph_sec_face", None),
         "rough": ("Roughing", "graph_sec_rough", None),

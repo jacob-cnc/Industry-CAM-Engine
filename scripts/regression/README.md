@@ -5,7 +5,7 @@ Two scripts, for refactors and any change that may alter generated G-code.
 1. `regen.py` regenerates saved programs (.json from the Program tab) exactly
    like the GUI's Generate button (a real ProgramTab, Qt offscreen) and records
    the G-code plus the cut sections from LinuxCNC's own interpreter
-   (`outputs/cut_regions.py`: nose circle + insert wedge swept along the path
+   (`validation/cut_regions.py`: nose circle + insert wedge swept along the path
    rs274 really runs; face / rough / cleanup / finish / finished part / uncut /
    gouge / not removed). Dialogs the GUI would show are recorded and answered
    with their default. Refuses to run while LinuxCNC is up.
