@@ -1,6 +1,6 @@
 # Claude status
 
-## 2026-11-12 — REVIEW-READY (claims released): C3 writer geometry, branch claude/c3-writer-geometry a6f6e2c
+## 2026-11-12 — REVIEW-READY (claims released): C3 writer geometry, branch claude/c3-writer-geometry 59f6365
 
 - From main d9c7d36. Cutter-comp entry/contour/lead-out planned in planners/comp_contour.py (pipeline; TurningPass.comp_contour),
   writer emits only. Kernel point-in-face + line intersection. Corpus TEXT-IDENTICAL to main; suite passed. dependency 4 -> 2.
