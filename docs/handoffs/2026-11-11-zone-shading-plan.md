@@ -386,3 +386,24 @@ Remaining from 3, only if the owner wants it: the graph could judge the faced ra
 in front of Z0 (X start → stock OD, when Z start > allowance) as "should be
 removed", to catch a facing regression in red. Item 4 (Hemisphere cleanup refused
 by LinuxCNC at a .010–.020 allowance) is next.
+
+## 12. Owner notes (2026-11-11): Z start meaning; item 4 left
+
+**Z start = where the feed moves begin.** It is a cushion that can be stock to
+remove or just safe approach distance before the material. It doesn't
+necessarily describe the stock. The logic may change later; leave it as it is
+for now.
+- Graph consequence, recorded so nobody reads more into it: the band from Z0 to
+  Z start is drawn as stock ("Face stock" / finished part where it isn't cut).
+  When the cushion is air, that shading is approach room, not material. (With
+  Z start ≤ allowance the model sets `face_at_z0` and nothing is drawn there.)
+  If the Z start logic is ever revisited, revisit `cut_regions.stock_polygon`
+  with it.
+
+**Item 4 left as a note.** At a .010–.020 finish allowance, the Hemisphere cleanup
+pass is refused by LinuxCNC at its first G03 out of the centre, and the writer's
+guard doesn't catch it. Owner: .010 isn't a sensible cleanup amount, so it isn't
+pursued. At the saved .005 it runs; the graph shows "not shown: interpreter did
+not run the program to the end" if it ever happens (the machine would stop on the
+same line). `test_cut_regions.test_no_centre_nib_and_a_flat_face` runs its dome at
+.005 for this reason.
