@@ -230,7 +230,7 @@ class SegmentListWidget(QWidget):
 
         # Button bar. Same height and labels as before; horizontal padding
         # trimmed from the app-wide 16 px to 6 px and the buttons share the
-        # row, so Add/Insert/#/Remove/Move Up/Move Down fit the default 435 px column
+        # row, so Add/Insert/#/Remove/Move Up/Move Down fit the default 432 px column
         # even with the panel's scrollbar showing (~384 px for the row).
         btn_pad_ss = "QPushButton { padding-left: 6px; padding-right: 6px; }"
         btn_layout = QHBoxLayout()

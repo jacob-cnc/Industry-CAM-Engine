@@ -269,13 +269,12 @@ class ProgramTab(QWidget):
         for section in (self._section_parameters, self._section_profile):
             section.toggled.connect(lambda _e: self._fit_program_column())
 
-    # px, default programming-column width. Sized for the lathe's fonts (the
-    # style guide's JetBrains Mono / Inter aren't installed there; Qt uses
-    # DejaVu Sans Mono / DejaVu Sans, tests/test_runtime_env.py): the segment
-    # table with corner-break badges needs 419 px and its button row 416, plus
-    # 16 px of panel and section margins = 435 at 96 dpi. At the old 420 the
-    # right 5-9 px of the profile section (Move Down button edge) were cut off.
-    PROGRAM_COLUMN_WIDTH = 435
+    # px, default programming-column width, sized for the lathe's fonts
+    # (JetBrains Mono / Inter, installed 2026-11-11 - tests/test_runtime_env.py):
+    # the segment table with corner-break badges needs 416 px, plus 16 px of
+    # panel and section margins = 432 at 96 dpi. (At the old 420, with the DejaVu
+    # fallback fonts, the right 5-9 px of the profile section were cut off.)
+    PROGRAM_COLUMN_WIDTH = 432
 
     def eventFilter(self, obj, event):  # noqa: N802 (Qt naming)
         from PyQt5.QtCore import QEvent

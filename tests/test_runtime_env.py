@@ -59,26 +59,27 @@ def test_pyqt5_is_debians():
 
 def test_fonts_are_the_lathes():
     """Pixel-budget layout tests (e.g. the Program column) depend on the fonts.
-    The style guide asks for JetBrains Mono / Inter; neither is installed on the
-    lathe, so Qt uses DejaVu (Debian fonts-dejavu-core 2.37-6). Installing other
-    fonts changes the layouts: do it deliberately, re-check the layout tests,
-    and update this pin."""
+    The style guide's JetBrains Mono and Inter are installed on the lathe from
+    Debian (fonts-jetbrains-mono 2.242+ds-3, fonts-inter 4.0~beta7+ds-1,
+    2026-11-11); they ship no fontconfig rules, so system defaults (DejaVu) are
+    unchanged. Changing fonts changes the layouts: do it deliberately, re-check
+    the layout tests, and update this pin."""
     import subprocess
     from PyQt5.QtGui import QFont, QFontInfo
     from PyQt5.QtWidgets import QApplication
     from gui.colors import FONTS
-    _app = QApplication.instance() or QApplication([])  # noqa: F841
     from gui.components.segment_list import SEG_MONO_FAMILIES
+    _app = QApplication.instance() or QApplication([])  # noqa: F841
     seg_font = QFont()
     seg_font.setFamilies(SEG_MONO_FAMILIES)              # as the segment list sets it
-    assert QFontInfo(seg_font).family() == "DejaVu Sans Mono"
-    # Asked for alone (numeric fields, some panels' stylesheets), the style
-    # guide's mono family falls back to the PROPORTIONAL DejaVu Sans on the lathe.
-    assert QFontInfo(QFont(FONTS["mono_family"])).family() == "DejaVu Sans"
-    assert QFontInfo(QFont(FONTS["ui_family"])).family() == "DejaVu Sans"
-    ver = subprocess.run(["dpkg-query", "-W", "-f=${Version}", "fonts-dejavu-core"],
-                         capture_output=True, text=True).stdout
-    assert ver == "2.37-6", f"fonts-dejavu-core {ver!r}; the lathe has 2.37-6"
+    assert QFontInfo(seg_font).family() == "JetBrains Mono"
+    assert QFontInfo(QFont(FONTS["mono_family"])).family() == "JetBrains Mono"
+    assert QFontInfo(QFont(FONTS["ui_family"])).family() == "Inter"
+    for pkg, want in (("fonts-jetbrains-mono", "2.242+ds-3"), ("fonts-inter", "4.0~beta7+ds-1"),
+                      ("fonts-dejavu-core", "2.37-6")):
+        ver = subprocess.run(["dpkg-query", "-W", "-f=${Version}", pkg],
+                             capture_output=True, text=True).stdout
+        assert ver == want, f"{pkg} {ver!r}; the lathe has {want}"
 
 
 def test_display_dpi_is_the_lathes():

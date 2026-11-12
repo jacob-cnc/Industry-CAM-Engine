@@ -1,5 +1,5 @@
 """Segment builder: Insert, numbering, large text, r column, and the
-Program tab's default-width column (ProgramTab.PROGRAM_COLUMN_WIDTH, 435 px on
+Program tab's default-width column (ProgramTab.PROGRAM_COLUMN_WIDTH, 432 px on
 the lathe's fonts) that widens only to avoid overflow.
 
 Invariant-style checks (they hold for any segment list), not one layout.
