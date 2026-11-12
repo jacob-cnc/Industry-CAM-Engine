@@ -18,7 +18,8 @@ from geometry.kernel_offset import KernelOffsetError, offset_face
 from geometry.zone_builder import profile_to_radius_coords
 from geometry.zone_query import EdgeData
 from geometry.curve_fit import circumcenter, curve_arc_spans
-from geometry.face_ops import clip_to_box, first_ocp_face, translate_face, wire_edges
+from geometry.face_ops import (clip_to_box, first_ocp_face, line_intersection, translate_face,
+                                wire_edges)
 
 __all__ = [
     # arc identity (geometry/arc_math, arc_helpers)
@@ -31,6 +32,8 @@ __all__ = [
     "offset_face", "KernelOffsetError",
     # face operations: first face, move, clip, walk (geometry/face_ops)
     "first_ocp_face", "translate_face", "clip_to_box", "wire_edges",
+    # where two lines meet (geometry/face_ops)
+    "line_intersection",
     # arcs fitted to non-circular edges (geometry/curve_fit)
     "curve_arc_spans", "circumcenter",
 ]

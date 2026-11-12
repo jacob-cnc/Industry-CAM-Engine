@@ -235,6 +235,8 @@ def _execute(
             if pass_obj.pass_type == PassType.FINISH and index > 0:
                 pass_obj = replace(pass_obj, approach_moves=tuple(transitions[index - 1].moves))
             all_passes[index] = pass_obj
+    all_passes = _plan_comp_contours(all_passes, profile, stock, tool, finish_tool or tool,
+                                     zone_query)
     cleanup_passes = [p for p in all_passes if p.pass_type == PassType.CLEANUP]
     finish_passes = [p for p in all_passes if p.pass_type == PassType.FINISH]
 
@@ -358,6 +360,59 @@ def _extract_zone_boundary(zone_query, zone_name):
             f"Zone construction may have failed. Do NOT create a hand-math fallback."
         )
     return boundary_polyline(edges)
+
+
+def _plan_comp_contours(all_passes, profile, stock, tool, finish_tool, zone_query):
+    """Every cleanup / finish pass with its cutter-comp plan
+    (planners/comp_contour.py): entry, contour, lead-out, as the writer will
+    emit them. Each pass starts where the writer is when it reaches it: the
+    first cleanup / finish pass at its planned approach point (x_level,
+    z_start), a later cleanup pass where the previous one ended (its lead-out
+    end, if any), a later finish pass at the end of its planned link."""
+    from planners.comp_contour import plan_comp_contour
+    is_id = profile.mode == MachiningMode.ID
+    face_at_z0 = bool(getattr(stock, "face_at_z0", False))
+
+    def part_contains(p):
+        return zone_query.contains("finished_part", p[0], p[1])
+
+    def stock_contains(p):
+        return zone_query.contains("stock", p[0], p[1])
+
+    out = list(all_passes)
+    cleanups = [i for i, p in enumerate(out) if p.pass_type == PassType.CLEANUP]
+    finishes = [i for i, p in enumerate(out) if p.pass_type == PassType.FINISH]
+    end = None
+    for n, i in enumerate(cleanups):
+        p = out[i]
+        start = (out[cleanups[0]].x_level, out[cleanups[0]].z_start) if n == 0 else end
+        plan = plan_comp_contour(p.moves, start, tool, is_id, stock.z_start, face_at_z0,
+                                 "Cleanup move", part_contains, stock_contains)
+        out[i] = replace(p, comp_contour=plan)
+        end = _comp_contour_end(plan)
+    for n, i in enumerate(finishes):
+        p = out[i]
+        if n == 0:
+            start = (p.x_level, p.z_start)
+        elif p.approach_moves:
+            start = (p.approach_moves[-1].x, p.approach_moves[-1].z)
+        else:
+            continue                  # the writer refuses a finish pass without its link
+        label = ("Spring pass (repeat final contour)" if p.is_spring_pass
+                 else f"Finish cutting pass {n + 1}")
+        plan = plan_comp_contour(p.moves, start, finish_tool, is_id, stock.z_start, face_at_z0,
+                                 f"{label}: move", part_contains, stock_contains)
+        out[i] = replace(p, comp_contour=plan)
+    return out
+
+
+def _comp_contour_end(plan):
+    """Where the tool is after a planned comp contour (lead-out end if any)."""
+    if plan.lead_out is not None:
+        return plan.lead_out
+    if plan.contour:
+        return (plan.contour[-1].x, plan.contour[-1].z)
+    return plan.start
 
 
 def _compute_stock_boundary(stock: StockDef) -> List[Tuple[float, float]]:

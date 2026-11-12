@@ -316,3 +316,30 @@ machines the sharp profile plus exactly the one real break (cut_regions vs a no-
 Still open in C1: NX trim rules next to arcs (cut-short / smooth) — not built; such breaks are
 reported "skipped". Vertex labels after an arc split (normalize_profile inserts points, the V numbers
 in reports shift) — pre-existing, worth a look with the owner.
+
+## C3 — writer geometry planned before output (owner approved 2026-11-12, branch claude/c3-writer-geometry)
+
+- `planners/comp_contour.py` (new): every cutter-comp decision the writer made for cleanup / finish
+  contours — contour start (approach artefacts skipped), comp entry (wall line; OD face / centre entry,
+  nose radius + .002 past centre; collinear with a sloped first cut; sliver protection), arc-piece
+  re-joining, sharpening concave arcs <= TNR, the comp lead-out, and the concave-corner check — moved
+  UNCHANGED. The pipeline plans each pass (`_plan_comp_contours`, starting exactly where the writer
+  is) and carries it on `TurningPass.comp_contour` (`models.results.CompContour`). The writer keeps only
+  sequencing from its position (rise, rapid, the .020 feed-in) and emission; it refuses a contour
+  without a plan.
+- Lead-out "material beyond the end?" is a kernel query now (`ZoneQueryAPI.contains`,
+  BRepClass_FaceClassifier on the finished-part and stock faces) instead of shapely polygons in the
+  writer; the sharpened corner is the kernel's line intersection (`geometry.kernel.line_intersection`,
+  IntAna2d). The writer no longer imports geometry or shapely: dependency_violation 4 → 2.
+- Verification: corpus TEXT-IDENTICAL to main (19 SAME, 4 BOTH-REFUSE; the two arc-break test
+  programs identical too); variants exercised by the corpus: lead-out 1, collinear entry 3, face
+  entry 16, plain entry 20, no-TNR 1; sharpened arcs by tests (incl. rs274 runs). Suite passed.
+- Kept as is: `check_concave_corners` predicts LinuxCNC's own comp arithmetic (R·tan(turn/2)), not part
+  geometry.
+
+OWNER DECISION found here — roughing retract X (`GCodeWriter._compute_pass_max_x`): for an arc move
+it adds the circle's top X whenever that is above both end points, but a concave arc piece never
+reaches its circle's top. Compared with the exact arc extent (arc_math pieces) over the corpus: 132 of
+280 roughing passes over-state, by up to 3.58 in (capped at the safe X); the rule is never LOW. So
+today's retracts are higher than needed (safe side). Exact values would shorten those rapids but
+bring them closer to material — a clearance judgement, so nothing was changed.

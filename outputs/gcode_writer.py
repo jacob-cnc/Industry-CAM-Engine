@@ -18,14 +18,6 @@ from models.program import ThreadingParams, GroovingParams
 from models.constants import TOLERANCE, CONTOUR_FEED_IN_DIA
 
 
-def _piece_sweep(p, q, centre_dia):
-    """Short sweep (radians) between two points on a canonical <= 90 deg arc
-    piece; points and centre are (X dia, Z)."""
-    from geometry.arc_math import short_sweep
-    return short_sweep((p[0] / 2.0, p[1]), (q[0] / 2.0, q[1]),
-                       (centre_dia[0] / 2.0, centre_dia[1]))
-
-
 class GCodeWriter:
     """G-code writer with full coordinate output and descriptive comments.
 
@@ -336,15 +328,10 @@ class GCodeWriter:
         # === CLEANUP PASS ===
         if pr.cleanup_passes:
             lines.append("; === CLEANUP PASS (semi-finish, roughing boundary contour) ===")
-            # Approach: rapid to safe boundary at Z0+fin, then rapid X to cleanup start
-            cleanup_pass = pr.cleanup_passes[0]
-            approach_x = cleanup_pass.x_level  # X_start + fin
-            approach_z = cleanup_pass.z_start  # Z0 + fin
-
-            for n_pass, p in enumerate(pr.cleanup_passes):
-                lines.extend(self._emit_contour_pass(
-                    p.moves, "Cleanup move", pr.tool, is_id, pr.stock.z_start, pr,
-                    start=(approach_x, approach_z) if n_pass == 0 else None))
+            # Each pass starts where its planned comp contour says (the first one at
+            # the pass's x_level / z_start, pipeline/_plan_comp_contours).
+            for p in pr.cleanup_passes:
+                lines.extend(self._emit_contour_pass(p, "Cleanup move", is_id))
 
             if pr.cleanup_passes[-1].retract_moves is None:
                 raise ValueError("Cleanup pass is missing its planned diagonal retract.")
@@ -400,11 +387,6 @@ class GCodeWriter:
                 lines.append("")
 
             lines.append("; === FINISH PASS (profile contour) ===")
-            # Approach: rapid to safe boundary at Z0+fin, then rapid X to X_start
-            finish_pass = pr.finish_passes[0]
-            approach_x = finish_pass.x_level  # X_start
-            approach_z = finish_pass.z_start  # Z0+fin
-
 
             for pass_number, p in enumerate(pr.finish_passes):
                 if pass_number > 0:
@@ -415,9 +397,7 @@ class GCodeWriter:
                         lines.append(self._emit_move(link, "Finish retract/approach"))
                 label = "Spring pass (repeat final contour)" if p.is_spring_pass else f"Finish cutting pass {pass_number + 1}"
                 lines.append(f"; {label}")
-                lines.extend(self._emit_contour_pass(
-                    p.moves, f"{label}: move", finish_tool, is_id, pr.stock.z_start, pr,
-                    start=(approach_x, approach_z) if pass_number == 0 else None))
+                lines.extend(self._emit_contour_pass(p, f"{label}: move", is_id))
             lines.append("")
 
         if pr.finish_passes:
@@ -467,130 +447,25 @@ class GCodeWriter:
             f"{o} endif",
         ]
 
-    # How far past the centreline the nose goes when a contour starts at X0, on
-    # top of the nose radius (owner 2026-11-11).
-    _CENTRE_OVERSHOOT = 0.002
+    def _emit_contour_pass(self, p, label: str, is_id: bool) -> List[str]:
+        """Emit one cleanup/finish contour from its planned comp contour
+        (p.comp_contour, planners/comp_contour.py: entry, contour, lead-out).
 
-    # Extra length of the comp entry move beyond 2 x TNR (inches).
-    _COMP_ENTRY_MARGIN = 0.010
-
-    def _emit_contour_pass(self, moves, label: str, tool, is_id: bool,
-                           z_clear_stock: float, pr=None, start=None) -> List[str]:
-        """Emit one cleanup/finish contour: safe approach, comp entry, contour.
-
-        ``start`` is the pass's planned start point (default: current position).
-        The approach never travels at face level: the tool rises to a clearance
-        Z, traverses there, and feeds down in air. (Until 2026-11-09 the writer
-        rapided to the pass start at Z0+fin, i.e. across the uncut face — on an
-        OD job the finish approach rapided 0.0015" below the face surface.)
-
-        Comp entry, per contour type (comp is OFF on arrival; the caller emits
-        G40 before the exit retract):
-          * first profile move along Z (bore wall, OD wall): entry straight down
-            the wall line, collinear with the contour.
-          * OD contour starting with a FACE move (G42): the entry runs down a
-            line one nose radius before the face start, so after LinuxCNC's
-            inside-corner clip the nose centre sits exactly on the face start —
-            the face is cut flat through the centreline (no centre nib, sim
-            2026-11-09) without cutting on the far side of centre.
-        For ID passes the leading radial moves along the face (pilot -> wall
-        at Z0+fin) are air travel, not profile, and are dropped.
+        What stays here is sequencing from the current position, comp off:
+        rise to the clearance Z, rapid to CONTOUR_FEED_IN_DIA short of the
+        entry X, feed in (owner 2026-11-11) - unless the planned link already
+        fed in to that X. Then comp on, the entry move, the contour, and the
+        lead-out. The caller emits G40 before the exit retract.
         """
+        plan = p.comp_contour
+        if plan is None:
+            raise ValueError(f"{label}: contour pass has no planned comp entry "
+                             "(pipeline/_plan_comp_contours).")
         out: List[str] = []
-        sx, sz = start if start is not None else (self._x, self._z)
-        has_tnr = tool.nose_radius > 0.0001
-        comp_code = self._get_comp_code(tool.direction, is_id) if has_tnr else "G40"
-        r = tool.nose_radius if has_tnr else 0.0
-        moves = list(moves)
-
-        # Contour start: skip approach artefacts at the head of the pass.
-        k, px, pz = 0, sx, sz
-        while k < len(moves) and moves[k].move_type in (MoveType.FEED, MoveType.RAPID):
-            mv = moves[k]
-            if abs(mv.x - px) < 1e-9 and abs(mv.z - pz) < 1e-9:   # zero length
-                k += 1; continue
-            radial = abs(mv.z - pz) < 1e-9 and abs(mv.x - px) > 1e-9
-            # ID lead across the mouth from the approach height (Z0+.001) down
-            # to the contour start is air too, though not exactly radial. Kept,
-            # comp treated it as a wall and stopped the nose short of a mouth
-            # chamfer (up to .005 left proud; G-code section check 2026-11-11).
-            near_radial = (abs(mv.z - pz) <= 0.002 and abs(mv.x - px) / 2.0 > 5.0 * abs(mv.z - pz)
-                           and abs(mv.x - px) > 1e-9)
-            if is_id and near_radial and not radial:
-                radial = True
-            # OD with the face already at Z0 (operator Z start <= allowance, no stock in front):
-            # a lead moving INWARD from X start to the contour start runs over the
-            # finished face in air. Kept, comp treated it as a wall and stopped the
-            # nose short of a face chamfer (the ID mouth-chamfer problem, mirrored).
-            mostly_radial = abs(mv.x - px) / 2.0 > 5.0 * abs(mv.z - pz)
-            face_clear = bool(getattr(getattr(pr, "stock", None), "face_at_z0", False))
-            if (not is_id and mostly_radial and mv.x < px - 1e-9 and face_clear):
-                px, pz = mv.x, mv.z; k += 1; continue
-            tiny_axial = abs(mv.x - px) < 1e-9 and 0 < abs(mv.z - pz) < max(2.0 * r, 0.005)
-            nxt_radial = (k + 1 < len(moves) and abs(moves[k + 1].z - mv.z) < 1e-9)
-            if is_id and radial:                      # ID face lead: air
-                px, pz = mv.x, mv.z; k += 1; continue
-            if not is_id and tiny_axial and nxt_radial:   # OD drop onto the face
-                px, pz = mv.x, mv.z; k += 1; continue
-            break
-        first = moves[k] if k < len(moves) else None
-        feed = first.feed if first is not None and first.feed > 0 else 0.0
-
-        min_len = 2.0 * r + self._COMP_ENTRY_MARGIN
-        # If the contour starts straight down the entry line with a sliver
-        # (2026-11-09 GCH ID cleanup: entry stopped at Z0+fin = .0015, first
-        # move .0006 to .0009, then a concave chamfer corner), end the entry
-        # higher - still in air on the same line - so that first contour move
-        # is long enough for LinuxCNC to shorten it at the corner (R*tan(turn/2))
-        # instead of aborting with "straight feed in concave corner cannot be
-        # reached". The entry itself must stay air-only: LinuxCNC moves the
-        # tool sideways onto the offset path along the whole entry move.
-        if (first is not None and first.move_type == MoveType.FEED
-                and abs(first.x - px) < 1e-9 and first.z < pz - 1e-9
-                and pz - first.z < min_len):
-            pz = first.z + min_len
-        z_clear = max(z_clear_stock, pz + min_len)
-        face_first = (first is not None and first.move_type == MoveType.FEED
-                      and abs(first.z - pz) < 1e-9 and abs(first.x - px) > 1e-9)
-        od_face_entry = (not is_id) and face_first and comp_code == "G42"
-        # A contour that starts AT THE CENTRE (X start 0 / segment 1 at X0) with
-        # something other than a face - a dome, a cone point - is entered the same
-        # way: across the centreline, then straight into the first cut.
-        at_centre = abs(px) < 1e-6
-        centre_entry = ((not is_id) and comp_code == "G42" and at_centre and not od_face_entry
-                        and first is not None and first.x > px + 1e-9)
-        if od_face_entry or centre_entry:
-            outward = 1.0 if first.x > px else -1.0
-            # one nose radius before the start (diameter) puts the nose centre on
-            # it after LinuxCNC's inside-corner clip; at the centre go a further
-            # .002 past, so no nib is left (owner 2026-11-11: nose radius + .002)
-            past = r + (self._CENTRE_OVERSHOOT if at_centre else 0.0)
-            entry_x = px - outward * 2.0 * past
-            od_face_entry = True
-        else:
-            entry_x = px
-        # Contour starting with a SLOPED line toward the chuck (a bore-mouth
-        # chamfer, an OD chamfer at the face): enter collinear with it, from the
-        # air behind its start. A vertical entry made a corner there that comp
-        # treats as inside, stopping the nose short of the top of the chamfer.
-        entry_z = pz
-        # Only a genuinely sloped first cut (>= 15 deg off radial): a near-radial
-        # lead (a face move .001 off level) would be extended almost flat and
-        # far out - that sent an entry to X18.2 (caught 2026-11-11, never released).
-        collinear = False
-        if (comp_code != "G40" and not od_face_entry and first is not None
-                and first.move_type == MoveType.FEED
-                and abs(first.x - px) > 1e-9 and first.z < pz - 1e-9):
-            ur, uz = (first.x - px) / 2.0, first.z - pz
-            L = (ur * ur + uz * uz) ** 0.5
-            if abs(uz) / L >= 0.2588:                   # sin 15 deg
-                t = min_len / (abs(uz) / L)             # back along it until min_len above the start
-                entry_x = px - 2.0 * (ur / L) * t
-                entry_z = pz - (uz / L) * t
-                collinear = is_id or entry_x >= 0.0     # never past the centreline on OD
-                if not collinear:
-                    entry_x, entry_z = px, pz
-
+        comp_code, feed = plan.comp_code, plan.feed
+        px, pz = plan.start
+        entry_x, entry_z = plan.entry
+        z_clear = plan.z_clear
         # Safe approach: rise, traverse at clearance (comp off).
         if self._z < z_clear - 1e-9:
             out.append(self._rapid(self._x, z_clear, "Contour approach: rise to clearance Z (comp off)"))
@@ -606,232 +481,33 @@ class GCodeWriter:
             if abs(self._x - feed_from) > 1e-9 or abs(self._z - z_clear) > 1e-9:
                 out.append(self._rapid(feed_from, z_clear, "Contour approach: above entry point, feed-in start (comp off)"))
             out.append(self._feed_line(entry_x, z_clear, feed, "Contour approach: feed in to entry X (comp off)"))
-        if collinear:
+        if plan.collinear:
             if abs(self._z - entry_z) > 1e-9:
                 out.append(self._rapid(entry_x, entry_z, "Contour approach: down to entry, in line with the first cut (comp off)"))
-            out.append(self._line(comp_code, f"Cutter comp on (TNR={tool.nose_radius:.4f})"))
+            out.append(self._line(comp_code, f"Cutter comp on (TNR={plan.nose_radius:.4f})"))
             out.append(self._feed_line(px, pz, feed, "Comp entry move (in air, in line with the first cut)"))
         elif comp_code != "G40":
-            out.append(self._line(comp_code, f"Cutter comp on (TNR={tool.nose_radius:.4f})"))
+            out.append(self._line(comp_code, f"Cutter comp on (TNR={plan.nose_radius:.4f})"))
             out.append(self._feed_line(entry_x, pz, feed, "Comp entry move (in air)"))
         else:
             out.append(self._feed_line(entry_x, pz, feed, "Contour approach: feed down (no TNR)"))
-        if od_face_entry:
+        if plan.face_entry:
             out.append(self._feed_line(px, pz, feed, "Comp entry: onto face start"))
 
-        prev = (self._x, self._z)
-        # Comp-on polyline for the concave-corner check (None = arc end).
-        path = [(entry_x, entry_z), (px, pz)] if collinear else [(entry_x, z_clear), (entry_x, pz)]
-        if od_face_entry:
-            path.append((px, pz))
-
-        def _track(pt):
-            if pt is None or path[-1] is None or \
-                    abs(pt[0] - path[-1][0]) > 1e-9 or abs(pt[1] - path[-1][1]) > 1e-9:
-                path.append(pt)       # zero-length moves are suppressed in output
-
-        contour = self._merge_arc_pieces(moves[k:], (px, pz))
-        if comp_code != "G40":
-            contour = self._sharpen_small_concave_arcs(
-                contour, (px, pz), r, comp_code, label, out)
-        for j, move in enumerate(contour):
-            prev = (self._x, self._z)
-            out.append(self._emit_move(move, f"{label} {j+1}"))
-            _track(None if move.move_type in (MoveType.ARC_CW, MoveType.ARC_CCW)
-                   else (self._x, self._z))
-        if pr is not None and comp_code != "G40":
-            lead = self._comp_lead_out(prev, (self._x, self._z), tool,
-                                       comp_code, contour, pr)
-            out.extend(lead)
-            if lead:
-                _track((self._x, self._z))
-        if comp_code != "G40":
-            self._check_concave_corners(path, r, comp_code, label)
-        return out
-
-    @staticmethod
-    def _merge_arc_pieces(moves, start, tol: float = 1e-6) -> list:
-        """Re-join consecutive arc moves on the same circle, same direction,
-        feed and pass (the kernel splits arcs into <= 90 deg pieces, see
-        geometry/arc_math.py). Output-only: planners and validators keep the
-        pieces. Keeps the G-code of an unsplit arc unchanged and lets the
-        concave-arc rule see the whole arc. Points are (X dia, Z)."""
-        from dataclasses import replace
-        arcs = (MoveType.ARC_CW, MoveType.ARC_CCW)
-        out = []                 # merged moves
-        run_start = None         # start point of out[-1]
-        run_sweep = 0.0          # |sweep| accumulated in out[-1] (radians)
-        pos = start
-        for m in moves:
-            end = (m.x, m.z)
-            if m.move_type in arcs:
-                centre = (pos[0] + m.center_i, pos[1] + m.center_k)
-                piece = abs(_piece_sweep(pos, end, centre))
-                last = out[-1] if out else None
-                if (last is not None and last.move_type == m.move_type
-                        and abs(last.feed - m.feed) < 1e-12 and last.pass_type == m.pass_type):
-                    last_centre = (run_start[0] + last.center_i, run_start[1] + last.center_k)
-                    if (abs(last_centre[0] - centre[0]) < tol and abs(last_centre[1] - centre[1]) < tol
-                            and run_sweep + piece < 2.0 * math.pi - 1e-6):
-                        out[-1] = replace(last, x=m.x, z=m.z)
-                        run_sweep += piece
-                        pos = end
-                        continue
-                run_sweep = piece
-            else:
-                run_sweep = 0.0
-            out.append(m)
-            run_start = pos
-            pos = end
-        return out
-
-    # A concave arc this close to the nose radius (or smaller) has no usable
-    # cutter-comp offset path (offset radius <= 0.0001").
-    _SMALL_CONCAVE_ARC_MARGIN = 0.0001
-
-    def _sharpen_small_concave_arcs(self, moves, start, r: float, comp_code: str,
-                                    label: str, out: List[str]) -> list:
-        """Cut concave arcs with radius <= the nose radius as a sharp corner.
-
-        Owner decision 2026-11-10: the nose cannot make an inside radius
-        smaller than itself, so a concave fillet R <= TNR is cut exactly like
-        the sharp inside corner (the tool leaves R = TNR there). LinuxCNC
-        cannot offset such an arc under G41/G42 ("Tool radius not less than
-        arc radius with comp"). The two neighbouring lines are extended to
-        their intersection and the arc is dropped; each one is reported in
-        ``self.notes`` and as a comment in the program. Not silent: the part
-        gets a larger corner radius than drawn.
-
-        Concave = the arc turns toward the comp side. Turn sign is LinuxCNC's
-        (outputs/gcode_dialect.py): G03 turns left in G18 (Z, X-radius), and
-        left is the G41 side (same rule as _check_concave_corners).
-        """
-        from dataclasses import replace
-        from outputs.gcode_dialect import gcode_for_arc
-        side = 1.0 if comp_code == "G41" else -1.0
-        arcs = (MoveType.ARC_CW, MoveType.ARC_CCW)
-        mv = list(moves)
-        i = 0
-        while i < len(mv):
-            m = mv[i]
-            if m.move_type not in arcs:
-                i += 1
-                continue
-            turn = 1.0 if gcode_for_arc(m.move_type) == "G03" else -1.0
-            radius = math.hypot(m.center_i / 2.0, m.center_k)
-            if turn * side <= 0 or radius > r + self._SMALL_CONCAVE_ARC_MARGIN:
-                i += 1
-                continue
-            a_end = (mv[i - 1].x, mv[i - 1].z) if i > 0 else start
-            where = f"{label}: concave arc R{radius:.4f} ending at X{m.x:.4f} Z{m.z:.4f}"
-            prev_ok = i > 0 and mv[i - 1].move_type == MoveType.FEED
-            next_ok = i + 1 < len(mv) and mv[i + 1].move_type == MoveType.FEED
-            if not (prev_ok and next_ok):
-                raise ValueError(
-                    f"{where} is not larger than the tool nose radius ({r:.4f}) and is "
-                    "not between two straight moves, so it cannot be cut as a sharp "
-                    "corner. Use a fillet larger than the nose radius, or a tool with "
-                    "a smaller nose radius.")
-            p0 = (mv[i - 2].x, mv[i - 2].z) if i > 1 else start
-            corner = self._line_intersection(p0, a_end, (m.x, m.z), (mv[i + 1].x, mv[i + 1].z))
-            if corner is None:
-                raise ValueError(f"{where}: the lines on either side are parallel; "
-                                 "it cannot be cut as a sharp corner.")
-            mv[i - 1] = replace(mv[i - 1], x=corner[0], z=corner[1])
-            del mv[i]
-            conv, fmt = self._conv, self._fmt
-            note = (f"{label}: concave R{radius * conv:{fmt}} at X{corner[0] * conv:{fmt}} "
-                    f"Z{corner[1] * conv:{fmt}} is not larger than the tool nose radius "
-                    f"({r * conv:{fmt}}); cut as a sharp corner - the tool leaves "
-                    f"R{r * conv:{fmt}} there.")
+        conv, fmt = self._conv, self._fmt
+        for corner in plan.sharpened:
+            note = (f"{label}: concave R{corner.radius * conv:{fmt}} at "
+                    f"X{corner.corner[0] * conv:{fmt}} Z{corner.corner[1] * conv:{fmt}} is not "
+                    f"larger than the tool nose radius ({plan.nose_radius * conv:{fmt}}); cut as a "
+                    f"sharp corner - the tool leaves R{plan.nose_radius * conv:{fmt}} there.")
             self.notes.append(note)
             out.append(f"; NOTE: {note}")
-        return mv
-
-    @staticmethod
-    def _line_intersection(p0, p1, q0, q1):
-        """Intersection of line p0-p1 with line q0-q1; points are (X dia, Z).
-        Solved in (X radius, Z). None if parallel."""
-        ax, az = p0[0] / 2.0, p0[1]
-        dx, dz = p1[0] / 2.0 - ax, p1[1] - az
-        bx, bz = q0[0] / 2.0, q0[1]
-        ex, ez = q1[0] / 2.0 - bx, q1[1] - bz
-        den = dx * ez - dz * ex
-        if abs(den) < 1e-12 * max(1.0, math.hypot(dx, dz) * math.hypot(ex, ez)):
-            return None
-        s = ((bx - ax) * ez - (bz - az) * ex) / den
-        return (2.0 * (ax + s * dx), az + s * dz)
-
-    @staticmethod
-    def _check_concave_corners(path, r: float, comp_code: str, label: str) -> None:
-        """Reject line-line corners LinuxCNC comp cannot reach (fail at generation).
-
-        At a corner that turns toward the comp side LinuxCNC shortens the
-        incoming line by R*tan(turn/2); if the line is shorter than that it
-        aborts with "straight feed in concave corner cannot be reached by the
-        tool without gouging". Points are (X diameter, Z); ``None`` marks the
-        end of an arc (corners touching arcs are not checked here). Turn sign
-        is in LinuxCNC's G18 plane (Z, X-radius): left (+) = G41 side.
-        """
-        side = 1.0 if comp_code == "G41" else -1.0
-        for i in range(1, len(path) - 1):
-            a, b, c = path[i - 1], path[i], path[i + 1]
-            if a is None or b is None or c is None:
-                continue
-            d1 = (b[1] - a[1], (b[0] - a[0]) / 2.0)
-            d2 = (c[1] - b[1], (c[0] - b[0]) / 2.0)
-            l1, l2 = math.hypot(*d1), math.hypot(*d2)
-            if l1 < 1e-9 or l2 < 1e-9:
-                continue
-            cross = (d1[0] * d2[1] - d1[1] * d2[0]) / (l1 * l2)
-            dot = (d1[0] * d2[0] + d1[1] * d2[1]) / (l1 * l2)
-            if side * cross <= 1e-9:
-                continue                          # straight or convex
-            turn = math.atan2(abs(cross), dot)
-            need = r * math.tan(turn / 2.0)
-            if l1 < need - 1e-6:
-                raise ValueError(
-                    f"{label}: the move to X{b[0]:.4f} Z{b[1]:.4f} is {l1:.4f}\" long "
-                    f"but cutter comp needs {need:.4f}\" before that concave corner "
-                    "(LinuxCNC would stop with 'straight feed in concave corner "
-                    "cannot be reached'). Use a smaller nose radius or a longer "
-                    "segment.")
-
-    def _comp_lead_out(self, prev, end, tool, comp_code, profile_moves, pr) -> List[str]:
-        """Stop the nose AT the contour end when material lies beyond it.
-
-        With comp on, LinuxCNC ends the last move with the nose centre on the
-        endpoint, so the nose overhangs the end by R along the move (sim
-        2026-11-08: OD finish reported Z-0.8155 for Z-0.8). Into air that is
-        fine (it cleans e.g. the pilot-hole edge); into material it would cut
-        R past the programmed part. Then a compensated lead-out toward the
-        tool's air side is added before G40, so LinuxCNC clips the last move.
-        """
-        from shapely.geometry import Point, Polygon
-        dx_r, dz = (end[0] - prev[0]) / 2.0, end[1] - prev[1]
-        length = math.hypot(dx_r, dz)
-        if length < 1e-9:
-            return []
-        ux_r, uz = dx_r / length, dz / length
-        r = tool.nose_radius
-        probe = Point(end[0] + 2.0 * ux_r * (r + 0.002), end[1] + uz * (r + 0.002))
-        try:
-            stock = Polygon(pr.stock_boundary)
-            part = Polygon(pr.finished_part_boundary) if pr.finished_part_boundary else None
-        except Exception:
-            return []
-        zs = [m.z for m in profile_moves] + [end[1]]
-        in_span = min(zs) - 1e-9 <= probe.y <= max(zs) + 1e-9
-        material = (part is not None and part.contains(probe)) or \
-                   (stock.contains(probe) and not in_span)
-        if not material:
-            return []
-        # Air side = the comp side: left normal for G41, right for G42, in the
-        # (Z, X-radius) plane LinuxCNC uses for G18.
-        nz, nx = (-ux_r, uz) if comp_code == "G41" else (ux_r, -uz)
-        lead = 2.0 * r + self._COMP_ENTRY_MARGIN
-        return [self._feed_line(end[0] + 2.0 * nx * lead, end[1] + nz * lead, 0.0,
-                                "Comp lead-out (stops nose at contour end; material beyond)")]
+        for j, move in enumerate(plan.contour):
+            out.append(self._emit_move(move, f"{label} {j+1}"))
+        if plan.lead_out is not None:
+            out.append(self._feed_line(plan.lead_out[0], plan.lead_out[1], 0.0,
+                                       "Comp lead-out (stops nose at contour end; material beyond)"))
+        return out
 
     def _emit_move(self, move: ToolMove, comment: str) -> str:
         """Emit a single G-code line — always includes both X and Z.

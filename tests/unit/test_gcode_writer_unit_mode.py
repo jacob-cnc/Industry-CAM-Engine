@@ -208,6 +208,13 @@ def _make_arc_plan_result():
         moves=[arc_move],
         retract_moves=(ToolMove(MoveType.RAPID, 2.01, 0.0, pass_type=PassType.TRANSITION),),
     )
+    # The writer emits a contour only as planned (pipeline/_plan_comp_contours);
+    # no zone faces here, so no lead-out (as before with empty boundaries).
+    from dataclasses import replace
+    from planners.comp_contour import plan_comp_contour
+    finish_pass = replace(finish_pass, comp_contour=plan_comp_contour(
+        finish_pass.moves, (finish_pass.x_level, finish_pass.z_start), tool, False,
+        stock.z_start, False, "Finish cutting pass 1: move"))
 
     return PlanResult(
         profile=profile,

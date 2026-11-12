@@ -130,30 +130,32 @@ def test_program_tab_missing_tool_is_an_error(tab):
 #     a wall ending at Z-0.6; with it, exactly Z-0.6000) ---------------------
 
 def _lead(prev, end, comp, stock, part, moves_z):
-    w = GCodeWriter(); w._x, w._z = end; w._conv, w._fmt, w._n, w._feed = 1.0, ".4f", 10, None
-    pr = SimpleNamespace(stock_boundary=stock, finished_part_boundary=part)
-    moves = [SimpleNamespace(z=z) for z in moves_z]
-    tool = SimpleNamespace(nose_radius=0.016)
-    return w._comp_lead_out(prev, end, tool, comp, moves, pr)
+    """planners/comp_contour.comp_lead_out with the stock / part given as
+    polygons (the pipeline asks the kernel's zone faces the same question)."""
+    from shapely.geometry import Point, Polygon
+    from planners.comp_contour import comp_lead_out
+    S, P = Polygon(stock), Polygon(part)
+    return comp_lead_out(prev, end, 0.016, comp, moves_z,
+                         lambda p: P.contains(Point(p)), lambda p: S.contains(Point(p)))
 
 
 def test_lead_out_when_material_beyond_od_wall_end():
     stock = [(0.0, 0.1), (1.0, 0.1), (1.0, -1.0), (0.0, -1.0)]       # bar continues to -1.0
     part = [(0.5, 0.0), (0.0, 0.0), (0.0, -0.6), (0.8, -0.6), (0.8, -0.3), (0.5, -0.3)]
     out = _lead((0.8, -0.3), (0.8, -0.6), "G42", stock, part, [0.0, -0.3, -0.6])
-    assert len(out) == 1 and "X0.8840 Z-0.6000" in out[0]           # +X (air side), 2R+0.010
+    assert out == pytest.approx((0.884, -0.6))                      # +X (air side), 2R+0.010
 
 
 def test_no_lead_out_into_pilot_hole_air():
     stock = [(2.995, 0.05), (4.0, 0.05), (4.0, -1.0), (2.995, -1.0)]
     part = [(3.117, 0.0), (3.117, -0.568), (2.995, -0.568), (2.995, -1.0), (4.0, -1.0), (4.0, 0.0)]
-    assert _lead((3.117, -0.568), (2.995, -0.568), "G41", stock, part, [0.0, -0.568]) == []
+    assert _lead((3.117, -0.568), (2.995, -0.568), "G41", stock, part, [0.0, -0.568]) is None
 
 
 def test_no_lead_out_past_end_of_bar():
     stock = [(0.0, 0.1), (1.0, 0.1), (1.0, -0.8), (0.0, -0.8)]       # bar ends at -0.8
     part = [(0.5, 0.0), (0.0, 0.0), (0.0, -0.8), (0.8, -0.8), (0.8, -0.3), (0.5, -0.3)]
-    assert _lead((0.8, -0.3), (0.8, -0.8), "G42", stock, part, [0.0, -0.3, -0.8]) == []
+    assert _lead((0.8, -0.3), (0.8, -0.8), "G42", stock, part, [0.0, -0.3, -0.8]) is None
 
 
 # --- tool type vs OD/ID (owner slip 2026-11-09: boring bar on an OD block) ---
