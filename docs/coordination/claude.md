@@ -1,5 +1,13 @@
 # Claude status
 
+## 2026-11-12 — MAIN at 517fe43 (C3 merged); REVIEW-READY: roughing retract rule, branch claude/rough-retract
+
+- main 517fe43 = lathe-2026-11-12-c3. Live checkout pulled.
+- claude/rough-retract: owner retract rule (OD prev max +.005, ID prev min -.005, pass 1 stock OD +.005 / pilot -.001,
+  45 deg pull-off at walls, pocket exit to the mouth) planned in planners/rough_links.py; writer emits; pipeline validates
+  the same moves. New validation/rapid_collision.py (rapids vs remaining material). Touched: outputs/gcode_writer.py
+  (roughing section), pipeline/pipeline.py, geometry/arc_math.py + kernel.py, scripts/regression/regen.py, tests. NOT merged.
+
 ## 2026-11-12 — REVIEW-READY (claims released): C3 writer geometry, branch claude/c3-writer-geometry 59f6365
 
 - From main d9c7d36. Cutter-comp entry/contour/lead-out planned in planners/comp_contour.py (pipeline; TurningPass.comp_contour),
