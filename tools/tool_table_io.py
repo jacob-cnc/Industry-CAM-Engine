@@ -24,7 +24,7 @@ import tempfile
 from urllib.parse import quote, unquote
 from typing import List
 
-from pipeline.tool_card_data import ToolCardData
+from tools.tool_card_data import ToolCardData
 
 
 # ---------------------------------------------------------------------------

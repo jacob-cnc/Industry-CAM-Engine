@@ -40,8 +40,12 @@ def _refuse_if_linuxcnc_up() -> None:
 
 
 def _tool_resolver(table_path: str):
-    from pipeline.tool_card_data import tool_card_to_tool_def
-    from pipeline.tool_table_io import load_tool_table
+    # The tool modules moved pipeline/ -> tools/ on 2026-11-12; this script must also
+    # regenerate baselines from checkouts before the move, so use whichever exists.
+    import importlib.util
+    pkg = "tools" if importlib.util.find_spec("tools.tool_card_data") else "pipeline"
+    tool_card_to_tool_def = importlib.import_module(f"{pkg}.tool_card_data").tool_card_to_tool_def
+    load_tool_table = importlib.import_module(f"{pkg}.tool_table_io").load_tool_table
     cards = {c.tool_number: c for c in load_tool_table(table_path)}
     return lambda n: tool_card_to_tool_def(cards[n]) if n in cards else None
 

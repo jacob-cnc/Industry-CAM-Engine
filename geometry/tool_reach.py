@@ -185,7 +185,7 @@ def reach_messages(profile, tool) -> List[str]:
 # contour again. Everything downstream (roughing, finish, validation, G-code)
 # runs unchanged on that contour, so the unreachable material is simply left on
 # the part, and each region is reported with its X/Z range, why, and which
-# inserts from pipeline/insert_geometry_lookup.py would reach it. The operator
+# inserts from tools/insert_geometry_lookup.py would reach it. The operator
 # cuts it in its own block with a suitable tool. Multi-tool segment builds that
 # know what is already cut are future work.
 #
@@ -412,7 +412,7 @@ def _reaches(dirs, front, back, mode_id, left, tol=REACH_TOL_DEG):
 def suggest_tools(region_dirs, all_dirs, mode_id: bool):
     """(whole_part, this_region_only): insert names (with hand) from the insert
     table that reach the whole contour / only this region."""
-    from pipeline.insert_geometry_lookup import INSERT_GEOMETRY
+    from tools.insert_geometry_lookup import INSERT_GEOMETRY
     whole, region = [], []
     seen = set()
     for code in _TURNING_INSERTS:

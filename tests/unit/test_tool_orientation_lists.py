@@ -8,7 +8,7 @@ import dataclasses
 import pytest
 from PyQt5.QtWidgets import QApplication
 
-from pipeline.tool_card_data import TYPE_ORIENTATIONS, ToolCardData
+from tools.tool_card_data import TYPE_ORIENTATIONS, ToolCardData
 
 _app = QApplication.instance() or QApplication([])
 

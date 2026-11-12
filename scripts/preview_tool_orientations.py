@@ -9,8 +9,8 @@ from PyQt5.QtWidgets import QApplication
 from PyQt5.QtGui import QColor
 app = QApplication(sys.argv)
 from gui.components.orientation_graphic import OrientationGraphicWidget, _EDGE_COLOR, _CROSSHAIR_COLOR, _BODY_FILL, _NOSE_COLOR
-from pipeline.tool_card_data import TYPE_ORIENTATIONS
-from pipeline.insert_geometry_lookup import get_angles
+from tools.tool_card_data import TYPE_ORIENTATIONS
+from tools.insert_geometry_lookup import get_angles
 W, H = 26, 13           # characters per panel
 def near(c, ref, tol=40):
     return abs(c.red()-ref.red()) + abs(c.green()-ref.green()) + abs(c.blue()-ref.blue()) < tol

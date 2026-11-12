@@ -8,7 +8,7 @@ import pytest
 
 from models.tool import ToolDirection
 from outputs.gcode_writer import GCodeWriter
-from pipeline.tool_card_data import TYPE_ORIENTATIONS
+from tools.tool_card_data import TYPE_ORIENTATIONS
 
 
 @pytest.mark.parametrize("direction,is_id,expected", [

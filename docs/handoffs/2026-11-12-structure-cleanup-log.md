@@ -129,3 +129,18 @@ from contour_roughing_planner) — ratchet lowered.
   Pruning that dormant GUI rendering is a GUI change for an owner-checked session.
 - Verification: suite 1297 passed (1310 − 13 removed); regression 16 SAME, 5 BOTH-REFUSE.
   Dependency errors 60 → 56 (Shapely gone from outputs/ x4) — ratchet lowered.
+
+### Step 3a — tool modules pipeline/ → tools/ (2026-11-12 01:35 → 02:00)
+
+- `git mv` (history kept): tool_card_data, tool_table_io, filter_cascade,
+  insert_geometry_lookup from pipeline/ to tools/. They depend only on models/ and each
+  other; pipeline/ is orchestration. Fixes geometry/tool_reach importing pipeline/
+  (dependency errors 56 → 55, ratchet lowered).
+- References updated in code, tests, scripts and one code comment (models/tool.py).
+  gui/ edits are import lines only (tools_tab, main_window, components/tool_geometry_row).
+- Historical documents NOT rewritten (handoffs from earlier days, .kiro specs, ACTIVE.md's
+  recorded checker messages, this log): they record what was true when written.
+  ARCHITECTURE.md describes the current layout → one update at the end of the cleanup.
+- regen.py imports the tool modules from tools/ or pipeline/, whichever the checkout has,
+  so it can still regenerate baselines from checkouts before the move.
+- Verification: suite 1297 passed; regression 16 SAME, 5 BOTH-REFUSE.

@@ -278,8 +278,8 @@ def test_owner_reference_programs_check_clean(path, block):
     from outputs.cut_regions import CutRegionsUnavailable
     from pipeline.model_builder import build_from_fields
     from pipeline.pipeline import execute
-    from pipeline.tool_card_data import tool_card_to_tool_def
-    from pipeline.tool_table_io import load_tool_table
+    from tools.tool_card_data import tool_card_to_tool_def
+    from tools.tool_table_io import load_tool_table
     repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     tools = {c.tool_number: tool_card_to_tool_def(c) for c in load_tool_table(os.path.join(repo, "tool.tbl"))}
     pdata = block.get("params_data", block)

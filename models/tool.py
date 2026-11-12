@@ -89,7 +89,7 @@ class ToolDef:
     x_wear: float = 0.0
     z_wear: float = 0.0
     # Cutting-edge angles from the tool table (I / J words, insert defaults from
-    # pipeline/insert_geometry_lookup.py), degrees, in the tool's own frame:
+    # tools/insert_geometry_lookup.py), degrees, in the tool's own frame:
     # measured from its feed direction (toward the chuck for a right-hand tool)
     # round toward the air side. CNMG in a 95 deg holder = 95 / 175. 0 / 0 =
     # unknown or round: the reach check (geometry/tool_reach.py) is skipped.
