@@ -10,6 +10,7 @@ import math
 import pytest
 
 from planners.finish_planner import FinishPlanner
+from geometry.kernel import circumcenter
 from models.moves import ToolMove, MoveType, PassType
 from models.params import FinishingParams
 from models.constants import QUADRANT_CHORD_ERROR
@@ -26,12 +27,12 @@ def finishing_params():
 
 
 class TestCircumcenter:
-    """Tests for FinishPlanner._circumcenter static method."""
+    """Tests for geometry.kernel.circumcenter (moved from FinishPlanner._circumcenter 2026-11-12)."""
 
     def test_unit_circle_points(self):
         """Three points on a unit circle should yield center at origin."""
         # Points at 0°, 90°, 180° on unit circle
-        center = FinishPlanner._circumcenter(1.0, 0.0, 0.0, 1.0, -1.0, 0.0)
+        center = circumcenter(1.0, 0.0, 0.0, 1.0, -1.0, 0.0)
         assert center is not None
         cx, cz = center
         assert abs(cx - 0.0) < 1e-10
@@ -44,7 +45,7 @@ class TestCircumcenter:
         # Points at 0°, 120°, 240°
         angles = [0, 2 * math.pi / 3, 4 * math.pi / 3]
         pts = [(cx_expected + r * math.cos(a), cz_expected + r * math.sin(a)) for a in angles]
-        center = FinishPlanner._circumcenter(pts[0][0], pts[0][1], pts[1][0], pts[1][1], pts[2][0], pts[2][1])
+        center = circumcenter(pts[0][0], pts[0][1], pts[1][0], pts[1][1], pts[2][0], pts[2][1])
         assert center is not None
         cx, cz = center
         assert abs(cx - cx_expected) < 1e-10
@@ -52,18 +53,18 @@ class TestCircumcenter:
 
     def test_collinear_returns_none(self):
         """Collinear points should return None (no circumcenter)."""
-        center = FinishPlanner._circumcenter(0.0, 0.0, 1.0, 1.0, 2.0, 2.0)
+        center = circumcenter(0.0, 0.0, 1.0, 1.0, 2.0, 2.0)
         assert center is None
 
     def test_near_collinear_returns_none(self):
         """Nearly collinear points should return None."""
-        center = FinishPlanner._circumcenter(0.0, 0.0, 1.0, 1.0, 2.0, 2.0 + 1e-14)
+        center = circumcenter(0.0, 0.0, 1.0, 1.0, 2.0, 2.0 + 1e-14)
         assert center is None
 
     def test_right_angle_triangle(self):
         """Right angle triangle — circumcenter is midpoint of hypotenuse."""
         # Right angle at origin, legs along axes
-        center = FinishPlanner._circumcenter(0.0, 0.0, 4.0, 0.0, 0.0, 3.0)
+        center = circumcenter(0.0, 0.0, 4.0, 0.0, 0.0, 3.0)
         assert center is not None
         cx, cz = center
         # Circumcenter of right triangle = midpoint of hypotenuse

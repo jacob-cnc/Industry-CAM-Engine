@@ -234,3 +234,22 @@ Findings while reading the planners' kernel code (for 4b and the hand-math branc
 - Noted: both wire walks drop edges that are neither lines nor circles without a word
   (documented on wire_edges) — not triggered by line/arc offsets, but a silent missing cut if
   it ever were.
+
+### Step 4c — finish planner's curve fitting → geometry/curve_fit (04:15 → 04:50)
+
+- `FinishPlanner._decompose_curve_edge` evaluated the OCP curve (BRepAdaptor_Curve) and
+  carried its own 3-point circumcentre, line-deviation check and adaptive subdivision.
+  Moved verbatim to `geometry/curve_fit.py` (via geometry.kernel): `circumcenter`,
+  `max_line_deviation`, `subdivide_curve_spans`, and `curve_arc_spans(ocp_edge, start, end,
+  chord_error)` → per piece (start, mid, end) in diameter, same direction detection (.001)
+  and first/last endpoint snapping. The planner keeps building the G2/G3 moves (feeds, I/K).
+- tests/unit/test_edge_decomposition.py: `FinishPlanner._circumcenter` → `geometry.kernel.
+  circumcenter` (5 refs). Its 15 tests (real OCCT ellipse + B-spline edges) pass.
+- Reachability: CURVE edges need non-circular geometry; since quadrant arcs became true circles
+  (owner 2026-11-11) the zone builder makes only lines and circles, so no Generate path reaches
+  this today. Kept (tested) for future spline input; documented in the module.
+- Dependency errors 8 → 7. Hand math 23 → 24 is a counting artifact, not new math: the
+  checker counts one finding per function, and `_decompose_curve_edge`'s two sqrt distances
+  are now split between `curve_arc_spans` (direction check) and the planner (arc radius).
+  Recorded in the baseline history.
+- Verification: suite 1300 passed; regression 16 SAME, 5 BOTH-REFUSE.

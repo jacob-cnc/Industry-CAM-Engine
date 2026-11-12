@@ -25,6 +25,7 @@ from models.tool import ToolDef
 from models.params import FinishingParams
 from models.stock import StockDef
 from models.profile import ClosedProfile, ProfileMove, SegmentType, MachiningMode
+from geometry.kernel import circumcenter, curve_arc_spans
 
 if TYPE_CHECKING:
     from geometry.zone_query import ZoneQueryAPI, EdgeData
@@ -396,72 +397,24 @@ class FinishPlanner:
             List of ToolMove objects (G2/G3 arcs) approximating the curve.
         """
         import math
-        from OCP.BRepAdaptor import BRepAdaptor_Curve
 
         moves = []
-        ocp_edge = edge.ocp_edge
-        curve = BRepAdaptor_Curve(ocp_edge)
-
-        u_first = curve.FirstParameter()
-        u_last = curve.LastParameter()
-
-        # Determine parametric direction: does u_first correspond to edge.start or edge.end?
-        # Edge start/end are in diameter, curve points are in radius
-        p_first = curve.Value(u_first)
-        start_x_r = edge.start[0] / 2.0
-        start_z = edge.start[1]
-
-        dist_to_start = math.sqrt(
-            (p_first.X() - start_x_r) ** 2 + (p_first.Y() - start_z) ** 2
-        )
-
-        if dist_to_start < 0.001:
-            # Parametric direction matches edge direction
-            u_start = u_first
-            u_end = u_last
-        else:
-            # Parametric direction is reversed
-            u_start = u_last
-            u_end = u_first
-
-        # Adaptive subdivision: recursively split spans that exceed chord error
-        # Collect parameter spans as list of (u_a, u_b)
-        spans = self._subdivide_curve_spans(curve, u_start, u_end, chord_error)
+        # Arc pieces on the curve in cutting order, first/last snapped to the
+        # edge's ends (kernel: geometry/curve_fit.curve_arc_spans).
+        spans = curve_arc_spans(edge.ocp_edge, edge.start, edge.end, chord_error)
 
         # Convert each span into a circular arc ToolMove
         # Track the running start point for incremental I/K calculation
         running_x_dia = prev_x_dia
         running_z = prev_z
 
-        for i, (u_a, u_b) in enumerate(spans):
-            # Get the three points for arc fitting: start, mid, end
-            u_mid = (u_a + u_b) / 2.0
-            p_a = curve.Value(u_a)
-            p_mid = curve.Value(u_mid)
-            p_b = curve.Value(u_b)
-
-            # Convert from radius to diameter coordinates
-            ax_dia = p_a.X() * 2.0
-            az = p_a.Y()
-            mx_dia = p_mid.X() * 2.0
-            mz = p_mid.Y()
-            bx_dia = p_b.X() * 2.0
-            bz = p_b.Y()
-
-            # Use exact edge endpoints for first and last spans (no drift)
-            if i == 0:
-                ax_dia = edge.start[0]
-                az = edge.start[1]
-            if i == len(spans) - 1:
-                bx_dia = edge.end[0]
-                bz = edge.end[1]
-
+        for i, ((ax_dia, az), (mx_dia, mz), (bx_dia, bz)) in enumerate(spans):
             # Fit circular arc through three points (circumcenter in radius space)
             ax_r = ax_dia / 2.0
             mx_r = mx_dia / 2.0
             bx_r = bx_dia / 2.0
 
-            center = self._circumcenter(ax_r, az, mx_r, mz, bx_r, bz)
+            center = circumcenter(ax_r, az, mx_r, mz, bx_r, bz)
 
             if center is None:
                 # Degenerate (collinear) — emit as line move
@@ -511,144 +464,6 @@ class FinishPlanner:
             running_z = bz
 
         return moves
-
-    def _subdivide_curve_spans(
-        self, curve, u_start: float, u_end: float, chord_error: float,
-        max_depth: int = 12
-    ) -> List[tuple]:
-        """Adaptively subdivide a curve into spans where circular arc fit is within tolerance.
-
-        Uses a stack-based approach to avoid deep recursion. For each candidate span,
-        computes the maximum deviation between the fitted arc and the true curve at
-        several sample points. If deviation exceeds chord_error, the span is split.
-
-        Returns:
-            List of (u_a, u_b) parameter pairs in traversal order.
-        """
-        import math
-
-        result = []
-        # Stack of (u_a, u_b, depth)
-        stack = [(u_start, u_end, 0)]
-
-        while stack:
-            u_a, u_b, depth = stack.pop()
-
-            # If we've hit max depth, accept this span as-is
-            if depth >= max_depth:
-                result.append((u_a, u_b))
-                continue
-
-            # Sample three points for arc fitting
-            u_mid = (u_a + u_b) / 2.0
-            p_a = curve.Value(u_a)
-            p_mid = curve.Value(u_mid)
-            p_b = curve.Value(u_b)
-
-            ax_r, az = p_a.X(), p_a.Y()
-            mx_r, mz = p_mid.X(), p_mid.Y()
-            bx_r, bz = p_b.X(), p_b.Y()
-
-            # Fit circumscribed circle through three points
-            center = self._circumcenter(ax_r, az, mx_r, mz, bx_r, bz)
-
-            if center is None:
-                # Collinear points — check if the actual curve deviates from the line
-                # Sample additional points and check deviation from the line
-                max_dev = self._max_line_deviation(curve, u_a, u_b, ax_r, az, bx_r, bz)
-                if max_dev <= chord_error:
-                    result.append((u_a, u_b))
-                else:
-                    # Subdivide (push right first so left is processed first)
-                    stack.append((u_mid, u_b, depth + 1))
-                    stack.append((u_a, u_mid, depth + 1))
-                continue
-
-            cx_r, cz = center
-            radius = math.sqrt((ax_r - cx_r) ** 2 + (az - cz) ** 2)
-
-            # Check deviation at several interior sample points
-            max_dev = 0.0
-            n_check = 5
-            for j in range(1, n_check + 1):
-                t = j / (n_check + 1)
-                u_sample = u_a + t * (u_b - u_a)
-                p_sample = curve.Value(u_sample)
-                sx_r, sz = p_sample.X(), p_sample.Y()
-
-                # Distance from sample point to fitted arc center
-                dist = math.sqrt((sx_r - cx_r) ** 2 + (sz - cz) ** 2)
-                dev = abs(dist - radius)
-                if dev > max_dev:
-                    max_dev = dev
-
-            if max_dev <= chord_error:
-                # This span is within tolerance
-                result.append((u_a, u_b))
-            else:
-                # Subdivide (push right first so left is processed first)
-                stack.append((u_mid, u_b, depth + 1))
-                stack.append((u_a, u_mid, depth + 1))
-
-        # Sort result by parameter order
-        if u_start < u_end:
-            result.sort(key=lambda span: span[0])
-        else:
-            result.sort(key=lambda span: span[0], reverse=True)
-
-        return result
-
-    def _max_line_deviation(
-        self, curve, u_a: float, u_b: float,
-        ax_r: float, az: float, bx_r: float, bz: float
-    ) -> float:
-        """Compute the maximum deviation of the curve from a straight line between endpoints."""
-        import math
-
-        dx = bx_r - ax_r
-        dz = bz - az
-        line_len = math.sqrt(dx ** 2 + dz ** 2)
-        if line_len < 1e-12:
-            return 0.0
-
-        max_dev = 0.0
-        n_check = 5
-        for j in range(1, n_check + 1):
-            t = j / (n_check + 1)
-            u_sample = u_a + t * (u_b - u_a)
-            p_sample = curve.Value(u_sample)
-            sx_r, sz = p_sample.X(), p_sample.Y()
-
-            # Perpendicular distance from point to line
-            # Using cross product formula: |cross| / |line_vec|
-            cross = abs((sx_r - ax_r) * dz - (sz - az) * dx)
-            dev = cross / line_len
-            if dev > max_dev:
-                max_dev = dev
-
-        return max_dev
-
-    @staticmethod
-    def _circumcenter(
-        x1: float, z1: float, x2: float, z2: float, x3: float, z3: float
-    ) -> Optional[tuple]:
-        """Compute circumcenter of three points (the center of the circumscribed circle).
-
-        Returns (cx, cz) or None if points are collinear.
-        Uses the determinant formula for numerical stability.
-        """
-        ax, az = x1, z1
-        bx, bz = x2, z2
-        cx, cz = x3, z3
-
-        D = 2.0 * (ax * (bz - cz) + bx * (cz - az) + cx * (az - bz))
-        if abs(D) < 1e-12:
-            return None  # Collinear
-
-        ux = ((ax ** 2 + az ** 2) * (bz - cz) + (bx ** 2 + bz ** 2) * (cz - az) + (cx ** 2 + cz ** 2) * (az - bz)) / D
-        uz = ((ax ** 2 + az ** 2) * (cx - bx) + (bx ** 2 + bz ** 2) * (ax - cx) + (cx ** 2 + cz ** 2) * (bx - ax)) / D
-
-        return (ux, uz)
 
     def _moves_from_segments(
         self, segments: List[ProfileMove], finishing_params: FinishingParams,
