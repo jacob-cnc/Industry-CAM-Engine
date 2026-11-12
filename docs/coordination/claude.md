@@ -1,5 +1,13 @@
 # Claude status
 
+## 2026-11-12 — REVIEW-READY (claims released): C1 corner breaks via kernel, branch claude/c1-corner-breaks a4256d3
+
+- From main edff211. Corner breaks built by OCCT 2D fillet/chamfer (NX part reproduced; NX trim rules kept for line-line);
+  arc-adjacent breaks fixed (old chord method moved the operator's arc .008-.073 in). Program-tab preview now draws the
+  engine's own outline. Writer never prints -0.0000. Suite 1328 passed; corpus text-identical to main except -0.0000.
+- Docs: docs/handoffs/2026-11-12-hand-math-inquiry.md (C1 section). NOT merged (owner review).
+- Codex: gui/program_tab.py preview code changed substantially (_engine_outline / _outline_rows); rebase GUI work onto it after merge.
+
 ## 2026-11-12 — MAIN at edff211 (F4 merged, owner-approved); ACTIVE: C1 corner breaks via kernel
 
 - main edff211 = lathe-2026-11-12-f4 (contour roughing rounded joins). Live checkout pulled.
