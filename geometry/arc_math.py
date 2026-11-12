@@ -174,3 +174,10 @@ def r_extent(arc: Arc) -> Tuple[float, float]:
         rs += [piece.start[0], piece.end[0]]
     return min(rs), max(rs)
 
+
+def signed_arc_radius(start, end, center, radius) -> float:
+    """Build123d RadiusArc sign for a minor arc start->end about center.
+    Verified empirically: +R puts the centre to the RIGHT of travel
+    (sketch X = radius, Y = Z), -R to the LEFT."""
+    side = (end[0] - start[0]) * (center[1] - start[1]) - (end[1] - start[1]) * (center[0] - start[0])
+    return -radius if side > 0 else radius

@@ -343,3 +343,27 @@ reaches its circle's top. Compared with the exact arc extent (arc_math pieces) o
 280 roughing passes over-state, by up to 3.58 in (capped at the safe X); the rule is never LOW. So
 today's retracts are higher than needed (safe side). Exact values would shorten those rapids but
 bring them closer to material — a clearance judgement, so nothing was changed.
+
+## C2 — tool reach from the kernel (owner approved 2026-11-12, branch claude/c2-tool-reach-v2)
+
+Probe first (`scripts/hand_math/reach_bridge_probe.py`): the polyline construction (arcs every 0.5°)
+put the bridge line's start within .000001–.0013 in of the exact tangent point and its end exactly;
+the one large difference (.061, Arc corners) is the deliberate "no sliver after the concave corner"
+snap, kept.
+
+Now (`geometry/tool_reach.py`):
+- contour directions come from the kernel's own edges (`zone_builder.edge_from_coords`): both ends
+  and, on arcs, the quadrant points (`Edge.find_tangent` at 0/90/180/270°);
+- a bridge starts at a line's start or at the arc point whose tangent reaches the insert's limit
+  (`find_tangent`, oriented), walking back over pieces already steeper than the limit; it ends at the
+  ray's first kernel intersection with the contour (`find_intersection_points`), snapped to the
+  piece end when only a sliver would remain;
+- the canonical frame (OD/ID, right/left hand, fall/climb) is a point/direction mapping (`_Frame`),
+  no mirrored geometry; bridges are applied per contour piece; cut-short arcs keep their circle
+  (`face_ops.circle_of`, `arc_math.signed_arc_radius` - now shared with the corner solver);
+- `densify_coords` (used by cut_regions) samples the kernel edges (`sample_outline`).
+hand_math 19 → 15.
+
+Verification: tests/integration/test_tool_reach.py (all, incl. the LinuxCNC run) and the full suite pass.
+Corpus vs main d83862f: finished parts within .000073 in (radius), gouge 0, left 0 everywhere; the
+changes are the bridge starts moving onto the exact tangent point (roughing ends .0001–.0002 later in Z).

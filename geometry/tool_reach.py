@@ -34,8 +34,6 @@ import math
 from dataclasses import dataclass
 from typing import List, Tuple
 
-from geometry.arc_entry import quadrant_centre, radius_arc_sweep
-from geometry.arc_math import radius_arc_centre
 
 # A violation smaller than this (degrees) is not reported: tool-table angles are
 # insert defaults, not measured holders.
@@ -51,54 +49,46 @@ class ReachProblem:
     kind: str               # "rise" (front edge) or "fall" (back edge)
 
 
-def _tangents_of(c0: dict, c1: dict) -> List[Tuple[Tuple[float, float], Tuple[float, float]]]:
-    """[(point (r, z), unit travel direction)] along one contour piece c0 -> c1
-    (coords from geometry.zone_builder.profile_to_radius_coords)."""
-    p0 = (c0["x_radius"], c0["z"])
-    p1 = (c1["x_radius"], c1["z"])
-    d = (p1[0] - p0[0], p1[1] - p0[1])
-    L = math.hypot(*d)
-    if L < 1e-9:
-        return []
-    centre, sweep, R = None, 0.0, 0.0
-    if c1.get("quadrant", False):
-        centre = quadrant_centre(p0, p1, c1.get("quadrant_sign", 1))
-        a0 = math.atan2(p0[1] - centre[1], p0[0] - centre[0])
-        a1 = math.atan2(p1[1] - centre[1], p1[0] - centre[0])
-        sweep = math.atan2(math.sin(a1 - a0), math.cos(a1 - a0))
-        R = math.hypot(p0[0] - centre[0], p0[1] - centre[1])
-    elif abs(c1.get("radius", 0.0) or 0.0) > 1e-9 and str(c1.get("type", "")).lower().endswith("arc"):
-        r = c1["radius"]
-        centre = radius_arc_centre(p0, p1, r)
-        if centre is not None:
-            sweep = radius_arc_sweep(p0, p1, centre, r)
-            R = abs(r)
-    if centre is None or abs(sweep) < 1e-9 or R < 1e-9:
-        u = (d[0] / L, d[1] / L)
-        return [(p0, u), (p1, u)]
-    a0 = math.atan2(p0[1] - centre[1], p0[0] - centre[0])
-    angles = [a0, a0 + sweep]
-    k = math.ceil(min(a0, a0 + sweep) / (math.pi / 2))
-    while k * math.pi / 2 < max(a0, a0 + sweep):
-        angles.append(k * math.pi / 2)                 # quadrant points: tangent extremes
-        k += 1
-    s = 1.0 if sweep > 0 else -1.0
+def _contour_coords(profile):
+    from geometry.arc_entry import normalize_profile
+    from geometry.zone_builder import profile_to_radius_coords
+    return profile_to_radius_coords(normalize_profile(profile))
+
+
+def _edges_of(coords):
+    """The kernel edge of every contour piece coords[k] -> coords[k+1] (None for
+    zero length), built exactly like the finished part (zone_builder)."""
+    from geometry.zone_builder import edge_from_coords
+    return [edge_from_coords(a, b) for a, b in zip(coords, coords[1:])]
+
+
+def _unit(v):
+    n = math.hypot(v[0], v[1])
+    return (v[0] / n, v[1] / n) if n > 1e-15 else (0.0, 0.0)
+
+
+def _edge_tangents(e) -> List[Tuple[Tuple[float, float], Tuple[float, float]]]:
+    """[(point, unit travel direction)] at both ends of a kernel edge and, on an
+    arc, at every quadrant point inside it (where its direction is axis-
+    aligned: the steepest / flattest tangents)."""
+    ts = {0.0, 1.0}
+    if e.geom_type.name == "CIRCLE":
+        for ang in (0.0, 90.0, 180.0, 270.0):
+            ts.update(t for t in e.find_tangent(ang) if 0.0 < t < 1.0)
     out = []
-    for a in sorted(angles, key=lambda a: (a - a0) * s):
-        pt = (centre[0] + R * math.cos(a), centre[1] + R * math.sin(a))
-        out.append((pt, (-s * math.sin(a), s * math.cos(a))))
+    for t in sorted(ts):
+        p, d = e.position_at(t), e.tangent_at(t)
+        out.append(((p.X, p.Y), _unit((d.X, d.Y))))
     return out
 
 
 def contour_tangents(profile) -> List[Tuple[Tuple[float, float], Tuple[float, float]]]:
     """Every (point, unit direction) the finished contour has, in profile order,
-    corner breaks included. Radius space."""
-    from geometry.arc_entry import normalize_profile
-    from geometry.zone_builder import profile_to_radius_coords
-    coords = profile_to_radius_coords(normalize_profile(profile))
+    corner breaks included. Radius space; from the kernel's own edges."""
     out = []
-    for c0, c1 in zip(coords, coords[1:]):
-        out.extend(_tangents_of(c0, c1))
+    for e in _edges_of(_contour_coords(profile)):
+        if e is not None:
+            out.extend(_edge_tangents(e))
     return out
 
 
@@ -198,121 +188,24 @@ def reach_messages(profile, tool) -> List[str]:
 # thing seen from the other end (Z mirrored, order reversed).
 
 _TURNING_INSERTS = ("CNMG", "CCMT", "WNMG", "DNMG", "DCMT", "VNMG", "TNMG", "SNMG")
-_DENSIFY_DEG = 0.5
-
-
-def _piece_geom(c0, c1):
-    """(centre, sweep, R) of an arc piece c0 -> c1, or None for a line."""
-    p0, p1 = (c0["x_radius"], c0["z"]), (c1["x_radius"], c1["z"])
-    if c1.get("quadrant", False):
-        c = quadrant_centre(p0, p1, c1.get("quadrant_sign", 1))
-        a0 = math.atan2(p0[1] - c[1], p0[0] - c[0])
-        a1 = math.atan2(p1[1] - c[1], p1[0] - c[0])
-        return c, math.atan2(math.sin(a1 - a0), math.cos(a1 - a0)), math.hypot(p0[0] - c[0], p0[1] - c[1])
-    r = c1.get("radius", 0.0) or 0.0
-    if abs(r) > 1e-9 and str(c1.get("type", "")).lower().endswith("arc"):
-        c = radius_arc_centre(p0, p1, r)
-        if c is not None:
-            return c, radius_arc_sweep(p0, p1, c, r), abs(r)
-    return None
 
 
 def densify_coords(coords):
-    """Polyline of the contour in radius space, and for each polyline segment
-    the coord piece k (coords[k] -> coords[k+1]) it lies on."""
-    pts = [(coords[0]["x_radius"], coords[0]["z"])]
+    """Polyline of the contour in radius space, ON the kernel's edges
+    (geometry.zone_builder.sample_outline), and for each polyline segment the
+    coord piece k (coords[k] -> coords[k+1]) it lies on."""
+    from geometry.zone_builder import sample_outline
+    pieces = sample_outline(coords)
+    pts = list(pieces[0])
     seg_piece = []
-    for k in range(len(coords) - 1):
-        c0, c1 = coords[k], coords[k + 1]
-        p1 = (c1["x_radius"], c1["z"])
-        g = _piece_geom(c0, c1)
-        if g is None:
-            sub = [p1]
-        else:
-            c, sw, R = g
-            a0 = math.atan2(pts[-1][1] - c[1], pts[-1][0] - c[0])
-            n = max(2, int(math.ceil(abs(math.degrees(sw)) / _DENSIFY_DEG)))
-            sub = [(c[0] + R * math.cos(a0 + sw * i / n), c[1] + R * math.sin(a0 + sw * i / n))
-                   for i in range(1, n)] + [p1]
-        for q in sub:
+    for k, piece in enumerate(pieces[1:]):
+        if piece is None:
+            piece = [pts[-1], (coords[k + 1]["x_radius"], coords[k + 1]["z"])]
+        for q in piece[1:]:
             if math.hypot(q[0] - pts[-1][0], q[1] - pts[-1][1]) > 1e-12:
                 pts.append(q)
                 seg_piece.append(k)
     return pts, seg_piece
-
-
-def _ray_hit(a, u, p, q):
-    """t > 0 where the ray a + t u meets segment p-q, or None."""
-    d = (q[0] - p[0], q[1] - p[1])
-    den = u[0] * d[1] - u[1] * d[0]
-    if abs(den) < 1e-15:
-        return None
-    w = (p[0] - a[0], p[1] - a[1])
-    t = (w[0] * d[1] - w[1] * d[0]) / den
-    s = (w[0] * u[1] - w[1] * u[0]) / den
-    if t > 1e-9 and -1e-9 <= s <= 1 + 1e-9:
-        return t
-    return None
-
-
-def _shadow_pass(pts, max_fall_deg, tol_deg, seg_piece=None, snap_len=0.0):
-    """Canonical frame (material below, travel -Z). Returns bridges
-    [(segA, A, segB, B)]: the contour from A (start of polyline segment segA)
-    to B (on segment segB) is replaced by the line A-B. segB None: to the end."""
-    th = math.radians(max_fall_deg)
-    u = (-math.sin(th), -math.cos(th))
-    out = []
-    cur, i, n = pts[0], 0, len(pts) - 1
-    floor = 0                        # can't back up past the last bridge end
-
-    def steeper(a, b):               # chord a -> b falls more steeply than the limit
-        d = (b[0] - a[0], b[1] - a[1])
-        return math.hypot(*d) > 1e-12 and math.degrees(math.atan2(d[0], -d[1])) < -max_fall_deg
-
-    while i < n:
-        nxt = pts[i + 1]
-        d = (nxt[0] - cur[0], nxt[1] - cur[1])
-        if math.hypot(*d) < 1e-12:
-            i += 1
-            cur = pts[i]
-            continue
-        phi = math.degrees(math.atan2(d[0], -d[1]))
-        if phi < -(max_fall_deg + tol_deg):
-            # start where the contour first got steeper than the limit itself (on a
-            # convex arc that is the tangent point, within the densify step)
-            while i - 1 >= floor and cur == pts[i] and steeper(pts[i - 1], pts[i]):
-                i -= 1
-                cur = pts[i]
-            best = None
-            for j in range(i + 1, n):
-                t = _ray_hit(cur, u, pts[j], pts[j + 1])
-                if t is not None and (best is None or t < best[0]):
-                    best = (t, j)
-            if best is None:                           # runs out past the end of the contour
-                zt = pts[n][1]
-                t = (zt - cur[1]) / u[1] if u[1] < -1e-12 else 0.0
-                out.append((i, cur, None, (cur[0] + t * u[0], cur[1] + t * u[1])))
-                break
-            t, j = best
-            b = (cur[0] + t * u[0], cur[1] + t * u[1])
-            # Don't leave a sliver of a contour piece after the concave corner the
-            # line makes: LinuxCNC's cutter comp refuses a short arc or line there
-            # ("... in concave corner cannot be reached by the tool without
-            # gouging"). Run the line on to the end of that piece instead: further
-            # along the rising contour, so it falls less and stays in air.
-            if seg_piece is not None and snap_len > 0.0:
-                k, rest, jj = seg_piece[j], math.hypot(pts[j + 1][0] - b[0], pts[j + 1][1] - b[1]), j
-                while jj + 1 < n and seg_piece[jj + 1] == k:
-                    jj += 1
-                    rest += math.hypot(pts[jj + 1][0] - pts[jj][0], pts[jj + 1][1] - pts[jj][1])
-                if rest < snap_len:
-                    j, b = jj, pts[jj + 1]
-            out.append((i, cur, j, b))
-            i, cur, floor = j, b, j + 1
-            continue
-        i += 1
-        cur = pts[i]
-    return out
 
 
 def _snap_len(tool) -> float:
@@ -320,27 +213,166 @@ def _snap_len(tool) -> float:
     return 4.0 * max(getattr(tool, "nose_radius", 0.0), 0.0) + 0.010
 
 
-def _signed_radius(c0, c1):
-    """A piece as a signed-R arc (+R = clockwise), for splitting a Q."""
-    g = _piece_geom(c0, c1)
-    if g is None:
-        return 0.0
-    c, sw, R = g
-    return R if sw < 0 else -R
+class _Frame:
+    """The tool's canonical frame: material below, travel toward -Z, the check
+    is "falls no steeper than max_fall". s mirrors r (ID, left hand - see
+    _phi); mirror_z also reverses the travel (a climb seen from the other end
+    is a fall). Points map by (s r, +/- z); travel directions by the same map,
+    negated when the order is reversed."""
+
+    def __init__(self, s: float, mirror_z: bool):
+        self.s, self.m = s, mirror_z
+
+    def point(self, p):                      # real -> canonical (and back: same map)
+        return (self.s * p[0], -p[1] if self.m else p[1])
+
+    def travel(self, d):                     # real forward direction -> canonical travel
+        c = (self.s * d[0], -d[1] if self.m else d[1])
+        return (-c[0], -c[1]) if self.m else c
+
+    def real_travel(self, c):                # canonical travel -> real forward direction
+        if self.m:
+            c = (-c[0], -c[1])
+        return (self.s * c[0], -c[1] if self.m else c[1])
 
 
-def _piece_to(c0, c1, p):
-    """Coord element for the piece c0 -> c1 cut short to end at point p
-    (same circle for arcs; a partial quadrant becomes a signed R)."""
-    g = _piece_geom(c0, c1)
-    if g is None:
-        return {"type": c1["type"], "x_radius": p[0], "z": p[1], "radius": 0.0,
-                "quadrant": False, "quadrant_sign": 1}
-    c, _sw, R = g
-    a = math.atan2(p[1] - c[1], p[0] - c[0])                  # snap onto the circle
-    p = (c[0] + R * math.cos(a), c[1] + R * math.sin(a))
-    return {"type": c1["type"], "x_radius": p[0], "z": p[1], "radius": _signed_radius(c0, c1),
+def _phi_c(c) -> float:
+    """Canonical travel direction's angle from -Z toward +r, degrees."""
+    return math.degrees(math.atan2(c[0], -c[1]))
+
+
+def _kernel_bridges(coords, frame: _Frame, max_fall: float, tol_deg: float, snap_len: float):
+    """Bridges in FORWARD piece order: [(kA, A, kB, B)] - the contour from A (on
+    piece kA; kA = -1: the line starts the contour) to B (on piece kB; None: to
+    the end) is replaced by the line A-B. Everything from the kernel: where the
+    contour gets steeper than max_fall (a line's start, or the arc point whose
+    tangent reaches the limit - Edge.find_tangent), and where the ray at the
+    limit meets the contour again (edge intersections)."""
+    from build123d import Line, Vector
+    edges = _edges_of(coords)
+    n_pc = len(edges)
+    order = list(range(n_pc))[::-1] if frame.m else list(range(n_pc))   # canonical order
+    th = math.radians(max_fall)
+    u_c = (-math.sin(th), -math.cos(th))                               # canonical limit direction
+
+    def cpar(t):                     # canonical param -> real param on the edge
+        return 1.0 - t if frame.m else t
+
+    def phi_at(k, t):                # canonical phi at canonical param t of piece k
+        d = edges[k].tangent_at(cpar(t))
+        return _phi_c(frame.travel((d.X, d.Y)))
+
+    def pos(k, t):
+        p = edges[k].position_at(cpar(t))
+        return (p.X, p.Y)
+
+    def limit_param(k):
+        """Canonical param on piece k where the canonical direction is exactly
+        the limit (a line: its whole length, so 0)."""
+        e = edges[k]
+        if e.geom_type.name != "CIRCLE":
+            return 0.0
+        dr = frame.real_travel(u_c)
+        ang = math.degrees(math.atan2(dr[1], dr[0])) % 360.0
+        ts = [cpar(t) for t in e.find_tangent(ang) if -1e-9 <= t <= 1 + 1e-9]
+        return min(ts) if ts else 0.0
+
+    out_c = []                        # canonical: (iA, A, iB or None, B), i = index into order
+    i, floor = 0, 0
+    t0 = 0.0                          # canonical param where the walk resumes on order[i]
+    while i < n_pc:
+        k = order[i]
+        if edges[k] is None:
+            i, t0 = i + 1, 0.0
+            continue
+        steep_end = phi_at(k, 1.0) < -(max_fall + tol_deg)
+        steep_start = phi_at(k, max(t0, 0.0)) < -(max_fall + tol_deg)
+        if not (steep_start or steep_end):
+            i, t0 = i + 1, 0.0
+            continue
+        # Where the contour first got steeper than the limit itself (no
+        # tolerance): walk back over pieces that are steeper than the limit end
+        # to end, stop inside the piece where it crosses the limit; never back
+        # past where the last bridge ended (floor) or past a resumed mid-piece
+        # point.
+        if steep_start and t0 > 1e-12:
+            iA, tA = i, t0
+        elif steep_start:
+            iA, tA = i, 0.0
+            while iA - 1 >= floor and edges[order[iA - 1]] is not None \
+                    and phi_at(order[iA - 1], 1.0) < -max_fall:
+                iA -= 1
+                if phi_at(order[iA], 0.0) >= -max_fall:      # it crosses the limit inside
+                    tA = limit_param(order[iA])
+                    break
+        else:                                                # an arc turning steeper
+            iA, tA = i, max(limit_param(k), t0)
+        A = pos(order[iA], tA)
+        # the ray at the limit from A, and where it meets the contour again
+        Ar = frame.point(A)
+        far = frame.point((Ar[0] + 50.0 * u_c[0], Ar[1] + 50.0 * u_c[1]))
+        ray = Line(A, far)
+        best = None
+        for jj in range(iA, n_pc):
+            kk = order[jj]
+            if edges[kk] is None:
+                continue
+            for q in edges[kk].find_intersection_points(ray):
+                d = math.hypot(q.X - A[0], q.Y - A[1])
+                if d > 1e-7 and (best is None or d < best[0]):
+                    best = (d, jj, (q.X, q.Y))
+        if best is None:                                  # runs out past the end of the contour
+            last = frame.point(pos(order[-1], 1.0))
+            t = (last[1] - Ar[1]) / u_c[1] if u_c[1] < -1e-12 else 0.0
+            out_c.append((iA, A, None, frame.point((Ar[0] + t * u_c[0], Ar[1] + t * u_c[1]))))
+            break
+        _, jB, B = best
+        # Don't leave a sliver of a contour piece after the concave corner the
+        # line makes: LinuxCNC's cutter comp refuses a short arc or line there
+        # ("... in concave corner cannot be reached by the tool without
+        # gouging"). Run the line on to the end of that piece instead: further
+        # along the rising contour, so it falls less and stays in air.
+        eB = edges[order[jB]]
+        tB = cpar(eB.param_at_point(Vector(B[0], B[1], 0)))
+        rest = eB.length * (1.0 - tB)
+        if snap_len > 0.0 and rest < snap_len:
+            B = pos(order[jB], 1.0)
+            tB = 1.0
+        out_c.append((iA, A, jB, B))
+        i, t0 = (jB, tB) if tB < 1.0 - 1e-12 else (jB + 1, 0.0)
+        floor = i
+    # forward piece indices
+    fwd = []
+    for iA, A, iB, B in out_c:
+        kA = order[iA]
+        if not frame.m:
+            fwd.append((kA, A, order[iB] if iB is not None else None, B))
+        else:                                             # reversed: swap ends
+            if iB is None:                                # ran past the START of the contour
+                start_z = coords[0]["z"]
+                fwd.append((-1, (B[0], start_z), kA, A))
+            else:
+                fwd.append((order[iB], B, kA, A))
+    fwd.sort(key=lambda b: b[0])
+    return fwd
+
+
+def _arc_end_at(coords, k, p, edges):
+    """Coord element for piece k cut short to end at p (a line, or a plain arc
+    of the same circle with its signed radius - a partial quadrant is no longer
+    a quadrant)."""
+    c1 = coords[k + 1]
+    e = edges[k]
+    base = {"type": c1["type"], "x_radius": p[0], "z": p[1], "radius": 0.0,
             "quadrant": False, "quadrant_sign": 1}
+    if e is None or e.geom_type.name != "CIRCLE":
+        return base
+    from geometry.arc_math import signed_arc_radius
+    from geometry.face_ops import circle_of
+    centre, R = circle_of(e)
+    p0 = (coords[k]["x_radius"], coords[k]["z"])
+    base["radius"] = signed_arc_radius(p0, (c1["x_radius"], c1["z"]), centre, R)
+    return base
 
 
 def _line(p, kind):
@@ -348,58 +380,59 @@ def _line(p, kind):
             "quadrant": False, "quadrant_sign": 1}
 
 
-def _apply_bridges(coords, seg_piece, bridges, line_type):
+def _apply_bridges(coords, bridges, line_type):
     """New coords with each bridge's stretch replaced by a straight line.
-    bridges: [(segA, A, segB or None, B)] in forward order, non-overlapping."""
+    bridges: [(kA, A, kB or None, B)] in forward order, non-overlapping."""
+    edges = _edges_of(coords)
+
+    def tail(kb, B):
+        """The rest of piece kb after B (same circle for an arc)."""
+        end = coords[kb + 1]
+        if math.hypot(B[0] - end["x_radius"], B[1] - end["z"]) <= 1e-9:
+            return []
+        return [_arc_end_at(coords, kb, (end["x_radius"], end["z"]), edges)
+                if edges[kb] is not None and edges[kb].geom_type.name == "CIRCLE" else dict(end)]
+
     out = [dict(coords[0])]
     k_next = 1                       # next original element to copy (it ends piece k_next-1)
-    for segA, A, segB, B in bridges:
-        if segA == -1:               # the line starts the contour (undercut back to the face)
-            out = [dict(coords[0], x_radius=A[0], z=A[1])]
-            out.append(_line(B, line_type))
-            kb = seg_piece[segB]
-            end = coords[kb + 1]
-            if math.hypot(B[0] - end["x_radius"], B[1] - end["z"]) > 1e-9:
-                e = dict(end)
-                if _piece_geom(coords[kb], coords[kb + 1]) is not None:
-                    e["radius"] = _signed_radius(coords[kb], coords[kb + 1])
-                    e["quadrant"] = False
-                out.append(e)
+    for ka, A, kb, B in bridges:
+        if ka == -1:                 # the line starts the contour (undercut back to the face)
+            out = [dict(coords[0], x_radius=A[0], z=A[1]), _line(B, line_type)] + tail(kb, B)
             k_next = kb + 2
             continue
-        ka = seg_piece[segA]
         out.extend(dict(c) for c in coords[k_next:ka + 1])
         start = coords[ka]
         if math.hypot(A[0] - start["x_radius"], A[1] - start["z"]) > 1e-9:
-            out.append(_piece_to(coords[ka], coords[ka + 1], A))
+            out.append(_arc_end_at(coords, ka, A, edges))
         out.append(_line(B, line_type))
-        if segB is None:
+        if kb is None:
             return out
-        kb = seg_piece[segB]
-        end = coords[kb + 1]
-        if math.hypot(B[0] - end["x_radius"], B[1] - end["z"]) > 1e-9:
-            e = dict(end)
-            if e.get("quadrant", False) or _piece_geom(coords[kb], coords[kb + 1]) is not None:
-                e["radius"] = _signed_radius(coords[kb], coords[kb + 1])
-                e["quadrant"] = False
-            out.append(e)
+        out.extend(tail(kb, B))
         k_next = kb + 2
     out.extend(dict(c) for c in coords[k_next:])
     return out
 
 
-def _canon(pts, s, mirror_z):
-    q = [(s * r, z) for r, z in pts]
-    if mirror_z:
-        q = [(r, -z) for r, z in reversed(q)]
-    return q
-
-
-def _uncanon_point(p, s, mirror_z):
-    r, z = p
-    if mirror_z:
-        z = -z
-    return (s * r, z)
+def _stretch(coords, ka, A, kb, B, step=0.002):
+    """Points (r, z) along the original contour from A (piece ka) to B (piece
+    kb; None = to the end), sampled on the kernel's edges - for the report."""
+    from build123d import Vector
+    edges = _edges_of(coords)
+    last = len(edges) - 1 if kb is None else kb
+    pts = [A]
+    for k in range(max(ka, 0), last + 1):
+        e = edges[k]
+        if e is None:
+            continue
+        t0 = e.param_at_point(Vector(A[0], A[1], 0)) if k == ka else 0.0
+        t1 = e.param_at_point(Vector(B[0], B[1], 0)) if (k == kb) else 1.0
+        n = max(1, int(math.ceil(e.length * abs(t1 - t0) / step)))
+        for i in range(1, n + 1):
+            p = e.position_at(t0 + (t1 - t0) * i / n)
+            pts.append((p.X, p.Y))
+    if kb is None or math.hypot(pts[-1][0] - B[0], pts[-1][1] - B[1]) > 1e-9:
+        pts.append(B)
+    return pts
 
 
 def _reaches(dirs, front, back, mode_id, left, tol=REACH_TOL_DEG):
@@ -469,45 +502,23 @@ def make_reachable(profile, tool, tol_deg: float = REACH_TOL_DEG):
     from dataclasses import replace as dc_replace
     from models.profile import MachiningMode, ProfileMove, SegmentType
     from models.tool import ToolDirection
-    from geometry.arc_entry import normalize_profile
-    from geometry.zone_builder import profile_to_radius_coords
-
     if not tool_applies(tool) or not reach_problems(profile, tool, tol_deg):
         return profile, []
     F, B = tool.front_angle, tool.back_angle
     mode_id = profile.mode == MachiningMode.ID
     left = tool.direction == ToolDirection.LEFT
     s = -1.0 if (mode_id != left) else 1.0              # r mirror (ID, LH) - see _phi
-    coords = profile_to_radius_coords(normalize_profile(profile))
+    coords = _contour_coords(profile)
     line_type = coords[0]["type"]
     regions_raw = []
 
     for kind, mirror_z, max_fall in (("fall", False, 180.0 - B), ("rise", True, F)):
-        pts, seg_piece = densify_coords(coords)
-        cp = _canon(pts, s, mirror_z)
-        # rise: Z mirrored + order reversed turns "climb <= F" into "fall <= F"
-        cpiece = list(reversed(seg_piece)) if mirror_z else seg_piece
-        bridges = _shadow_pass(cp, max_fall, tol_deg, cpiece, _snap_len(tool))
+        bridges = _kernel_bridges(coords, _Frame(s, mirror_z), max_fall, tol_deg, _snap_len(tool))
         if not bridges:
             continue
-        n = len(pts) - 1
-        fwd = []
-        for segA, A, segB, Bp in bridges:
-            A0, B0 = _uncanon_point(A, s, mirror_z), _uncanon_point(Bp, s, mirror_z)
-            if not mirror_z:
-                fwd.append((segA, A0, segB, B0))
-            else:                                   # reversed order: swap ends
-                sa = (n - 1 - segB) if segB is not None else 0
-                sb = n - 1 - segA
-                if segB is None:                    # ran past the START of the contour
-                    sa, B0 = -1, (B0[0], pts[0][1])
-                fwd.append((sa, B0, sb, A0))
-        fwd.sort(key=lambda b: b[0])
-        coords = _apply_bridges(coords, seg_piece, fwd, line_type)
-        for sa, P, sb, Q in fwd:
-            last = n if sb is None else sb + 1
-            stretch = [P] + pts[max(sa, 0) + 1:last] + [Q]       # the contour being bridged
-            regions_raw.append((kind, P, Q, stretch))
+        stretches = [(kind, A, Q, _stretch(coords, ka, A, kb, Q)) for ka, A, kb, Q in bridges]
+        coords = _apply_bridges(coords, bridges, line_type)
+        regions_raw.extend(stretches)
 
     moves = []
     for c in coords:
