@@ -249,8 +249,9 @@ class ProgramTab(QWidget):
         self._right_panel = self._build_right_panel()
         self._splitter.addWidget(self._right_panel)
 
-        # Programming column opens at 420 px every launch (nothing cut off at
-        # that width); the user can drag it narrower (220 px min) or wider.
+        # Programming column opens at PROGRAM_COLUMN_WIDTH every launch (LINE
+        # rows fit, nothing cut off); the user can drag it narrower (220 px
+        # min) or wider.
         # It also widens on its own when the segment table needs more room
         # (r column open for a selected ARC row) and returns afterwards; see
         # _fit_program_column.
@@ -268,7 +269,13 @@ class ProgramTab(QWidget):
         for section in (self._section_parameters, self._section_profile):
             section.toggled.connect(lambda _e: self._fit_program_column())
 
-    PROGRAM_COLUMN_WIDTH = 420   # px, default programming-column width
+    # px, default programming-column width. Sized for the lathe's fonts (the
+    # style guide's JetBrains Mono / Inter aren't installed there; Qt uses
+    # DejaVu Sans Mono / DejaVu Sans, tests/test_runtime_env.py): the segment
+    # table with corner-break badges needs 419 px and its button row 416, plus
+    # 16 px of panel and section margins = 435 at 96 dpi. At the old 420 the
+    # right 5-9 px of the profile section (Move Down button edge) were cut off.
+    PROGRAM_COLUMN_WIDTH = 435
 
     def eventFilter(self, obj, event):  # noqa: N802 (Qt naming)
         from PyQt5.QtCore import QEvent
@@ -290,8 +297,22 @@ class ProgramTab(QWidget):
         target = self._user_column_width
         seg = self._segment_list
         if seg.isVisible() and seg.width() > 0:
-            chrome = self._left_panel.width() - seg.width()  # margins, scrollbar
-            target = max(target, seg.required_width() + chrome)
+            # Chrome measured from the structure: panel -> scroll viewport
+            # (margins, vertical scrollbar) + scroll content -> segment list
+            # (section margins). "panel width - segment width" was wrong when
+            # the list sat at its minimum width: the content was then wider than
+            # the viewport (horizontal scrolling off), its right edge was cut
+            # off, and the fit over-widened by the shortfall (lathe 2026-11-11).
+            scroll = getattr(self, "_left_scroll", None)
+            content = scroll.widget() if scroll is not None else None
+            if scroll is not None and content is not None:
+                chrome = (self._left_panel.width() - scroll.viewport().width()) \
+                    + (content.width() - seg.width())
+            else:
+                chrome = self._left_panel.width() - seg.width()
+            # The widget can't be narrower than its own minimum (the button row)
+            need = max(seg.required_width(), seg.minimumSizeHint().width())
+            target = max(target, need + chrome)
         if target != sizes[0]:
             total = sum(sizes)
             self._splitter.setSizes([target, max(0, total - target)])
@@ -345,6 +366,7 @@ class ProgramTab(QWidget):
 
         # Scrollable area for the accordion sections
         scroll = QScrollArea()
+        self._left_scroll = scroll          # _fit_program_column measures its viewport
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setFrameShape(QFrame.NoFrame)

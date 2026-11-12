@@ -25,8 +25,10 @@ import warnings
 
 import pytest
 
-if sys.platform == "win32":
-    os.environ.setdefault("QT_FONT_DPI", "96")
+# The lathe's display is 1920x1080 at 96 DPI (xdpyinfo, 2026-11-11). Offscreen Qt
+# defaults to 100 DPI, so pixel-budget tests measured a layout the lathe never
+# shows - and which one depended on test order. Pin 96 on every platform.
+os.environ.setdefault("QT_FONT_DPI", "96")
 
 # --- The suite never talks to the machine (lathe, 2026-11-11) -------------------
 # Tests run on the lathe's own Python (requirements-lathe.txt), which has

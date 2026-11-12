@@ -14,5 +14,6 @@ for p in milltask rtapi_app linuxcncsvr; do
     fi
 done
 [ $# -eq 0 ] && set -- tests
-exec env -u LD_LIBRARY_PATH -u PYTHONHOME -u PYTHONPATH QT_QPA_PLATFORM=offscreen \
+# Lathe display: 1920x1080 at 96 DPI (offscreen Qt would default to 100).
+exec env -u LD_LIBRARY_PATH -u PYTHONHOME -u PYTHONPATH QT_QPA_PLATFORM=offscreen QT_FONT_DPI=96 \
     timeout 1800 nice -n 10 /usr/bin/python3 -m pytest -q -p no:cacheprovider -rf "$@"

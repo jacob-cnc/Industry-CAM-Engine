@@ -1,5 +1,6 @@
 """Segment builder: Insert, numbering, large text, r column, and the
-Program tab's 420 px column that widens only to avoid overflow.
+Program tab's default-width column (ProgramTab.PROGRAM_COLUMN_WIDTH, 435 px on
+the lathe's fonts) that widens only to avoid overflow.
 
 Invariant-style checks (they hold for any segment list), not one layout.
 """
@@ -176,9 +177,9 @@ def _close(w):
     _app.processEvents()
 
 
-def test_program_column_420_widens_for_arc_and_returns():
+def test_program_column_default_widens_for_arc_and_returns():
     if not _real_fonts():
-        pytest.skip("needs real fonts: the 420 px budget is a pixel measurement")
+        pytest.skip("needs real fonts: the column budget is a pixel measurement")
     w = _program_window()
     try:
         pt = w.program_tab
@@ -188,20 +189,33 @@ def test_program_column_420_widens_for_arc_and_returns():
         for _ in range(3):
             _app.processEvents()
         line_w = pt._splitter.sizes()[0]
-        assert line_w >= 420
+        default = pt.PROGRAM_COLUMN_WIDTH
+        assert line_w >= default
         if dpi96:                       # the app's (and lathe's) layout
-            assert line_w == 420        # LINE rows fit: no widening
+            assert line_w == default    # LINE rows fit: no widening
         assert seg.width() >= seg.required_width()     # never overflows
         t = seg._table
         t.cellWidget(seg._segment_index_to_row(1), COL_TYPE).setCurrentText("ARC")
         for _ in range(4):
             _app.processEvents()
-        assert pt._splitter.sizes()[0] > line_w        # widened for r column
+        arc_w = pt._splitter.sizes()[0]
+        assert arc_w > line_w                          # widened for r column
         assert seg.width() >= seg.required_width()     # no overflow
         t.setCurrentCell(seg._segment_index_to_row(0), COL_X)
         for _ in range(4):
             _app.processEvents()
-        assert pt._splitter.sizes()[0] == line_w       # back to where it was
+        back = pt._splitter.sizes()[0]
+        assert back < arc_w                            # r column closed: shrinks back
+        assert seg.width() >= seg.required_width()     # no overflow
+        # ...to exactly what the content now needs: not necessarily line_w, since
+        # making a row an ARC flags its neighbours' corner-break badges
+        # ("R.03" -> "R.03!", arc-adjacent breaks unvalidated), which widens the
+        # row-number column (passed or failed by timing until 2026-11-11).
+        sa = pt._left_scroll
+        chrome = (pt._left_panel.width() - sa.viewport().width()) \
+            + (sa.widget().width() - seg.width())
+        need = max(seg.required_width(), seg.minimumSizeHint().width()) + chrome
+        assert back == max(pt.PROGRAM_COLUMN_WIDTH, need)
     finally:
         _close(w)
 

@@ -4,6 +4,9 @@
 #
 # Interpreter: Debian 12 /usr/bin/python3 3.11.2 - fixed: LinuxCNC 2.9.6's linuxcnc
 # and hal modules are built for it. From Debian (apt), kept: PyQt5 5.15.9 (system Qt).
+# Fonts (they set the GUI's pixel layout): the style guide's JetBrains Mono / Inter
+# are NOT installed; Qt falls back to DejaVu Sans Mono / DejaVu Sans from Debian
+# fonts-dejavu-core 2.37-6. Pinned in tests/test_runtime_env.py.
 # Everything below lives in ~/.local (pip --user --break-system-packages) and
 # shadows the older Debian copies (python3-shapely 1.8.5, python3-pyqtgraph 0.13.1,
 # python3-matplotlib 3.6.3 - the latter built for numpy 1, unusable with numpy 2).
