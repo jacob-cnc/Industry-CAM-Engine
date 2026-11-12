@@ -3,7 +3,7 @@
   "errors": {
     "dependency_violation": 2,
     "fallback_pattern": 4,
-    "hand_math": 15
+    "hand_math": 10
   },
   "_history": [
     "2026-11-12 main 01f6cf3: dependency 62, fallback 4, hand_math 22",
@@ -18,6 +18,7 @@
     "hand-math branch F6: one arc-centre implementation (geometry/arc_math.radius_arc_centre, kernel-checked to 1.4e-12); validator and arc_helpers delegate: hand_math 22 -> 20",
     "2026-11-12 C1 (claude/c1-corner-breaks): hand_math 20 -> 19. Corner breaks built by the kernel (OCCT 2D fillet/chamfer); the legacy arc-adjacent chord construction (_legacy_vertex) and the unreachable pre-solver code in zone_builder.profile_to_radius_coords removed.",
     "2026-11-12 C3 (claude/c3-writer-geometry): dependency_violation 4 -> 2. Cutter-comp entry / contour / lead-out decisions moved from outputs/gcode_writer.py to planners/comp_contour.py (planned in the pipeline, carried on TurningPass.comp_contour); the writer no longer imports geometry.arc_math or shapely.",
-    "2026-11-12 C2 (claude/c2-tool-reach): hand_math 19 -> 15. Tool reach from the kernel: tangents from kernel edges (find_tangent for arc limit points and quadrant points), bridge lines by kernel edge intersections, outline sampling on kernel edges; the hand arc geometry (_tangents_of, _piece_geom, _shadow_pass, _ray_hit) removed. circle_of / signed_arc_radius made shared (face_ops / arc_math)."
+    "2026-11-12 C2 (claude/c2-tool-reach): hand_math 19 -> 15. Tool reach from the kernel: tangents from kernel edges (find_tangent for arc limit points and quadrant points), bridge lines by kernel edge intersections, outline sampling on kernel edges; the hand arc geometry (_tangents_of, _piece_geom, _shadow_pass, _ray_hit) removed. circle_of / signed_arc_radius made shared (face_ops / arc_math).",
+    "2026-11-12 C5/C6 (claude/c456-leftovers): hand_math 15 -> 10. The unreachable curve-fitting path removed (geometry/curve_fit.py, FinishPlanner._decompose_curve_edge; corpus: 0 CURVE edges in 2339) - non-circular edges are refused, not approximated or dropped; cut_regions samples LinuxCNC's arcs on the canonical arc_math.Arc (identical to 2e-15)."
   ]
 }

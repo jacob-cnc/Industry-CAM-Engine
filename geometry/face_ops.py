@@ -76,10 +76,9 @@ def wire_edges(wire) -> list:
     Arcs come as canonical <= 90 deg pieces with the kernel's true sweep
     (geometry/arc_math).
 
-    DEBT: edges that are neither lines nor circles are SILENTLY DROPPED (both
-    planners did this). Offsets of lines/arcs only give lines/arcs, so it does
-    not trigger today - but a dropped edge would be a missing cut.
-    Raises on kernel exceptions.
+    An edge that is neither a line nor a circle raises ValueError (until
+    2026-11-12 it was silently dropped - a missing cut). Offsets of lines and
+    arcs only give lines and arcs. Raises on kernel exceptions.
     """
     from geometry.arc_math import arc_from_kernel, split_at_quadrants
     exp = BRepTools_WireExplorer(wire)
@@ -108,6 +107,10 @@ def wire_edges(wire) -> list:
                 out.append(((piece.start[0] * 2, piece.start[1]),
                             (piece.end[0] * 2, piece.end[1]), "ARC",
                             (loc.X() * 2, loc.Y()), ci.Radius()))
+        else:
+            raise ValueError(f"A non-circular edge (kernel curve type {ct}) from X{sd:.4f} "
+                             f"Z{sz:.4f} to X{ed:.4f} Z{ez:.4f}: only lines and circular arcs "
+                             "can be cut. Please report this.")
         exp.Next()
     return out
 

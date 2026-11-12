@@ -191,6 +191,25 @@ class CanonMove:
     pts: List[Tuple[float, float]]     # tip path, (r, z), densified, start included
 
 
+def _canon_arc_points(start, end, centre, rot):
+    """Points (r, z) along a LinuxCNC ARC_FEED, start and end included, on the
+    canonical arc (geometry/arc_math.Arc). rot > 0 is counter-clockwise in
+    LinuxCNC's G18 plane (Z, X) - clockwise in (r, z). A same-point arc is a
+    FULL circle, as LinuxCNC runs it (2026-11-12)."""
+    from geometry.arc_math import Arc, sweep_piece
+    sgn = -1.0 if rot > 0 else 1.0                       # direction in (r, z)
+    R = math.dist(start, centre)
+    sweep = sweep_piece(start, end, centre, sgn)
+    if abs(sweep) < 1e-12:
+        sweep = sgn * 2.0 * math.pi if math.dist(start, end) < 1e-12 else 0.0
+    n = 1
+    if R > 1e-9 and abs(sweep) > 1e-12:
+        step = 2 * math.acos(max(-1.0, 1 - CHORD_ERR / R)) if R > CHORD_ERR else math.pi
+        n = max(2, int(math.ceil(abs(sweep) / max(step, 1e-4))))
+    arc = Arc(start, end, centre, R, sweep)
+    return [start] + [arc.point_at(k / n) for k in range(1, n)] + [end]
+
+
 def parse_canon(canon: str) -> List[CanonMove]:
     """Moves from rs274 canonical output (X is a radius there)."""
     moves: List[CanonMove] = []
@@ -217,22 +236,7 @@ def parse_canon(canon: str) -> List[CanonMove]:
         if m and pos is not None:
             v = [float(x) for x in m.group(1).split(",")]
             ze, xe, zc, xc, rot = v[:5]                  # G18: first axis Z, second X
-            a0 = math.atan2(pos[0] - xc, pos[1] - zc)    # angle in (z, x), Z -> X positive
-            a1 = math.atan2(xe - xc, ze - zc)
-            ccw = (a1 - a0) % (2 * math.pi)
-            sweep = ccw if rot > 0 else ccw - 2 * math.pi
-            if ccw == 0.0:
-                # start == end: LinuxCNC runs a FULL circle (2026-11-12: tiny
-                # roughing arcs rounded to this; treating it as no move hid it)
-                sweep = 2 * math.pi if rot > 0 else -2 * math.pi
-            R = math.hypot(pos[0] - xc, pos[1] - zc)
-            n = 1
-            if R > 1e-9 and abs(sweep) > 1e-12:
-                step = 2 * math.acos(max(-1.0, 1 - CHORD_ERR / R)) if R > CHORD_ERR else math.pi
-                n = max(2, int(math.ceil(abs(sweep) / max(step, 1e-4))))
-            pts = [pos] + [(xc + R * math.sin(a0 + sweep * k / n), zc + R * math.cos(a0 + sweep * k / n))
-                           for k in range(1, n)] + [(xe, ze)]
-            moves.append(CanonMove(section, tool, False, pts))
+            moves.append(CanonMove(section, tool, False, _canon_arc_points(pos, (xe, ze), (xc, zc), rot)))
             pos = (xe, ze)
     return moves
 
