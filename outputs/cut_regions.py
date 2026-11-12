@@ -320,7 +320,10 @@ def stock_polygon(stock, mode_id: bool):
     """The bar this block cuts, (r, z): from the axis (OD) or pilot hole (ID) to
     the stock radius, from the stock front (Z start) to Z end."""
     r_in = stock.pilot_hole_dia / 2.0 if mode_id else 0.0
-    return box(r_in, stock.z_end, stock.diameter / 2.0, max(stock.z_start, 0.0))
+    # Z start <= allowance means the face is already at Z0; the model then raises
+    # z_start for approach clearance only (StockDef.face_at_z0) - no stock there.
+    front = 0.0 if getattr(stock, "face_at_z0", False) else max(stock.z_start, 0.0)
+    return box(r_in, stock.z_end, stock.diameter / 2.0, front)
 
 
 def part_polygon(profile, stock, mode_id: bool):

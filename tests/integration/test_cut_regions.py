@@ -360,3 +360,15 @@ def test_face_chamfer_profiles_generate_and_cut_in_one_motion(label, rows, kw):
     assert res.plan_result is not None, [v.message for v in res.validations if v.severity.value == "error"]
     s = _sections(res)                    # writes the G-code: raises if refused
     assert s.ok, s.notes
+
+
+def test_face_already_at_z0_shows_no_stock_in_front():
+    """Z start 0 = the face is already at Z0. The model raises z_start to
+    allowance + .050 for approach clearance only; the graph must not show that
+    as stock (it did: a phantom .055 stub)."""
+    from shapely.geometry import box
+    res = _run(_rows(1.0, (1.0, -0.4), (1.2, -0.4), (1.2, -1.0)), CNMG, x_start=1.4, z_start=0.0)
+    assert res.plan_result.stock.face_at_z0
+    s = _sections(res)
+    assert s.stock.bounds[3] == 0.0
+    assert s.finished.intersection(box(-5, 1e-6, 5, 5)).is_empty
