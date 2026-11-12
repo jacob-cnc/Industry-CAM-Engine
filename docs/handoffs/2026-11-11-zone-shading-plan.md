@@ -407,3 +407,29 @@ pursued. At the saved .005 it runs; the graph shows "not shown: interpreter did
 not run the program to the end" if it ever happens (the machine would stop on the
 same line). `test_cut_regions.test_no_centre_nib_and_a_flat_face` runs its dome at
 .005 for this reason.
+
+## 13. Open notes from the owner's GUI check (2026-11-11), not fixed
+
+1. **Shading edges vs toolpath lines at extreme zoom.** At about .0002"/grid
+   (GCH boring test ring, finish allowance → cleanup boundary), the shaded
+   section edges and the drawn toolpath lines are visibly a few hundred-
+   thousandths apart. The owner has seen this class of mismatch before; it may
+   be a limit of how finely that view draws. Things to look at when picked up:
+   - the shading is the nose *sweep* (circle edge), while the drawn line is the
+     programmed tip path, so they are offset by design wherever the nose isn't
+     tangent to the drawn line;
+   - the arc densification of each (CHORD_ERR 2e-5 in cut_regions vs the sim
+     viewer's own arc interpolation);
+   - pyqtgraph line rendering at sub-pixel scale.
+2. **Arc → line join in the finish passes (GCH bore, Z-.0172).** At about
+   .0002"/grid the drawn toolpath shows a small step (~.00005") where the corner
+   arc meets the straight cut (e.g. N830 G02 X2.9492 Z-0.0172 I0.0087 K-0.0062
+   followed by N840 G01 X2.9492 Z-0.5673).
+   - Likely cause: the G-code writes I/K to 4 decimals and the viewer draws the
+     arc from that rounded centre, so the drawn arc ends a hair off the commanded
+     end point, while the next line starts at the commanded point.
+   - LinuxCNC moves to the commanded end point (it only checks the radius
+     mismatch), so it is probably display only, but this is unverified.
+   - Fix to consider: draw arcs so they end exactly at the commanded end point,
+     the way the controller does; then confirm with rs274 canon that the real
+     path has no step.
