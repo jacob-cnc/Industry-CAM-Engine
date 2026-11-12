@@ -185,3 +185,64 @@ distorted arc — the geometry is now right where it would).
 
 Checked and correct (no change): `post_planning_validator._densify_arc_move` — radius space, the
 move's own direction ("never the shorter guess"), shared adaptive densifier.
+
+## Where the hand math stands now (inventory after F1–F6)
+
+`scripts/hand_math/inventory.py`: 77 → 67 functions with geometric arithmetic; planners 24 → 5
+operations (3 functions); pipeline 16 → 0; checker-flagged 24 → 20. Classified by the question
+each answers (owner rule: geometric answers that feed a program come from the kernel; remaining
+arc math lives only in geometry/arc_math.py):
+
+| class | where | verdict |
+|---|---|---|
+| A. not a geometry decision | threading_planner.compute_g76_params (thread depth formula), models/constants (TOLERANCE_SQ), adaptive_sampling (display/validation densifier, exempt by design), pre_output_validator (tolerance checks on emitted arcs), cut_regions._wedge (insert outline from tool-table angles), graph_adapter (display), arc_helpers.format_validation_message | fine |
+| B. canonical arc identity | arc_math: wrap, angle_of, Arc.point_at, split_at_quadrants, sweep_piece, merge_co_circular, radius_arc_centre | allowed (owner rule) |
+| C1. corner breaks | corner_breaks_od (hand vector algebra: _sub/_add/_unit/_cross/_dot, angles, roll-onto, cliff fillet) + zone_builder.profile_to_radius_coords | **should be kernel**: build123d 0.10 has 2D `fillet` / `chamfer` on sketch vertices. Biggest correctness surface (every zone, every pass starts from these coords). |
+| C2. tool reach | tool_reach (tangents, shadow pass, piece geometry, bridges) | **should be kernel**: tangent / intersection queries against the profile wire (bookmark plan: "the biggest part"). |
+| C3. writer geometry | gcode_writer: collinear chamfer entry (sin 15°, vector back-off), concave-corner shortening R·tan(turn/2), comp lead-out direction + material probe, _line_intersection, _compute_pass_max_x | **should move**: decisions belong in planners with kernel queries; the writer should only emit. Touches cutter-comp output → owner-reviewed branch. |
+| C4. arc picker helpers | arc_entry (quadrant points, candidates, tangent arc, end direction), arc_helpers (min / tangent / bounded radius, X extremum, max Z/X for radius) | these SUGGEST profile geometry the operator accepts; kernel constructs exist (TangentArc, RadiusArc, bounding boxes). Medium priority. |
+| C5. G-code check densifier | cut_regions.parse_canon (rs274 ARC_FEED → points with atan2/cos/sin) | low risk: switch to arc_math.Arc.point_at (LinuxCNC's arc, canonical sampling). |
+| C6. small leftovers | cleanup._face_level_extension (one sqrt), finish._decompose_curve_edge (arc radius from 3 points; unreachable today), curve_fit | fold into C2/C4 work; curve_fit only matters once splines exist. |
+
+## Walls (kernel limits met tonight)
+
+1. **OCCT sharp-join (GeomAbs_Intersection) offsets of concave features** fail beyond a
+   distance, closed face or open wire (F4). Rounded joins work and are the true constant-distance
+   path. Recommendation in F4.
+2. **Zero-width outline spikes**: when a profile runs along the engine's own closure line, the
+   closed finished-part face folds onto itself (F2). Not a kernel bug — the engine asked for an
+   unrepresentable shape. Rule of thumb that fixed it: ask the kernel about the OPEN profile wire
+   (`profile_offset_edges`) instead of searching a closed face the engine assembled. The zone
+   builder's finished-part face still contains the fold for such profiles; the validation polygons
+   and the keep zone tolerate it today (no gouge in cut_regions), but it is worth an engine change:
+   build the finished part as profile-face ∪ retained stock without a closure that can overlap the
+   profile.
+3. **Bounding boxes are not exact** (F1): never compare a kernel bounding-box value with an exact
+   value without a tolerance, and snap to known vertices when they agree.
+
+## Recommended next steps (owner decides; each on its own branch with the regression corpus)
+
+1. Merge `claude/structure-cleanup`, then this branch (F1, F2, F5 fix real defects; F3/F6 remove
+   dead/duplicate math; all behaviour verified on the corpus).
+2. F4 policy: rounded joins for contour roughing + an operator note (owner call).
+3. C1 corner breaks on kernel fillet/chamfer — first a comparison tool against the NX STEP fixtures
+   (tests/fixtures/nx_corner_break/*.stp) and today's coords, like open_wire_vs_walk.py.
+4. C3 writer decisions → planners (comp entry / lead-out / concave shortening as planned moves).
+5. C2 tool reach on kernel tangents/intersections.
+6. Corpus growth: an ID program with arcs and corner breaks; a grooving program; a program with a
+   back shoulder at the operation end (the F2 shape) — each found or confirmed a defect tonight.
+
+## Branch summary (claude/hand-math-kernel, from claude/structure-cleanup 9962c59)
+
+| commit | finding |
+|---|---|
+| 30a8c0d | F1 "wires not planar" on a contour ending at the stock back face (fixed; +4 tests) |
+| 8333207 | F2 finish contour kernel-only, hand-math fallback chain removed; F3 dead cleanup offset route + other zero-reference methods removed; +2 quadrant-arc corpus programs |
+| c49ff1b | F6 one arc-centre implementation (kernel-checked) |
+| d865db5 | F4 OCCT sharp-join wall: probe + recommendation |
+| 68c4bdb | F5 zone boundary polylines on the kernel's arcs (fixed; +5 tests) |
+
+Suite 1310 passed (main 1310 → structure branch 1300 → this branch 1310). Regenerated corpus
+(23 programs) vs main's baseline: 18 SAME, 4 identical refusals, 1 newly generating program (F1,
+machinist-checked). Architecture errors: dependency 4 (main 62), hand math 20 (main 22),
+fallback 4. Nothing merged to main.
