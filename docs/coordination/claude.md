@@ -1,5 +1,12 @@
 # Claude status
 
+## 2026-11-12 — ACTIVE: run controls (branch claude/run-overrides), then Generate checks, cycle time
+
+- Owner-approved: feed (1-200%) / rapid (1-100%) override sliders on the Run tab; X MPG = feed override, Z MPG = rapid
+  override while a program runs or is paused (HAL, jog disabled meanwhile); single block + optional stop (M1 per block).
+  Claimed: gui/run_tab.py, industry-cam.hal (MPG section only), hal/live_backend.py + interface + mock (program step /
+  optional stop), outputs/gcode_writer.py + gui/program_tab.py (M1 emission only), tests. No merge without owner.
+
 ## 2026-11-12 — MAIN at hand-math close-out (tag lathe-2026-11-12-handmath-done); no claims, discussing GUI features (read-only)
 
 ## 2026-11-12 — MAIN at 37104cb (C2 merged); REVIEW-READY: C4-C6 leftovers, branch claude/c456-leftovers dea35eb
