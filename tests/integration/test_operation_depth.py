@@ -60,3 +60,46 @@ def test_kernel_depth_includes_arc_extremum_between_endpoints():
         dict(type="arc", x=4, z=0, radius=-0.5),
     ], "id")
     assert contour_z_end(profile) == pytest.approx(-0.5)
+
+
+# --- 2026-11-12 hand-math inquiry: a contour ending exactly at the stock back face ---------
+# "Test Program Tab" (reference program, T4) failed in the GUI with "Cannot build face(s):
+# wires not planar": its last segment is an R.5 arc ending at Z-1.5 = the stock back face.
+# contour_z_end took the kernel's bounding-box minimum, -1.4999999999999865 (1.35e-14 of noise),
+# so build_zones saw stock "behind" the part and built a retained-stock rectangle 1.35e-14
+# tall, which OCCT cannot make a face from.
+
+_STEPPED_WITH_END_ARC = [dict(type="line", x=0.0, z=0.0), dict(type="line", x=0.5, z=0.0),
+                         dict(type="line", x=0.5, z=-0.5), dict(type="line", x=1.0, z=-0.5),
+                         dict(type="line", x=1.0, z=-1.0),
+                         dict(type="arc", x=1.5, z=-1.5, radius=-0.5)]
+
+
+def test_contour_end_on_a_vertex_is_exact_not_bounding_box_noise():
+    profile = profile_from_fields(_STEPPED_WITH_END_ARC, "od", [])
+    assert contour_z_end(profile) == -1.5          # exact: the arc's end point is the lowest Z
+
+
+@pytest.mark.parametrize("strategy", ["staircase", "offset_contour"])
+def test_profile_ending_exactly_at_the_back_face_generates(strategy):
+    fields = bore_fields(mode="od", strategy=strategy, segments=_STEPPED_WITH_END_ARC,
+                         stock_dia=2.0, x_start=0.0, z_start=0.1, z_end=-1.5, stock_back_z=-1.5,
+                         pilot_hole_dia=0.0, fin_allowance=0.005, doc_dia=0.05, feed=0.008,
+                         tool_def=ToolDef(4, 0.016, 80, 0.5, ToolOrientation(2),
+                                          ToolDirection.RIGHT, ToolType.TURNING))
+    profile, stock, roughing, finishing = build_from_fields(**fields)
+    result = execute(profile, stock, fields["tool_def"], roughing, finishing)
+    assert result.plan_result is not None, [v.message for v in result.validations][:3]
+
+
+def test_an_arc_dipping_below_its_end_points_still_sets_the_depth():
+    # An arc between two points at the SAME Z (-0.4) bulges toward -Z for one of the two
+    # radius signs: then its interior, not a vertex, is the contour's lowest point and the
+    # kernel's extremum must stand (the vertex snap applies only within 1e-9).
+    depths = []
+    for r in (0.2, -0.2):
+        segs = [dict(type="line", x=0.0, z=0.0), dict(type="line", x=1.0, z=0.0),
+                dict(type="line", x=1.0, z=-0.4), dict(type="arc", x=1.6, z=-0.4, radius=r)]
+        depths.append(contour_z_end(profile_from_fields(segs, "od", [])))
+    assert min(depths) < -0.4 - 0.05            # the dip (about -0.53) is reported
+    assert max(depths) == pytest.approx(-0.4)   # the other bulge stays at the vertex depth
