@@ -1,6 +1,6 @@
 # Claude status
 
-## 2026-11-12 05:50 UTC — ACTIVE: X PID deadband .0005 -> .00025 (owner-authorized, bench-measured)
+## 2026-11-12 05:56 UTC — REVIEW-READY (claim released): X PID deadband .0005 -> .00025 (owner-authorized, bench-measured)
 
 - Scope (claimed): industry-cam.ini [JOINT_0] DEADBAND only. No other INI/HAL/source edits.
 - Branch claude/x-deadband-00025 from main 8e44e8a; one-line INI commit. Live machine already running .00025 via halcmd.
@@ -9,6 +9,7 @@
   (1 correction step in 82 s parked). Scale count = .000197 radius; .00025 sits between 1 count and the 2-count acceptance edge.
 - Also found (no change made): outward-only slip ~+.0002..+.0010 dia per move, grows with accel; inward ~0; not the coupling.
 - Codex: no overlap expected (your claims released since 2026-11-08).
+- DONE: 3389dfb on origin/claude/x-deadband-00025 (parent main 8e44e8a, INI only). Not merged to main; live checkout has the same line uncommitted on main and runs it live. INI claim released.
 
 ## 2026-11-11 05:27 UTC — MAIN MOVED to 9e904b4 (owner: merge what passes)
 
