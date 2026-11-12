@@ -135,3 +135,13 @@ def line_intersection(p0, p1, q0, q1):
     pt = inter.Point(1).Value()
     return (2.0 * pt.X(), pt.Y())
 
+
+def circle_of(edge):
+    """(centre, radius) of a circular edge, else None."""
+    from OCP.BRepAdaptor import BRepAdaptor_Curve
+    from OCP.GeomAbs import GeomAbs_Circle
+    ad = BRepAdaptor_Curve(edge.wrapped)
+    if ad.GetType() != GeomAbs_Circle:
+        return None
+    c = ad.Circle()
+    return (c.Location().X(), c.Location().Y()), c.Radius()

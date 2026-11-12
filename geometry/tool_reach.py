@@ -367,10 +367,11 @@ def _arc_end_at(coords, k, p, edges):
             "quadrant": False, "quadrant_sign": 1}
     if e is None or e.geom_type.name != "CIRCLE":
         return base
-    from geometry.corner_breaks_od import _circle_of, _signed_arc_radius
-    centre, R = _circle_of(e)
+    from geometry.arc_math import signed_arc_radius
+    from geometry.face_ops import circle_of
+    centre, R = circle_of(e)
     p0 = (coords[k]["x_radius"], coords[k]["z"])
-    base["radius"] = _signed_arc_radius(p0, (c1["x_radius"], c1["z"]), centre, R)
+    base["radius"] = signed_arc_radius(p0, (c1["x_radius"], c1["z"]), centre, R)
     return base
 
 

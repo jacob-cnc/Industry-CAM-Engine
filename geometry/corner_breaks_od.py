@@ -50,6 +50,8 @@ from typing import List, Optional, Tuple
 
 from build123d import Line
 
+from geometry.arc_math import signed_arc_radius
+from geometry.face_ops import circle_of
 from models.profile import ClosedProfile, CornerBreakType, SegmentType
 
 EPS = 1e-9
@@ -148,14 +150,6 @@ def _dot(a, b):
     return a[0] * b[0] + a[1] * b[1]
 
 
-def _signed_arc_radius(start, end, center, radius) -> float:
-    """Build123d RadiusArc sign for a minor arc start->end about center.
-    Verified empirically: +R puts the centre to the RIGHT of travel
-    (sketch X = radius, Y = Z), -R to the LEFT."""
-    side = _cross(_sub(end, start), _sub(center, start))
-    return -radius if side > 0 else radius
-
-
 def _angle_between(u, v) -> float:
     """Unsigned angle in degrees between two unit directions."""
     return math.degrees(math.acos(max(-1.0, min(1.0, _dot(u, v)))))
@@ -247,17 +241,6 @@ def _travel_dir(edge, at, arriving: bool):
     mid = edge.position_at(0.5)
     ref = _sub(at, (mid.X, mid.Y)) if arriving else _sub((mid.X, mid.Y), at)
     return _unit(d if _dot(d, ref) >= 0 else _mul(d, -1.0))
-
-
-def _circle_of(edge):
-    """(centre, radius) of a circular edge, else None."""
-    from OCP.BRepAdaptor import BRepAdaptor_Curve
-    from OCP.GeomAbs import GeomAbs_Circle
-    ad = BRepAdaptor_Curve(edge.wrapped)
-    if ad.GetType() != GeomAbs_Circle:
-        return None
-    c = ad.Circle()
-    return (c.Location().X(), c.Location().Y()), c.Radius()
 
 
 def _reversed_edge(edge):
@@ -372,9 +355,9 @@ def build_od_corner_coords(profile: ClosedProfile) -> OdCornerResult:
         """Record a kernel-built break at point i."""
         t_in, t_out, edge, rest = kb
         if kind == "fillet":
-            centre, radius = _circle_of(edge)
+            centre, radius = circle_of(edge)
             element = {"type": SegmentType.ARC, "x_radius": t_out[0], "z": t_out[1],
-                       "radius": _signed_arc_radius(t_in, t_out, centre, radius)}
+                       "radius": signed_arc_radius(t_in, t_out, centre, radius)}
             geometry[i] = VertexGeometry(i + 1, t_in, t_out, "fillet", centre, radius)
         else:
             element = {"type": SegmentType.LINE, "x_radius": t_out[0], "z": t_out[1],
@@ -533,7 +516,7 @@ def build_od_corner_coords(profile: ClosedProfile) -> OdCornerResult:
                     pt_in, pel = plan[i - 1]
                     pel["x_radius"], pel["z"] = prev_new_end
                     if prev_g.kind == "fillet":
-                        pel["radius"] = _signed_arc_radius(prev_g.t_in, prev_new_end,
+                        pel["radius"] = signed_arc_radius(prev_g.t_in, prev_new_end,
                                                            prev_g.center, prev_g.radius)
                     prev_rep = next((r for r in reports if r.vertex == i), None)
                     if prev_rep is not None:
@@ -594,7 +577,7 @@ def build_od_corner_coords(profile: ClosedProfile) -> OdCornerResult:
             arc_r = _len(_sub(t_in, center))
             plan[i] = (t_in, {"type": SegmentType.ARC, "x_radius": t_out[0],
                               "z": t_out[1],
-                              "radius": _signed_arc_radius(t_in, t_out, center, arc_r)})
+                              "radius": signed_arc_radius(t_in, t_out, center, arc_r)})
             geometry[i] = VertexGeometry(i + 1, t_in, t_out, "fillet", center, arc_r)
             consumed_from_start[i + 1] = _len(_sub(t_out, c))
             # Arc tangent at its end point, in the direction of travel.
@@ -616,9 +599,9 @@ def build_od_corner_coords(profile: ClosedProfile) -> OdCornerResult:
                  "radius": seg.radius, "quadrant": seg.quadrant,
                  "quadrant_sign": seg.quadrant_sign}
         if i > 0 and seg.quadrant and (i in plan or i - 1 in plan) and sharp[i] is not None:
-            centre, radius = _circle_of(sharp[i])
+            centre, radius = circle_of(sharp[i])
             entry = {"type": SegmentType.ARC,
-                     "radius": _signed_arc_radius(pts[i - 1], pts[i], centre, radius)}
+                     "radius": signed_arc_radius(pts[i - 1], pts[i], centre, radius)}
         if i in plan:
             trim_in, element = plan[i]
             coords.append({**entry, "x_radius": trim_in[0], "z": trim_in[1]})
