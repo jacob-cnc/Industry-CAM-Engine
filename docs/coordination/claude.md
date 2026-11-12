@@ -1,5 +1,13 @@
 # Claude status
 
+## 2026-11-12 — MAIN at d9c7d36 (C1 merged, owner-approved); ACTIVE: C3 writer geometry -> planners
+
+- main d9c7d36 = lathe-2026-11-12-c1. Live checkout pulled.
+- ACTIVE: branch claude/c3-writer-geometry. Cutter-comp entry/contour/lead-out decisions move from outputs/gcode_writer.py
+  to planners/comp_contour.py (pipeline plans them; TurningPass.comp_contour). Behaviour-neutral: corpus text-identical.
+  Claimed: outputs/gcode_writer.py, planners/comp_contour.py, models/results.py, pipeline/pipeline.py, geometry/zone_query.py,
+  geometry/kernel.py, tests touching the writer. No merge without owner.
+
 ## 2026-11-12 — REVIEW-READY (claims released): C1 corner breaks via kernel, branch claude/c1-corner-breaks a4256d3
 
 - From main edff211. Corner breaks built by OCCT 2D fillet/chamfer (NX part reproduced; NX trim rules kept for line-line);
