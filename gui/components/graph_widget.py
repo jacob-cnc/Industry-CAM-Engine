@@ -84,7 +84,8 @@ class MachiningGraphWidget(pg.PlotWidget):
 
         self._setup_plot()
         self._setup_crosshair()
-        self._tool_dot = None
+        self._tool_graphic = None
+        self._live_tool = (None, "")      # (outline, note) of the spindle tool
         self._next_seg_item = None
         self._rapid_items = []
         self._graph_data: Optional[GraphData] = None
@@ -190,7 +191,7 @@ class MachiningGraphWidget(pg.PlotWidget):
         """Load complete graph data. Replaces all current display items."""
         self.clear()
         self._setup_crosshair()
-        self._tool_dot = None
+        self._tool_graphic = None
         self._next_seg_item = None
         self._profile_overlay_items = []
         self._uncut_overlay_items = []
@@ -244,18 +245,25 @@ class MachiningGraphWidget(pg.PlotWidget):
         # Auto-fit view to show everything (small padding for grid visibility at edges)
         self.getViewBox().autoRange(padding=0.05)
 
-    def set_tool_position(self, x_radius: float, z: float):
-        """Update animated tool dot position during playback."""
-        if self._tool_dot is None:
-            self._tool_dot = pg.ScatterPlotItem(
-                size=16,
-                brush=pg.mkBrush(COLORS['graph_tool_dot']),
-                pen=pg.mkPen('#00000099', width=2),
-            )
-            self._tool_dot.setZValue(20)
-            self.addItem(self._tool_dot)
+    def set_live_tool_outline(self, outline, note: str = ""):
+        """The spindle tool's outline (geometry.tool_outline) for live
+        positions; None = the dot (tool-graphic plan 2026-11-13)."""
+        self._live_tool = (outline, note)
+        if self._tool_graphic is not None and self._tool_live:
+            self._tool_graphic.set_outline(outline, note)
 
-        self._tool_dot.setData([z], [x_radius])
+    def set_tool_position(self, x_radius: float, z: float, live: bool = False):
+        """Move the tool. live=True: the machine's position, drawn as the
+        spindle tool. live=False (sim playback): the dot until the sim knows
+        each move's tool (plan phase T4)."""
+        from gui.components.tool_graphic_item import ToolGraphic
+        if self._tool_graphic is None:
+            self._tool_graphic = ToolGraphic(self, dot_size=16)
+            self._tool_live = None
+        if live != self._tool_live:
+            self._tool_live = live
+            self._tool_graphic.set_outline(*(self._live_tool if live else (None, "")))
+        self._tool_graphic.set_position(x_radius, z)
 
     def highlight_next_segment(self, move_index: int):
         """Show the upcoming segment as a dotted preview line (next move to be executed).
@@ -458,7 +466,7 @@ class MachiningGraphWidget(pg.PlotWidget):
         """Clear toolpath display (return to preview mode)."""
         self.clear()
         self._setup_crosshair()
-        self._tool_dot = None
+        self._tool_graphic = None
         self._graph_data = None
 
     def _get_segment_color(self, segment: ToolpathSegment) -> str:

@@ -159,6 +159,18 @@ class LiveBackend(HALBackend):
     # Polling
     # ------------------------------------------------------------------
 
+    def work_position(self):
+        """Fresh feedback position in work coordinates, X diameter (see
+        HALBackend.work_position). Same formula as poll()."""
+        try:
+            self._stat.poll()
+        except linuxcnc.error:
+            return None
+        s = self._stat
+        x = 2.0 * (s.actual_position[0] - s.g5x_offset[0] - s.g92_offset[0] - s.tool_offset[0])
+        z = s.actual_position[2] - s.g5x_offset[2] - s.g92_offset[2] - s.tool_offset[2]
+        return (x, z)
+
     def poll(self) -> None:
         """Poll LinuxCNC stat channel and rebuild state snapshot.
 

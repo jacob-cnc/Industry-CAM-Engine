@@ -78,6 +78,14 @@ class RunTab(QWidget):
         self._poll_timer = QTimer(self)
         self._poll_timer.timeout.connect(self._poll)
         self._poll_timer.setInterval(100)  # 10 Hz
+        # Tool graphic (tool-graphic plan 2026-11-13): the spindle tool's
+        # outline, moved at ~30 Hz from a side-effect-free position read.
+        self._tool_card_resolver = None
+        self._tool_graphic_key = None
+        self._tool_graphic_rev = 0
+        self._graphic_timer = QTimer(self)
+        self._graphic_timer.setInterval(33)
+        self._graphic_timer.timeout.connect(self._on_graphic_tick)
 
     # =================================================================
     # UI Construction
@@ -271,8 +279,36 @@ class RunTab(QWidget):
         self._active = active
         if active:
             self._poll_timer.start()
+            self._graphic_timer.start()
         else:
             self._poll_timer.stop()
+            self._graphic_timer.stop()
+
+    def set_tool_card_resolver(self, resolver):
+        """resolver(tool_number) -> ToolCardData or None (the Tools tab)."""
+        self._tool_card_resolver = resolver
+        self.refresh_tool_graphic()
+
+    def refresh_tool_graphic(self):
+        """Rebuild the tool graphic on the next poll (tool table edited / reloaded)."""
+        self._tool_graphic_rev += 1
+
+    def _on_graphic_tick(self):
+        pos = self._backend.work_position()
+        if pos is not None:
+            self._sim_viewer.move_live_tool(pos[0] / 2.0, pos[1])
+
+    def _update_tool_graphic(self, state):
+        from gui.components.tool_graphic_item import graphic_for
+        t = state.tool_in_spindle
+        key = (t, round(state.tool_offset_x, 9), round(state.tool_offset_z, 9),
+               self._tool_graphic_rev)
+        if key == self._tool_graphic_key:
+            return
+        self._tool_graphic_key = key
+        card = self._tool_card_resolver(t) if (self._tool_card_resolver and t > 0) else None
+        outline, note = graphic_for(card, t, (state.tool_offset_x, state.tool_offset_z))
+        self._sim_viewer.set_live_tool_outline(outline, note)
 
     _TOOL_CHECK_RE = re.compile(
         r";\s*--- tool check: program generated for T(\d+) D([0-9.]+) Q(\d+)")
@@ -748,6 +784,7 @@ class RunTab(QWidget):
         # program has work (interp may be IDLE mid-cut, see program_busy).
         x_r = state.x.position / 2.0
         z = state.z.position
+        self._update_tool_graphic(state)
         if state.program_busy:
             self._sim_viewer.update_live_position(motion_line, x_r, z)
         elif not self._sim_viewer.is_playing():

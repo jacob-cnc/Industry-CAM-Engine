@@ -220,6 +220,13 @@ class MainWindow(QMainWindow):
         # 5b. Tool resolver — lets Program tab look up any tool by number
         self._program_tab.set_tool_resolver(self._resolve_tool_by_number)
 
+        # 5c. Tool graphic on the Manual screen: tool cards from the Tools tab,
+        #     rebuilt when the table is edited or reloaded (tool-graphic plan).
+        for tab in (self._manual_tab, self._run_tab):
+            tab.set_tool_card_resolver(self._tools_tab.get_tool)
+            self._tools_tab.tool_changed.connect(lambda _n, t=tab: t.refresh_tool_graphic())
+            self._tools_tab.tools_reloaded.connect(tab.refresh_tool_graphic)
+
         # 6. Tab change → activate/deactivate Setup tab polling
         self._tab_widget.currentChanged.connect(self._on_tab_changed)
 

@@ -232,3 +232,54 @@ and `blade=` today. LinuxCNC ignores the comment, so `tool.tbl` remains a valid 
 - Full suite 1463 passed.
 - Current tool table: T1 (CCMT, Q3), T2 (60 deg thread, Q2) and T4 (CNMG, Q2) draw at a nominal size until an
   ISO code or IC is entered. T3 (Custom) and T99 (QCTP master) have I0 J0 and keep the dot.
+
+### T2 (2026-11-13, branch claude/tool-graphic-build)
+- `gui/components/tool_graphic_item.py`:
+  - `ToolGraphic` is one object per graph: a filled body path, the cutting edges, a "+" at the
+    controlled point, and the dot plus a note. The path is built once per tool; motion is just
+    `setPos` (pens are cosmetic, so line widths stay the same at any zoom).
+  - `graphic_for(card, tool_in_spindle, tool_offset)` returns the outline, or None with a reason:
+    - no tool -> plain dot;
+    - "Tn is not in the tool table";
+    - **"offset not active (G43)"**: LinuxCNC's active tool offset differs from the card's
+      geometry + wear, so the work position is not this tool's controlled point. The dot is
+      shown instead of a misplaced insert;
+    - edge angles unknown.
+- `PositionGraphWidget` (Manual):
+  - The dot is replaced by `ToolGraphic`.
+  - `set_tool_outline(outline, note)`; `move_tool(x_dia, z)` (tool only, no trail).
+- `ManualTab`:
+  - A 33 ms (~30 Hz) graphics timer runs only while the tab is visible. It reads
+    `backend.work_position()` and moves the tool; the 100 ms poll keeps the DRO, trail etc.
+  - The tool graphic is rebuilt on a tool change, an active-offset change, or a table edit / reload.
+- `HALBackend.work_position()`: a fresh feedback position with no side effects. The live backend
+  polls `linuxcnc.stat` only; it does **not** drain the error channel, which `poll()` does, so a
+  faster graphics read cannot swallow an error the rest of the GUI should show.
+- Wiring (`MainWindow`): `ManualTab.set_tool_card_resolver(ToolsTab.get_tool)`. `tool_changed` and the
+  new `ToolsTab.tools_reloaded` (emitted by `_accept_table`) trigger `refresh_tool_graphic()`.
+- `hal/interface.py`: the `tool_offset_x` comment corrected to RADIUS (it always held `tool_offset[0]`).
+- Tests: `tests/unit/test_tool_graphic_screen.py`:
+  - the controlled point maps to the DRO position's screen pixel (1e-6), and +X is down;
+  - `move_tool` moves only the tool;
+  - the dot and its reasons; the G43 mismatch; `work_position`.
+
+### T3 (2026-11-13, branch claude/tool-graphic-build)
+- `MachiningGraphWidget` (Run / sim graph):
+  - The dot is replaced by `ToolGraphic`, rebuilt lazily after `clear()` (a program load clears
+    every plot item).
+  - `set_live_tool_outline(outline, note)` holds the spindle tool.
+  - `set_tool_position(x_r, z, live=False)`: live=True draws the spindle tool. Sim playback
+    (live=False) keeps the dot until phase T4 gives the sim each move's own tool (the spindle
+    tool would be the wrong tool for a multi-tool program).
+- `SimViewerWidget`:
+  - `show_machine_position` / `update_live_position` pass live=True.
+  - `set_live_tool_outline`.
+  - `move_live_tool` moves the tool only, and not while sim playback is running.
+- `RunTab`:
+  - The same `graphic_for` logic as Manual (G43 check, reasons).
+  - A 33 ms graphics timer runs only while the tab is active.
+  - Wired from `MainWindow` with `ToolsTab.get_tool`, `tool_changed`, `tools_reloaded`.
+- Tests: the live tool vs the sim dot on the Run graph; the tool survives `clear_toolpath()`.
+- Already there, not caused by this branch: `tests/unit/test_run_from_line.py` aborts when run by
+  itself (it does on main too: its teardown closes a RunTab that Qt has already deleted). It passes
+  in the full suite.

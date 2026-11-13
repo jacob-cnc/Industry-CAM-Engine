@@ -138,7 +138,7 @@ class MachineState:
 
     # Tool
     tool_in_spindle: int = 0
-    tool_offset_x: float = 0.0     # diameter
+    tool_offset_x: float = 0.0     # RADIUS (LinuxCNC tool_offset[0], machine units)
     tool_offset_z: float = 0.0
 
     # Flags
@@ -195,6 +195,16 @@ class HALBackend(ABC):
         After calling, read self.state for the latest snapshot.
         """
         ...
+
+    def work_position(self):
+        """(x_diameter, z) work position (tool offset applied) for a fast
+        graphics refresh, or None when not connected. Unlike poll() it has no
+        side effects: no error-channel drain, no state rebuild (tool-graphic
+        plan 2026-11-13, 30 Hz tool graphic). Backends without a cheap read
+        return the last poll()'s snapshot.
+        """
+        s = self.state
+        return (s.x.position, s.z.position)
 
     # ------------------------------------------------------------------
     # Mode Control
