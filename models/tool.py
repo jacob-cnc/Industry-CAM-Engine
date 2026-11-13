@@ -95,3 +95,27 @@ class ToolDef:
     # unknown or round: the reach check (geometry/tool_reach.py) is skipped.
     front_angle: float = 0.0
     back_angle: float = 0.0
+
+
+# Insert body shapes the screen graphic can draw (geometry/tool_outline.py).
+# ISO 1832 / ANSI B212.4 shape letters plus the non-ISO kinds this shop uses.
+INSERT_SHAPES = ("C", "D", "V", "T", "S", "W", "R", "thread", "groove", "custom")
+
+
+@dataclass(frozen=True)
+class InsertSpec:
+    """What the true-scale tool graphic needs (tool-graphic plan 2026-11-13).
+
+    orientation: LinuxCNC Q (1-9); nose_radius: inches; front/back angle: the
+    tool table I / J (degrees, tool frame as in geometry/tool_reach.py);
+    shape: one of INSERT_SHAPES; ic: inscribed-circle diameter in inches
+    (round: the insert diameter; groove: the visible blade length), 0 = unknown;
+    blade_width: grooving blade width, inches.
+    """
+    orientation: int
+    nose_radius: float
+    front_angle: float
+    back_angle: float
+    shape: str
+    ic: float = 0.0
+    blade_width: float = 0.0

@@ -43,6 +43,8 @@ class ToolCardData:
     x_wear: float           # radius internally
     z_wear: float
     blade_width: float = 0.0
+    iso_code: str = ""      # full ISO insert code, e.g. "CNMG432" (optional)
+    ic: float = 0.0         # insert inscribed circle / blade length, inches; 0 = from iso_code
 
 
 # ---------------------------------------------------------------------------
@@ -215,3 +217,35 @@ def tool_def_to_tool_card(tool: ToolDef) -> ToolCardData:
         z_wear=tool.z_wear,
         blade_width=0.0,
     )
+
+
+def insert_spec(card: ToolCardData):
+    """InsertSpec for the true-scale graphic (tool-graphic plan 2026-11-13).
+
+    Size: the IC field when set, else the IC read from a full ISO code
+    (owner: both), else 0 = unknown (drawn at a nominal size, labelled).
+    Body shape: the ISO code's shape letter, else the insert family's.
+    """
+    from models.tool import InsertSpec
+    from tools.insert_geometry_lookup import INSERT_SHAPE, parse_iso_code
+    iso = parse_iso_code(card.iso_code) if card.iso_code else None
+    if card.tool_type == "Grooving/Parting" or card.insert_code == "Grooving":
+        shape = "groove"
+    elif iso:
+        shape = iso[0]
+    else:
+        shape = INSERT_SHAPE.get(card.insert_code, "custom")
+    ic = card.ic if card.ic > 0 else (iso[1] if iso and shape != "groove" else 0.0)
+    return InsertSpec(orientation=card.orientation, nose_radius=card.nose_radius,
+                      front_angle=card.front_angle, back_angle=card.back_angle,
+                      shape=shape, ic=ic, blade_width=card.blade_width)
+
+
+def iso_radius_mismatch(card: ToolCardData) -> str:
+    """A note when the ISO code's nose radius differs from the table's D/2."""
+    from tools.insert_geometry_lookup import parse_iso_code
+    iso = parse_iso_code(card.iso_code) if card.iso_code else None
+    if iso and iso[0] != "R" and abs(iso[2] - card.nose_radius) > 0.0005:
+        return (f"{card.iso_code} has a {iso[2]:.4f} nose radius; the tool table has "
+                f"{card.nose_radius:.4f}")
+    return ""

@@ -80,7 +80,9 @@ def serialize_tool(tool: ToolCardData) -> str:
     metadata = (
         f"ice=2|xwear={tool.x_wear:.9f}|zwear={tool.z_wear:.9f}|"
         f"type={type_key}|insert={quote(tool.insert_code, safe=' ')}|blade={blade_str}|"
-        f"desc={quote(tool.description, safe=' ')}"
+        + (f"iso={quote(tool.iso_code, safe='')}|" if tool.iso_code else "")
+        + (f"ic={tool.ic:.4f}|" if tool.ic > 0 else "")
+        + f"desc={quote(tool.description, safe=' ')}"
     )
     if not all(math.isfinite(v) for v in (x_applied, tool.z_offset + tool.z_wear,
             nose_diameter, tool.front_angle, tool.back_angle, tool.x_wear, tool.z_wear)):
@@ -175,6 +177,8 @@ def deserialize_tool(line: str, *, unversioned_x_units: str | None = None) -> To
         x_offset=applied_x - x_wear, z_offset=applied_z - z_wear,
         x_wear=x_wear, z_wear=z_wear,
         blade_width=_safe_float(metadata.get("blade", ""), 0.0),
+        iso_code=unquote(metadata.get("iso", "")),
+        ic=_safe_float(metadata.get("ic", ""), 0.0),
     )
 
 

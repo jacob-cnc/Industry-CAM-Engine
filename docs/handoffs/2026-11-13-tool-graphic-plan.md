@@ -187,3 +187,48 @@ and `blade=` today. LinuxCNC ignores the comment, so `tool.tbl` remains a valid 
 3. **Boring bars:** draw the bar's diameter along its length as well (shows bar-to-bore clearance)?
 4. **Live material removal:** wanted during real cuts too, or the sim only? (It is about the same
    work once the sim version exists.)
+
+## 10. Implementation notes
+
+### T1 (2026-11-13, branch claude/tool-graphic-build)
+- `models/tool.py`: `InsertSpec` (Q, nose radius, I, J, shape, IC, blade width).
+- `tools/insert_geometry_lookup.py`:
+  - `INSERT_SHAPE` maps each insert family to its body shape.
+  - `parse_iso_code` reads the inch codes (ANSI B212.4: IC n/8", radius n/64") and the metric codes
+    (ISO 1832: edge-length digits -> IC for the common sizes; radius in 0.1 mm).
+  - A size it can't read returns None; it never guesses.
+- `tools/tool_card_data.py`:
+  - `iso_code` / `ic` fields.
+  - `insert_spec(card)`: IC from the field, else from the ISO code, else unknown.
+  - `iso_radius_mismatch(card)`: a note when the ISO code's nose radius differs from the table's D/2.
+- `tools/tool_table_io.py`: `iso=` / `ic=` in the comment, written only when set, so existing lines
+  are unchanged (the repo `tool.tbl` round-trips byte-identical).
+- `geometry/tool_outline.py`: `tool_outline(spec) -> ToolOutline`, built with build123d / OCCT only
+  (no trig; the architecture ratchet is unchanged).
+  - Shapes:
+    - rhombic bodies (C, D, V, S, custom): two strips of width IC crossing at the included angle;
+    - T and 60 deg thread: three half-planes;
+    - W: six half-planes;
+    - 55 / 29 deg thread: the tooth wedge cut to the IC triangle (body nominal, edges exact);
+    - groove: blade width x length;
+    - R: a circle.
+  - Corners are filleted with the nose radius. The body is then turned so its bisector is at
+    (I+J)/2 in the Q frame, and the nose centre is placed at controlled point - r * Q direction.
+  - Arc samples include the quadrant points, so the outline reaches the true touch-off lines.
+  - Unknown edge angles (I0 J0, non-round) raise ValueError with a reason: the screens keep the dot.
+  - An unknown size is drawn at a nominal IC (thread .375, groove .25, others .5), flagged
+    `size_known=False`.
+- `gui/components/orientation_graphic.py`: the editor picture is now drawn from `tool_outline` (the
+  old hand-built shapes and the Q mirror tables are gone). It shows a reason when the insert can't
+  be drawn, and "size not set" when the size is nominal.
+- `gui/components/tool_geometry_row.py`: ISO code and IC fields, plus a warning label for an
+  unreadable code or a nose-radius mismatch.
+- Tests: `tests/unit/test_tool_outline.py`:
+  - Q1-Q9 nose centre; the 95 deg holder touching both touch-off lines (Q1-Q4);
+  - edge angles for 4 I/J pairs x 4 Q;
+  - the ISO inscribed circle for C, D, V, S, T, W;
+  - round Q9; groove; nominal size; refusal; ISO parsing; IC priority;
+  - tool table round trip.
+- Full suite 1463 passed.
+- Current tool table: T1 (CCMT, Q3), T2 (60 deg thread, Q2) and T4 (CNMG, Q2) draw at a nominal size until an
+  ISO code or IC is entered. T3 (Custom) and T99 (QCTP master) have I0 J0 and keep the dot.
