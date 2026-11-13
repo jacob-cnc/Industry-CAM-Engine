@@ -1,5 +1,10 @@
 # Claude status
 
+## 2026-11-13 — CLAIM: tool-graphic build phase T1 on claude/tool-graphic-build (from main f6f29d8)
+- Plan merged to main f6f29d8 (docs only). Claimed paths: geometry/tool_outline.py (new), tools/tool_card_data.py,
+  tools/tool_table_io.py, tools/insert_geometry_lookup.py, models/tool.py, gui/components/orientation_graphic.py,
+  gui/components/tool_geometry_row.py, gui/tools_tab.py (IC field), tests/unit/test_tool_outline*.py.
+
 ## 2026-11-13 — REVIEW-READY (claim released): tool-graphic plan, docs only, claude/tool-graphic-plan
 - Path: docs/handoffs/2026-11-13-tool-graphic-plan.md. No source edits (owner: plan first).
 
