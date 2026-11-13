@@ -655,3 +655,5 @@ F. Machine-control classification: affects tool offsets -> software-verified onl
 - 2026-11-10 02:41 UTC — Lathe PC OS/RT tuning (owner-applied, machine-local, no app code): kernel isolcpus=2,3 irqaffinity=0,1 + C-state limit, Bluetooth disabled/blacklisted, apt timers/cups/ModemManager/avahi disabled. Record: session-notes/2026-11-09-pc-os-rt-tuning.md, merged to main at 2d9b86c (docs only). No claims taken or changed. FYI for Codex: latency/test timing on the lathe PC may differ after this reboot.
 
 - 2026-11-10 02:50 UTC Owner-directed RT/OS tuning (machine-local, no CAM/HAL/GUI paths): claim set-cpu-performance.sh. Pin CPU clock 2.4 GHz to stop N150 thermal throttling (83C, 1742 throttles/2 min). Not committed to main yet.
+
+- 2026-11-13 UTC — MERGED (owner-approved): claude/tool-graphic-build T1-T5 -> main 9c255f9 (tag lathe-2026-11-13-merged; rollback lathe-pre-merge-2026-11-13 = f6f29d8). Tree identical to the tested branch (1496 pass). Live checkout NOT pulled. No claims. State: idle.
