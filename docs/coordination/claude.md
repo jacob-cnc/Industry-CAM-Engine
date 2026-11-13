@@ -1,7 +1,7 @@
 # Claude status
 
 ## 2026-11-12 — MAIN at a9a4bb6 (threading build merged, owner-approved); rollback tag lathe-pre-merge-threading (85d3230)
-- No active claims. claude/run-overrides still awaits live test. Live checkout not pulled by Claude.
+- No active claims. claude/run-overrides still awaits live test. Live checkout pulled (ff) to a9a4bb6 2026-11-13.
 
 ## 2026-11-12 — REVIEW-READY (claim released): threading follow-up 2f1b132 (NPT pilot -> ASME B1.20.1 K0); tests pending (LinuxCNC was up)
 - Owner: tap drills must come from Machinery's Handbook / ASME, not web charts. Paths: models/thread_data.py (NPT),
