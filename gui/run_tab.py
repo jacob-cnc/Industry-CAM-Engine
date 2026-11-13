@@ -26,7 +26,7 @@ from PyQt5.QtWidgets import (
 
 from gui.components.elided_label import ElidedLabel
 from gui.colors import COLORS, FONTS
-from gui.components.sim_viewer import SimViewerWidget, parse_gcode_for_sim, GCodePanel
+from gui.components.sim_viewer import SimViewerWidget, build_sim_moves, GCodePanel
 from outputs.graph_adapter import convert_from_moves
 from outputs.gcode_parser import parse as parse_gcode
 from hal import get_backend
@@ -455,10 +455,10 @@ class RunTab(QWidget):
             graph_data = convert_from_moves(moves)
 
             # Parse for sim (with line_idx tracking for highlighting)
-            sim_moves = parse_gcode_for_sim(self._gcode_text)
+            sim_moves, sim_note = build_sim_moves(self._gcode_text)
 
             # Load everything into the SimViewerWidget
-            self._sim_viewer.load(graph_data, self._gcode_text, sim_moves)
+            self._sim_viewer.load(graph_data, self._gcode_text, sim_moves, sim_note)
 
             logger.info("Preview loaded: %d moves, %d sim moves",
                         len(moves), len(sim_moves))

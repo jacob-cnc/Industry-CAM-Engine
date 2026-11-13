@@ -99,8 +99,8 @@ def test_interface_work_position_has_no_side_effects():
 # ------------------------------------------------------------ T3: Run graph
 
 def test_run_graph_live_shows_the_spindle_tool_sim_shows_the_dot():
-    """Live positions draw the spindle tool; sim playback keeps the dot until
-    the sim knows each move's tool (plan phase T4)."""
+    """Live positions draw the spindle tool; a sim position with no tool
+    graphic (plain G-code path, no interpreter) is the dot."""
     from gui.components.graph_widget import MachiningGraphWidget as GraphWidget
     g = GraphWidget()
     c = _card()
@@ -123,3 +123,61 @@ def test_run_graph_survives_a_program_reload():
     g.clear_toolpath()                                           # clears every plot item
     g.set_tool_position(0.5, -0.5, live=True)
     assert g._tool_graphic.outline is not None and g._tool_graphic._body.scene() is not None
+
+
+# ------------------------------------------------------- T4: sim from canon
+
+_SIM_PROG = ("G18 G20 G7 G90 G95\nT4 M6 G43\nS500 M3\nG0 X1.0 Z0.1\nG1 Z-0.5 F.004\n"
+             "G0 X1.2\nT1 M6 G43\nG0 X0.5 Z0.1\nG1 Z-0.3\nG0 X0.4\nM2\n")
+
+
+def _sim_table(tmp_path):
+    from tools.tool_table_io import save_tool_table
+    t4 = _card()
+    t1 = _card(tool_number=1, tool_type="Boring Bar", insert_code="CCMT", orientation=3,
+               iso_code="CCMT32.51", x_offset=0.05, z_offset=0.3, x_wear=0.0)
+    path = str(tmp_path / "tool.tbl")
+    save_tool_table([t1, t4], path)
+    return path
+
+
+@pytest.mark.skipif(__import__("shutil").which("rs274") is None, reason="rs274 not installed")
+def test_sim_draws_each_move_with_its_own_tool(tmp_path):
+    from gui.components.sim_viewer import SimViewerWidget, build_sim_moves
+    from outputs.gcode_parser import parse as parse_gcode
+    from outputs.graph_adapter import convert_from_moves
+    moves, note = build_sim_moves(_SIM_PROG, _sim_table(tmp_path))
+    assert note == ""
+    tools = [(m.line_idx, m.graphic[0].ic if m.graphic[0] else None) for m in moves]
+    assert tools[0] == (4, 0.5) and tools[-1] == (9, 0.375)          # CNMG431, then CCMT32.51
+    v = SimViewerWidget()
+    v.load(convert_from_moves(parse_gcode(_SIM_PROG)), _SIM_PROG, moves, note)
+    # every interpreter move maps to the drawn segment of its own line
+    assert len(v._sim_to_toolmoves) == len(moves)
+    gt = v._graph._tool_graphic
+    for step in (5, v._path_len - 2):
+        v._sim_step = step
+        v._update_display()
+        r, z, i = v._path[step]
+        assert gt.outline is moves[i].graphic[0] and gt.position() == pytest.approx((r, z))
+
+
+@pytest.mark.skipif(__import__("shutil").which("rs274") is None, reason="rs274 not installed")
+def test_sim_without_g43_shows_the_dot_with_the_reason(tmp_path):
+    from gui.components.sim_viewer import build_sim_moves
+    prog = _SIM_PROG.replace("T4 M6 G43", "T4 M6")
+    moves, _ = build_sim_moves(prog, _sim_table(tmp_path))
+    assert moves[0].graphic[0] is None and "G43" in moves[0].graphic[1]
+
+
+@pytest.mark.skipif(__import__("shutil").which("rs274") is None, reason="rs274 not installed")
+def test_sim_interpreter_error_is_shown(tmp_path):
+    from gui.components.sim_viewer import build_sim_moves
+    moves, note = build_sim_moves(_SIM_PROG.replace("G1 Z-0.3", "G2 Z-0.3"), _sim_table(tmp_path))
+    assert "stops here" in note and moves
+
+
+def test_nominal_size_is_marked_on_the_screen():
+    c = _card(iso_code="")
+    out, note = graphic_for(c, 4, _offset(c))
+    assert out is not None and not out.size_known and "size not set" in note

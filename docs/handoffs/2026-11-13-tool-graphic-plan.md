@@ -283,3 +283,35 @@ and `blade=` today. LinuxCNC ignores the comment, so `tool.tbl` remains a valid 
 - Already there, not caused by this branch: `tests/unit/test_run_from_line.py` aborts when run by
   itself (it does on main too: its teardown closes a RunTab that Qt has already deleted). It passes
   in the full suite.
+
+### T4 (2026-11-13, branch claude/tool-graphic-build)
+- `validation/sim_path.py`: the program goes through rs274 (`cycle_time.prepare` + `_canon`) with the
+  machine's INI and `tool.tbl`. Each code line is given its line number as an N word first, so every
+  canonical move carries its source line.
+  - Segments: rapid / feed / arc / thread (between START/STOP_SPEED_FEED_SYNCH), with the tool from
+    SELECT_TOOL + CHANGE_TOOL and the offset from USE_TOOL_LENGTH_OFFSET (None after a change with no
+    G43). G21 programs are scaled to inches.
+  - Positions are program coordinates of the controlled point (checked: no G5x or tool offset in
+    them), the same point the live graphic puts at the DRO position.
+  - **Comp line lag:** under G41/G42 rs274 prints each move under the NEXT motion block (it holds the
+    move to find the corner). Those moves are given back to the last line before it with an X/Z/I/K
+    word. Tested with G42 on its own line and an F-only line in between.
+  - An interpreter error returns the path up to there plus the message (error text + the block).
+    `cycle_time` gets the same clearer message.
+- **Comp check (4.2) passes:** under LinuxCNC's own G42, the nose centre stays R from the programmed
+  chamfer / straight / R.1 fillet / shoulder within .0001 (rs274 prints 4 decimals).
+- **G76 in G7:** LinuxCNC reads G76 I / J / K as diameters (halved). `threading_planner` already
+  writes them as diameters - checked, no change.
+- `gui/components/sim_viewer.py`: `build_sim_moves(gcode) -> (moves, note)` used by the Run, Edit and
+  Program tabs.
+  - Each move draws with its own tool's outline, read from the same tool.tbl the interpreter used.
+    Dot + reason for no G43 / not in table / angles unknown; "size not set" for nominal sizes.
+  - The drawn toolpath is still the programmed path; reveal maps each interpreter move to the
+    segment of its own line.
+  - Without rs274 installed (not the lathe) the old G-code parser is used and the note says
+    "Approximate ... without cutter comp". `parse_gcode_for_sim` (with its G76 expansion) stays only
+    for that and for the line-to-segment map.
+- Speed: `tool_outline` took ~1.4 s per tool (build123d find_tangent). Quadrant points are now found
+  with `param_at_point` (~.03 s) and outlines are cached. This also removes a >1 s freeze on a tool
+  change on Manual / Run (T2/T3). A 318-line program builds its sim in ~.4 s.
+

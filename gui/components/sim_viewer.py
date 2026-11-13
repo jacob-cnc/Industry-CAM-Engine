@@ -48,6 +48,69 @@ class SimMove:
     feed_rate: float = 0.0
     center_i: float = 0.0
     center_k: float = 0.0
+    # From LinuxCNC's interpreter (build_sim_moves): the controlled-point path
+    # (r, z) evenly spaced, and (outline, note) of the tool this move runs with.
+    points: Optional[list] = None
+    graphic: Optional[tuple] = None
+
+
+# ---------------------------------------------------------------------------
+# The sim from LinuxCNC's interpreter (tool-graphic plan 2026-11-13, T4)
+# ---------------------------------------------------------------------------
+
+_PER_INCH = {"rapid": 20, "feed": 80, "arc": 80, "thread": 80}
+
+
+def build_sim_moves(gcode_text: str, tool_table: Optional[str] = None):
+    """(sim moves, note) for gcode_text as LinuxCNC will run it
+    (validation/sim_path): cutter comp applied, G76 / G33 passes as LinuxCNC
+    makes them, each move drawn with the tool it runs with (outline from the
+    same tool table the interpreter read). note says what the sim can't show:
+    the interpreter stopping early (path up to there), or - with no rs274
+    installed (not the lathe) - that the path is the plain G-code, uncompensated.
+    """
+    from validation.sim_path import REPO, interpreter_available, sim_path
+    import os
+    if not interpreter_available():
+        return (parse_gcode_for_sim(gcode_text),
+                "Approximate: LinuxCNC's interpreter is not installed - path without cutter comp")
+    tool_table = tool_table or os.path.join(REPO, "tool.tbl")
+    path = sim_path(gcode_text, os.path.join(REPO, "industry-cam.ini"), tool_table)
+    graphics = _sim_graphics(path.segments, tool_table)
+    moves = []
+    for seg in path.segments:
+        (r0, z0), (r1, z1) = seg.pts[0], seg.pts[-1]
+        moves.append(SimMove(
+            move_type=seg.kind, start_x=2 * r0, start_z=z0, end_x=2 * r1, end_z=z1,
+            line_idx=seg.line_idx, points=seg.resampled(_PER_INCH[seg.kind]),
+            graphic=graphics[(seg.tool, seg.tool_offset)]))
+    note = f"LinuxCNC's interpreter stops here: {path.problem}" if path.problem else ""
+    return moves, note
+
+
+def _sim_graphics(segments, tool_table: str) -> dict:
+    """(tool, offset) -> (outline or None, note), one outline per tool."""
+    from gui.components.tool_graphic_item import graphic_for
+    from tools.tool_table_io import load_tool_table
+    try:
+        cards = {c.tool_number: c for c in load_tool_table(tool_table)}
+        table_note = ""
+    except (OSError, ValueError, KeyError) as exc:
+        cards, table_note = {}, f"tool table unreadable: {exc}"
+    out = {}
+    for seg in segments:
+        key = (seg.tool, seg.tool_offset)
+        if key in out:
+            continue
+        card = cards.get(seg.tool)
+        if table_note and seg.tool > 0:
+            out[key] = (None, table_note)
+            continue
+        # no G43 after the change: the controlled point is the spindle's
+        # reference, which is the tool's tip only for a zero offset
+        offset = seg.tool_offset if seg.tool_offset is not None else (0.0, 0.0)
+        out[key] = graphic_for(card, seg.tool, offset, tol=6e-5)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -352,6 +415,7 @@ class SimViewerWidget(QWidget):
         super().__init__(parent)
         self._show_gcode_panel = show_gcode_panel
         self._sim_moves: List[SimMove] = []
+        self._sim_note = ""
         self._sim_step = 0
         self._sim_timer = QTimer(self)
         self._sim_timer.timeout.connect(self._sim_advance)
@@ -371,9 +435,12 @@ class SimViewerWidget(QWidget):
 
         self._setup_ui()
 
-    def load(self, graph_data: GraphData, gcode_text: str, sim_moves: List[SimMove]):
-        """Load data into the viewer. Call after pipeline or file open."""
+    def load(self, graph_data: GraphData, gcode_text: str, sim_moves: List[SimMove],
+             note: str = ""):
+        """Load data into the viewer. Call after pipeline or file open.
+        note: shown under the graph (build_sim_moves)."""
         self._sim_moves = sim_moves
+        self._sim_note = note
         self._sim_step = 0
 
         # Pre-compute interpolated path
@@ -381,9 +448,12 @@ class SimViewerWidget(QWidget):
         self._path_len = len(self._path)
 
         # Build SimMove-to-tool_moves index mapping
-        self._sim_to_toolmoves = self._build_sim_to_toolmoves_mapping(
-            sim_moves, graph_data
-        )
+        if any(mv.points is not None for mv in sim_moves):
+            self._sim_to_toolmoves = self._map_by_line(sim_moves, gcode_text, graph_data)
+        else:
+            self._sim_to_toolmoves = self._build_sim_to_toolmoves_mapping(
+                sim_moves, graph_data
+            )
 
         # Build G-code line_idx → sim_move index for live execution tracking
         self._line_to_sim_idx = {sm.line_idx: i for i, sm in enumerate(sim_moves)}
@@ -405,7 +475,7 @@ class SimViewerWidget(QWidget):
         # Update slider
         self._slider.setMaximum(self._path_len - 1 if self._path_len > 0 else 0)
         self._frame_label.setText(f"0 / {self._path_len}")
-        self._info_label.setText("Ready")
+        self._info_label.setText(note or "Ready")
 
         # Show all toolpath by default after generating
         self._sim_show_all()
@@ -471,6 +541,21 @@ class SimViewerWidget(QWidget):
 
         self._graph.reveal_toolpath_up_to(toolmoves_idx)
         self._graph.highlight_next_segment(toolmoves_idx + 1)
+
+    def _map_by_line(self, sim_moves: List[SimMove], gcode_text: str,
+                     graph_data: GraphData) -> dict:
+        """Interpreter moves -> drawn toolpath segments, by source line.
+
+        The drawn toolpath is the PROGRAMMED path (outputs/gcode_parser), so it
+        is matched to the program's own lines by endpoint (as before), and each
+        interpreter move - compensated, or one of many G76 passes - takes the
+        segment of the line it came from."""
+        plain = parse_gcode_for_sim(gcode_text)
+        line_tm: dict = {}
+        for si, tm in self._build_sim_to_toolmoves_mapping(plain, graph_data).items():
+            ln = plain[si].line_idx
+            line_tm[ln] = max(tm, line_tm.get(ln, tm))
+        return {i: line_tm[mv.line_idx] for i, mv in enumerate(sim_moves) if mv.line_idx in line_tm}
 
     def _build_sim_to_toolmoves_mapping(
         self, sim_moves: List[SimMove], graph_data: GraphData
@@ -812,6 +897,9 @@ class SimViewerWidget(QWidget):
 
         path = []
         for i, mv in enumerate(sim_moves):
+            if mv.points is not None:                 # interpreter path, already spaced
+                path.extend((r, z, i) for r, z in mv.points)
+                continue
             sx_r = mv.start_x / 2.0
             sz = mv.start_z
             ex_r = mv.end_x / 2.0
@@ -1000,7 +1088,8 @@ class SimViewerWidget(QWidget):
     def _update_display(self):
         if self._sim_step > 0 and self._path:
             x_r, z, move_idx = self._path[min(self._sim_step, self._path_len - 1)]
-            self._graph.set_tool_position(x_r, z)
+            mv = self._sim_moves[move_idx] if move_idx < len(self._sim_moves) else None
+            self._graph.set_tool_position(x_r, z, sim_graphic=mv.graphic if mv else None)
             # Reveal toolpath segments up to current move
             # Convert sim_moves index to tool_moves index (toolpath_segments align with tool_moves)
             toolpath_idx = self._sim_to_toolmoves.get(move_idx, None)
@@ -1031,7 +1120,7 @@ class SimViewerWidget(QWidget):
             else:
                 self._info_label.setText("")
         else:
-            self._info_label.setText("Ready")
+            self._info_label.setText(self._sim_note or "Ready")
 
         # --- Material removal state update ---
         if self._material_enabled and self._sim_step > 0 and self._path:

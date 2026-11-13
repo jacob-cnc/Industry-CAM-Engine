@@ -25,6 +25,7 @@ geometry/).
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
@@ -50,7 +51,7 @@ _FRAMES = {
 _ARC_SAMPLES = 24
 
 
-@dataclass
+@dataclass(frozen=True)
 class ToolOutline:
     """The insert, in (r, z) inches, controlled point at (0, 0)."""
     outline: List[Point]                     # closed polygon (first point repeated last)
@@ -120,8 +121,13 @@ def _sample_edge(e) -> List[Point]:
         ts = [0.0, 1.0]
     else:
         ts = {i / _ARC_SAMPLES for i in range(_ARC_SAMPLES + 1)}
-        for ang in (0.0, 90.0, 180.0, 270.0):
-            ts.update(t for t in e.find_tangent(ang) if 0.0 < t < 1.0)
+        c, rad = e.arc_center, e.radius
+        for q in (bd.Vector(rad, 0), bd.Vector(0, rad), bd.Vector(-rad, 0), bd.Vector(0, -rad)):
+            pt = c + q                                  # the circle's X / Z extreme
+            if e.distance_to(pt) < 1e-9:
+                t = e.param_at_point(pt)
+                if 0.0 < t < 1.0:
+                    ts.add(t)
         ts = sorted(ts)
     return [((e @ t).Y, (e @ t).X) for t in ts]
 
@@ -145,6 +151,7 @@ def _polyline(edges) -> List[Point]:
 # Public API
 # ---------------------------------------------------------------------------
 
+@functools.lru_cache(maxsize=64)
 def tool_outline(spec: InsertSpec) -> ToolOutline:
     """The true-scale outline of this insert, controlled point at (0, 0).
 

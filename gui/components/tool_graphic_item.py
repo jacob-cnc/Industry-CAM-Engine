@@ -35,14 +35,16 @@ def _path(points) -> QtGui.QPainterPath:
     return path
 
 
-def graphic_for(card, tool_in_spindle: int, tool_offset: Optional[Tuple[float, float]] = None):
+def graphic_for(card, tool_in_spindle: int, tool_offset: Optional[Tuple[float, float]] = None,
+                tol: float = 1e-6):
     """(outline or None, note) for the tool in the spindle.
 
     card: the ToolCardData for tool_in_spindle (None when it isn't in the table);
     tool_offset: LinuxCNC's active (x radius, z) tool offset, checked against
     the card's geometry + wear: if they differ the work position is NOT this
     tool's controlled point (G43 not applied), so the dot is shown, not a
-    misplaced insert.
+    misplaced insert. tol: 1e-6 for LinuxCNC's live offset; the interpreter's
+    printed offset (sim) has 4 decimals.
     """
     from geometry.tool_outline import tool_outline
     from tools.tool_card_data import insert_spec
@@ -52,12 +54,14 @@ def graphic_for(card, tool_in_spindle: int, tool_offset: Optional[Tuple[float, f
         return None, f"T{tool_in_spindle} is not in the tool table"
     if tool_offset is not None:
         want = (card.x_offset + card.x_wear, card.z_offset + card.z_wear)
-        if abs(tool_offset[0] - want[0]) > 1e-6 or abs(tool_offset[1] - want[1]) > 1e-6:
+        if abs(tool_offset[0] - want[0]) > tol or abs(tool_offset[1] - want[1]) > tol:
             return None, f"T{tool_in_spindle} offset not active (G43) - showing the spindle point"
     try:
-        return tool_outline(insert_spec(card)), ""
+        outline = tool_outline(insert_spec(card))
     except ValueError as exc:
         return None, f"T{tool_in_spindle}: {exc}"
+    # drawn at a nominal size until an ISO code or IC is entered - say so
+    return outline, ("" if outline.size_known else f"T{tool_in_spindle} size not set (ISO code / IC)")
 
 
 class ToolGraphic:

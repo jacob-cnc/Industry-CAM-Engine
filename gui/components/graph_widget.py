@@ -85,6 +85,7 @@ class MachiningGraphWidget(pg.PlotWidget):
         self._setup_plot()
         self._setup_crosshair()
         self._tool_graphic = None
+        self._tool_shown = None
         self._live_tool = (None, "")      # (outline, note) of the spindle tool
         self._next_seg_item = None
         self._rapid_items = []
@@ -192,6 +193,7 @@ class MachiningGraphWidget(pg.PlotWidget):
         self.clear()
         self._setup_crosshair()
         self._tool_graphic = None
+        self._tool_shown = None
         self._next_seg_item = None
         self._profile_overlay_items = []
         self._uncut_overlay_items = []
@@ -249,20 +251,24 @@ class MachiningGraphWidget(pg.PlotWidget):
         """The spindle tool's outline (geometry.tool_outline) for live
         positions; None = the dot (tool-graphic plan 2026-11-13)."""
         self._live_tool = (outline, note)
-        if self._tool_graphic is not None and self._tool_live:
+        if self._tool_graphic is not None and (self._tool_shown or ("",))[0] == "live":
+            self._tool_shown = ("live", id(outline), note)
             self._tool_graphic.set_outline(outline, note)
 
-    def set_tool_position(self, x_radius: float, z: float, live: bool = False):
+    def set_tool_position(self, x_radius: float, z: float, live: bool = False,
+                          sim_graphic=None):
         """Move the tool. live=True: the machine's position, drawn as the
-        spindle tool. live=False (sim playback): the dot until the sim knows
-        each move's tool (plan phase T4)."""
+        spindle tool. live=False (sim playback): sim_graphic = (outline, note)
+        of the tool that move runs with (validation/sim_path), None = the dot."""
         from gui.components.tool_graphic_item import ToolGraphic
         if self._tool_graphic is None:
             self._tool_graphic = ToolGraphic(self, dot_size=16)
-            self._tool_live = None
-        if live != self._tool_live:
-            self._tool_live = live
-            self._tool_graphic.set_outline(*(self._live_tool if live else (None, "")))
+            self._tool_shown = None
+        want = self._live_tool if live else (sim_graphic or (None, ""))
+        key = ("live", id(want[0]), want[1]) if live else ("sim", id(want[0]), want[1])
+        if key != self._tool_shown:
+            self._tool_shown = key
+            self._tool_graphic.set_outline(*want)
         self._tool_graphic.set_position(x_radius, z)
 
     def highlight_next_segment(self, move_index: int):
@@ -467,6 +473,7 @@ class MachiningGraphWidget(pg.PlotWidget):
         self.clear()
         self._setup_crosshair()
         self._tool_graphic = None
+        self._tool_shown = None
         self._graph_data = None
 
     def _get_segment_color(self, segment: ToolpathSegment) -> str:

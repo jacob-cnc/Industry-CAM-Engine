@@ -916,7 +916,7 @@ class EditTab(QWidget):
 
     def _on_preview(self):
         """Parse G-code and load into the SimViewerWidget (proven architecture)."""
-        from gui.components.sim_viewer import parse_gcode_for_sim
+        from gui.components.sim_viewer import build_sim_moves
         from outputs.graph_adapter import convert_from_moves
 
         text = self._editor.toPlainText()
@@ -936,10 +936,10 @@ class EditTab(QWidget):
             graph_data = convert_from_moves(moves)
 
             # Parse for sim (with line_idx tracking)
-            sim_moves = parse_gcode_for_sim(text)
+            sim_moves, sim_note = build_sim_moves(text)
 
             # Load everything into the proven SimViewerWidget
-            self._sim_viewer.load(graph_data, text, sim_moves)
+            self._sim_viewer.load(graph_data, text, sim_moves, sim_note)
 
         except Exception as e:
             QMessageBox.warning(
