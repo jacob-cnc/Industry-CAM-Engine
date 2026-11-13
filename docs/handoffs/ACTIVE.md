@@ -15,8 +15,12 @@ the distinction between the owner's verbatim request and later design advice.
     -> 2 (v3 model + converter, corpus identical) -> 3 (Program tab) -> 4 (in-process stock, rest machining).
   - Owner 2026-11-12: no implementation yet; import does not set the stock; threads not on segments.
 
+- [Plan: true-scale tool graphic on Manual / Run / sim screens](2026-11-13-tool-graphic-plan.md)
+  - Status: PLAN ONLY, owner decisions 2026-11-13: insert only (no holder / bar), IC from ISO code or field,
+    material removal in sim and live.
+
 - [Plan: field-driven threading (straight + tapered, thread lists, hints)](2026-11-12-threading-workflow-plan.md)
-  - Status: PLAN ONLY, owner decisions recorded 2026-11-12. Fields OD/ID, tool #, X start / end (major),
+  - Status: MERGED main a9a4bb6 (2026-11-12); live checkout pulled; air cut pending. Fields OD/ID, tool #, X start / end (major),
     Z start, Z end (= pull-out point), pitch, pilot (ID), RPM, passes, spring passes, starts, entry angle;
     depth DERIVED from standard + class. UNC/UNF (2A/2B, 3A/3B), metric (6g/6H, 4h/5H), Tr (7e/7H),
     Acme (2G/3G), NPT preset, Custom. Hints: PD window (OD), tap drill (ID). Retract major + .020 (OD),
