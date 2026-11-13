@@ -27,7 +27,8 @@ class PositionGraphWidget(pg.PlotWidget):
     """Real-time tool position graph for manual mode.
 
     Features:
-        - Tool dot (large, bright white) at current XZ position
+        - The tool: true-scale insert (controlled point marked) or a dot when
+          no drawable tool is loaded
         - Position trail (green line of recent positions)
         - Grid with labeled axes (X diameter vertical, Z horizontal)
         - Crosshair with coordinate readout
@@ -110,12 +111,10 @@ class PositionGraphWidget(pg.PlotWidget):
         self._trail_item = self.plot([], [], pen=pg.mkPen(
             COLORS['graph_feed'], width=2, style=QtCore.Qt.SolidLine
         ))
-        self._tool_dot = pg.ScatterPlotItem(
-            size=14,
-            brush=pg.mkBrush(COLORS['graph_tool_dot']),
-            pen=pg.mkPen('#000000', width=1),
-        )
-        self.addItem(self._tool_dot)
+        # The tool: true-scale insert once a drawable tool is loaded, else the
+        # dot (tool-graphic plan 2026-11-13).
+        from gui.components.tool_graphic_item import ToolGraphic
+        self._tool = ToolGraphic(self, dot_size=14)
 
     # ------------------------------------------------------------------
     # Public API
@@ -146,8 +145,21 @@ class PositionGraphWidget(pg.PlotWidget):
         if len(self._trail_z) > 1:
             self._trail_item.setData(list(self._trail_z), list(self._trail_x))
 
-        # Update tool dot
-        self._tool_dot.setData([z], [x_radius])
+        self._tool.set_position(x_radius, z)
+
+    def move_tool(self, x_diameter: float, z: float):
+        """Move only the tool (fast graphics refresh; the trail is left to
+        update_position)."""
+        self._tool.set_position(x_diameter / 2.0, z)
+
+    def set_tool_outline(self, outline, note: str = ""):
+        """Show this tool outline (geometry.tool_outline, controlled point at
+        0, 0); None shows the dot, with `note` as the reason if given."""
+        self._tool.set_outline(outline, note)
+
+    @property
+    def tool_graphic(self):
+        return self._tool
 
     def clear_trail(self):
         """Clear the position trail."""

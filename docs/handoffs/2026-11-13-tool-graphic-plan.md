@@ -187,3 +187,158 @@ and `blade=` today. LinuxCNC ignores the comment, so `tool.tbl` remains a valid 
 3. **Boring bars:** draw the bar's diameter along its length as well (shows bar-to-bore clearance)?
 4. **Live material removal:** wanted during real cuts too, or the sim only? (It is about the same
    work once the sim version exists.)
+
+## 10. Implementation notes
+
+### T1 (2026-11-13, branch claude/tool-graphic-build)
+- `models/tool.py`: `InsertSpec` (Q, nose radius, I, J, shape, IC, blade width).
+- `tools/insert_geometry_lookup.py`:
+  - `INSERT_SHAPE` maps each insert family to its body shape.
+  - `parse_iso_code` reads the inch codes (ANSI B212.4: IC n/8", radius n/64") and the metric codes
+    (ISO 1832: edge-length digits -> IC for the common sizes; radius in 0.1 mm).
+  - A size it can't read returns None; it never guesses.
+- `tools/tool_card_data.py`:
+  - `iso_code` / `ic` fields.
+  - `insert_spec(card)`: IC from the field, else from the ISO code, else unknown.
+  - `iso_radius_mismatch(card)`: a note when the ISO code's nose radius differs from the table's D/2.
+- `tools/tool_table_io.py`: `iso=` / `ic=` in the comment, written only when set, so existing lines
+  are unchanged (the repo `tool.tbl` round-trips byte-identical).
+- `geometry/tool_outline.py`: `tool_outline(spec) -> ToolOutline`, built with build123d / OCCT only
+  (no trig; the architecture ratchet is unchanged).
+  - Shapes:
+    - rhombic bodies (C, D, V, S, custom): two strips of width IC crossing at the included angle;
+    - T and 60 deg thread: three half-planes;
+    - W: six half-planes;
+    - 55 / 29 deg thread: the tooth wedge cut to the IC triangle (body nominal, edges exact);
+    - groove: blade width x length;
+    - R: a circle.
+  - Corners are filleted with the nose radius. The body is then turned so its bisector is at
+    (I+J)/2 in the Q frame, and the nose centre is placed at controlled point - r * Q direction.
+  - Arc samples include the quadrant points, so the outline reaches the true touch-off lines.
+  - Unknown edge angles (I0 J0, non-round) raise ValueError with a reason: the screens keep the dot.
+  - An unknown size is drawn at a nominal IC (thread .375, groove .25, others .5), flagged
+    `size_known=False`.
+- `gui/components/orientation_graphic.py`: the editor picture is now drawn from `tool_outline` (the
+  old hand-built shapes and the Q mirror tables are gone). It shows a reason when the insert can't
+  be drawn, and "size not set" when the size is nominal.
+- `gui/components/tool_geometry_row.py`: ISO code and IC fields, plus a warning label for an
+  unreadable code or a nose-radius mismatch.
+- Tests: `tests/unit/test_tool_outline.py`:
+  - Q1-Q9 nose centre; the 95 deg holder touching both touch-off lines (Q1-Q4);
+  - edge angles for 4 I/J pairs x 4 Q;
+  - the ISO inscribed circle for C, D, V, S, T, W;
+  - round Q9; groove; nominal size; refusal; ISO parsing; IC priority;
+  - tool table round trip.
+- Full suite 1463 passed.
+- Current tool table: T1 (CCMT, Q3), T2 (60 deg thread, Q2) and T4 (CNMG, Q2) draw at a nominal size until an
+  ISO code or IC is entered. T3 (Custom) and T99 (QCTP master) have I0 J0 and keep the dot.
+
+### T2 (2026-11-13, branch claude/tool-graphic-build)
+- `gui/components/tool_graphic_item.py`:
+  - `ToolGraphic` is one object per graph: a filled body path, the cutting edges, a "+" at the
+    controlled point, and the dot plus a note. The path is built once per tool; motion is just
+    `setPos` (pens are cosmetic, so line widths stay the same at any zoom).
+  - `graphic_for(card, tool_in_spindle, tool_offset)` returns the outline, or None with a reason:
+    - no tool -> plain dot;
+    - "Tn is not in the tool table";
+    - **"offset not active (G43)"**: LinuxCNC's active tool offset differs from the card's
+      geometry + wear, so the work position is not this tool's controlled point. The dot is
+      shown instead of a misplaced insert;
+    - edge angles unknown.
+- `PositionGraphWidget` (Manual):
+  - The dot is replaced by `ToolGraphic`.
+  - `set_tool_outline(outline, note)`; `move_tool(x_dia, z)` (tool only, no trail).
+- `ManualTab`:
+  - A 33 ms (~30 Hz) graphics timer runs only while the tab is visible. It reads
+    `backend.work_position()` and moves the tool; the 100 ms poll keeps the DRO, trail etc.
+  - The tool graphic is rebuilt on a tool change, an active-offset change, or a table edit / reload.
+- `HALBackend.work_position()`: a fresh feedback position with no side effects. The live backend
+  polls `linuxcnc.stat` only; it does **not** drain the error channel, which `poll()` does, so a
+  faster graphics read cannot swallow an error the rest of the GUI should show.
+- Wiring (`MainWindow`): `ManualTab.set_tool_card_resolver(ToolsTab.get_tool)`. `tool_changed` and the
+  new `ToolsTab.tools_reloaded` (emitted by `_accept_table`) trigger `refresh_tool_graphic()`.
+- `hal/interface.py`: the `tool_offset_x` comment corrected to RADIUS (it always held `tool_offset[0]`).
+- Tests: `tests/unit/test_tool_graphic_screen.py`:
+  - the controlled point maps to the DRO position's screen pixel (1e-6), and +X is down;
+  - `move_tool` moves only the tool;
+  - the dot and its reasons; the G43 mismatch; `work_position`.
+
+### T3 (2026-11-13, branch claude/tool-graphic-build)
+- `MachiningGraphWidget` (Run / sim graph):
+  - The dot is replaced by `ToolGraphic`, rebuilt lazily after `clear()` (a program load clears
+    every plot item).
+  - `set_live_tool_outline(outline, note)` holds the spindle tool.
+  - `set_tool_position(x_r, z, live=False)`: live=True draws the spindle tool. Sim playback
+    (live=False) keeps the dot until phase T4 gives the sim each move's own tool (the spindle
+    tool would be the wrong tool for a multi-tool program).
+- `SimViewerWidget`:
+  - `show_machine_position` / `update_live_position` pass live=True.
+  - `set_live_tool_outline`.
+  - `move_live_tool` moves the tool only, and not while sim playback is running.
+- `RunTab`:
+  - The same `graphic_for` logic as Manual (G43 check, reasons).
+  - A 33 ms graphics timer runs only while the tab is active.
+  - Wired from `MainWindow` with `ToolsTab.get_tool`, `tool_changed`, `tools_reloaded`.
+- Tests: the live tool vs the sim dot on the Run graph; the tool survives `clear_toolpath()`.
+- Already there, not caused by this branch: `tests/unit/test_run_from_line.py` aborts when run by
+  itself (it does on main too: its teardown closes a RunTab that Qt has already deleted). It passes
+  in the full suite.
+
+### T4 (2026-11-13, branch claude/tool-graphic-build)
+- `validation/sim_path.py`: the program goes through rs274 (`cycle_time.prepare` + `_canon`) with the
+  machine's INI and `tool.tbl`. Each code line is given its line number as an N word first, so every
+  canonical move carries its source line.
+  - Segments: rapid / feed / arc / thread (between START/STOP_SPEED_FEED_SYNCH), with the tool from
+    SELECT_TOOL + CHANGE_TOOL and the offset from USE_TOOL_LENGTH_OFFSET (None after a change with no
+    G43). G21 programs are scaled to inches.
+  - Positions are program coordinates of the controlled point (checked: no G5x or tool offset in
+    them), the same point the live graphic puts at the DRO position.
+  - **Comp line lag:** under G41/G42 rs274 prints each move under the NEXT motion block (it holds the
+    move to find the corner). Those moves are given back to the last line before it with an X/Z/I/K
+    word. Tested with G42 on its own line and an F-only line in between.
+  - An interpreter error returns the path up to there plus the message (error text + the block).
+    `cycle_time` gets the same clearer message.
+- **Comp check (4.2) passes:** under LinuxCNC's own G42, the nose centre stays R from the programmed
+  chamfer / straight / R.1 fillet / shoulder within .0001 (rs274 prints 4 decimals).
+- **G76 in G7:** LinuxCNC reads G76 I / J / K as diameters (halved). `threading_planner` already
+  writes them as diameters - checked, no change.
+- `gui/components/sim_viewer.py`: `build_sim_moves(gcode) -> (moves, note)` used by the Run, Edit and
+  Program tabs.
+  - Each move draws with its own tool's outline, read from the same tool.tbl the interpreter used.
+    Dot + reason for no G43 / not in table / angles unknown; "size not set" for nominal sizes.
+  - The drawn toolpath is still the programmed path; reveal maps each interpreter move to the
+    segment of its own line.
+  - Without rs274 installed (not the lathe) the old G-code parser is used and the note says
+    "Approximate ... without cutter comp". `parse_gcode_for_sim` (with its G76 expansion) stays only
+    for that and for the line-to-segment map.
+- Speed: `tool_outline` took ~1.4 s per tool (build123d find_tangent). Quadrant points are now found
+  with `param_at_point` (~.03 s) and outlines are cached. This also removes a >1 s freeze on a tool
+  change on Manual / Run (T2/T3). A 318-line program builds its sim in ~.4 s.
+
+
+### T5 (2026-11-13, branch claude/tool-graphic-build)
+- `validation/material_sweep.py` (not `geometry/` as section 5 said: the architecture rule allows
+  Shapely only in validation/, where cut_regions does its sweeps).
+  - Each move removes the insert outline swept along the interpreter's own points. The outline is
+    convex, so each straight step sweeps exactly the convex hull of the two placements. The nose
+    arc is kept at full resolution; the rest of the body is simplified to .0001.
+  - Only feed / arc / thread moves cut. Only the steps where the insert meets the stock are swept.
+  - **Rub:** stock met by a LEADING non-cutting edge (anything but the nose and its two edges) on a
+    feed move. **Rapid into stock:** stock in a rapid's sweep. Both count only where the material is
+    thicker than .004 (GRAZE): the nose-radius cusp a pass leaves at a shoulder, grazed by the
+    retract, is not a crash.
+- Stock: from the program header (`outputs/program_header.py`). A program without one gets no material
+  and says so (never guessed). The writer now adds `; Stock Face Z:` (StockDef.face_at_z0). Older
+  programs use cut_regions' rule (face at Z Start, not ahead of Z0) and the note says so.
+- Sim: computed in a background thread after loading (~.3 s for the GCH bore, ~7 s for a 3,600-line
+  roughing program). Playback looks up each move's result; inside a cutting move the part done so
+  far is swept on the spot (median 12 ms, p95 16 ms per frame). Rubs / rapids are drawn red hatched
+  and listed in the info line. "Hide Material" button.
+- Live (Run tab): when a program starts the bar resets (Run From: the sim's bar before that line).
+  The spindle tool is swept between 30 Hz feedback samples while the measured spindle speed is over
+  5 RPM and LinuxCNC's motion_type is feed / arc (new `motion_type` in MachineState and
+  `motion_sample()` read with the position). Redrawn ~10x a second; kept after the program ends until
+  the sim is played.
+- Found with it: "Regenerated 2026-11-10 (arc fix)/GUI Conv Test (T4).ngc" on the Desktop has 27 arcs
+  that LinuxCNC runs as 353-359 deg near-full circles (e.g. line 177, N1040 G02). Do not run that
+  file. The same job regenerated with current main has no long arcs and no warnings.

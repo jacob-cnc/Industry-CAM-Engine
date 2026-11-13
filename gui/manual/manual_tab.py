@@ -300,10 +300,52 @@ class ManualTab(QWidget):
     # ==================================================================
 
     def _setup_polling(self):
-        """Start 100ms timer to poll backend and update all displays."""
+        """Start 100ms timer to poll backend and update all displays, and a
+        ~30 Hz timer that only moves the tool graphic (tool-graphic plan
+        2026-11-13: at 10 Hz the tool trails a .75 in/s rapid by .075)."""
         self._poll_timer = QTimer(self)
         self._poll_timer.timeout.connect(self._on_poll)
         self._poll_timer.start(100)
+        self._tool_card_resolver = None
+        self._tool_graphic_key = None
+        self._tool_graphic_rev = 0
+        self._graphic_timer = QTimer(self)
+        self._graphic_timer.setInterval(33)
+        self._graphic_timer.timeout.connect(self._on_graphic_tick)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._graphic_timer.start()
+
+    def hideEvent(self, event):
+        self._graphic_timer.stop()
+        super().hideEvent(event)
+
+    def _on_graphic_tick(self):
+        """Move only the tool graphic from a fresh, side-effect-free position read."""
+        pos = self._backend.work_position()
+        if pos is not None:
+            self._graph.move_tool(*pos)
+
+    def set_tool_card_resolver(self, resolver):
+        """resolver(tool_number) -> ToolCardData or None (the Tools tab)."""
+        self._tool_card_resolver = resolver
+        self.refresh_tool_graphic()
+
+    def refresh_tool_graphic(self):
+        """Rebuild the tool graphic on the next poll (tool table edited / reloaded)."""
+        self._tool_graphic_rev += 1
+
+    def _update_tool_graphic(self, s):
+        from gui.components.tool_graphic_item import graphic_for
+        t = s.tool_in_spindle
+        key = (t, round(s.tool_offset_x, 9), round(s.tool_offset_z, 9), self._tool_graphic_rev)
+        if key == self._tool_graphic_key:
+            return
+        self._tool_graphic_key = key
+        card = self._tool_card_resolver(t) if (self._tool_card_resolver and t > 0) else None
+        outline, note = graphic_for(card, t, (s.tool_offset_x, s.tool_offset_z))
+        self._graph.set_tool_outline(outline, note)
 
     def _on_poll(self):
         """Poll backend, update DRO + graph + section indicators + compound."""
@@ -342,6 +384,7 @@ class ManualTab(QWidget):
         # Tool
         t = s.tool_in_spindle
         self._tool["tool_display"].setText(f"T{t}" if t > 0 else "T0")
+        self._update_tool_graphic(s)
 
     # ==================================================================
     # Handlers

@@ -1310,9 +1310,9 @@ class ProgramTab(QWidget):
                 graph_data = graph_convert(first_plan_result)
 
             stage = "sim_load"
-            from gui.components.sim_viewer import parse_gcode_for_sim
-            sim_moves = parse_gcode_for_sim(combined_gcode)
-            self._sim_viewer.load(graph_data, combined_gcode, sim_moves)
+            from gui.components.sim_viewer import build_sim_moves
+            sim_moves, sim_note = build_sim_moves(combined_gcode)
+            self._sim_viewer.load(graph_data, combined_gcode, sim_moves, sim_note)
 
             if hasattr(self, '_profile_contour_segments') and self._profile_contour_segments:
                 self._sim_viewer.set_profile_overlay(self._profile_contour_segments)
@@ -1808,10 +1808,10 @@ class ProgramTab(QWidget):
 
             # Convert to graph data and load into SimViewerWidget
             from outputs.graph_adapter import convert_from_moves
-            from gui.components.sim_viewer import parse_gcode_for_sim
+            from gui.components.sim_viewer import build_sim_moves
             graph_data = convert_from_moves(moves)
-            sim_moves = parse_gcode_for_sim(gcode_text)
-            self._sim_viewer.load(graph_data, gcode_text, sim_moves)
+            sim_moves, sim_note = build_sim_moves(gcode_text)
+            self._sim_viewer.load(graph_data, gcode_text, sim_moves, sim_note)
 
             # Emit G-code to Edit tab
             self._last_gcode_text = gcode_text

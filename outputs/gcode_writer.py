@@ -106,6 +106,10 @@ class GCodeWriter:
         lines.append(f"; X Start: {pr.stock.x_start * conv:{fmt}}")
         lines.append(f"; Z Start: {pr.stock.z_start * conv:{fmt}}")
         lines.append(f"; Z End: {pr.stock.z_end * conv:{fmt}}")
+        # where the bar's face is (Z start can be approach clearance only): the
+        # sim's material removal reads it back (outputs/program_header.py)
+        face = 0.0 if getattr(pr.stock, "face_at_z0", False) else max(pr.stock.z_start, 0.0)
+        lines.append(f"; Stock Face Z: {face * conv:{fmt}}")
         lines.append(f"; X Park: {pr.stock.x_park * conv:{fmt}}")
         lines.append(f"; Z Park: {pr.stock.z_park * conv:{fmt}}")
         if pr.stock.pilot_hole_dia > 0:

@@ -131,6 +131,9 @@ class MachineState:
     program_file: str = ""
     current_line: int = 0
     motion_line: int = 0
+    # LinuxCNC stat.motion_type of the move executing: 0 none, 1 rapid,
+    # 2 feed, 3 arc, 4 tool change, 5 probe, 6 rotary index
+    motion_type: int = 0
 
     # Active G-codes (modal state)
     active_gcodes: str = ""         # e.g., "G20 G90 G95 G54"
@@ -138,7 +141,7 @@ class MachineState:
 
     # Tool
     tool_in_spindle: int = 0
-    tool_offset_x: float = 0.0     # diameter
+    tool_offset_x: float = 0.0     # RADIUS (LinuxCNC tool_offset[0], machine units)
     tool_offset_z: float = 0.0
 
     # Flags
@@ -195,6 +198,23 @@ class HALBackend(ABC):
         After calling, read self.state for the latest snapshot.
         """
         ...
+
+    def work_position(self):
+        """(x_diameter, z) work position (tool offset applied) for a fast
+        graphics refresh, or None when not connected. Unlike poll() it has no
+        side effects: no error-channel drain, no state rebuild (tool-graphic
+        plan 2026-11-13, 30 Hz tool graphic). Backends without a cheap read
+        return the last poll()'s snapshot.
+        """
+        s = self.state
+        return (s.x.position, s.z.position)
+
+    def motion_sample(self):
+        """(x_diameter, z, motion_type) read together, for the live material
+        sweep (tool-graphic plan T5): the type belongs to the same instant as
+        the position. Same rules as work_position()."""
+        s = self.state
+        return (s.x.position, s.z.position, s.motion_type)
 
     # ------------------------------------------------------------------
     # Mode Control

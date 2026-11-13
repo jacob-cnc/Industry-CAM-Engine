@@ -68,6 +68,7 @@ class Tools_Tab(QWidget):
 
     tool_changed = pyqtSignal(int)
     tool_selected = pyqtSignal(object)
+    tools_reloaded = pyqtSignal()       # a table was loaded (tool graphics rebuild)
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -575,6 +576,7 @@ class Tools_Tab(QWidget):
         self._loaded_tools = deepcopy(tools)
         self.set_cards(tools)
         self._button_bar.set_table_name(os.path.basename(path))
+        self.tools_reloaded.emit()
 
     def _live_table_path(self):
         ini_name = os.environ.get("INI_FILE_NAME") or getattr(self._linuxcnc_stat, "ini_filename", None)

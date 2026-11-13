@@ -177,7 +177,11 @@ def _canon(program: str, ini_path: str, tool_table: str) -> tuple:
     if "PROGRAM_END" not in canon:
         msgs = [l for l in (p.stdout + p.stderr).splitlines()
                 if l.strip() and not re.match(r"\s*(\d+ =|enter choice)", l)]
-        problem = msgs[-1].strip() if msgs else "the interpreter stopped early"
+        # rs274 prints the error, then echoes the block it stopped at
+        if len(msgs) >= 2 and msgs[-1].strip() in program:
+            problem = f"{msgs[-2].strip()}: {msgs[-1].strip()}"
+        else:
+            problem = msgs[-1].strip() if msgs else "the interpreter stopped early"
     return canon, problem
 
 
