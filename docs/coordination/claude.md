@@ -1,6 +1,7 @@
 # Claude status
 
-## 2026-11-13 — CLAIM: tool-graphic build phase T1 on claude/tool-graphic-build (from main f6f29d8)
+## 2026-11-13 — REVIEW-READY (claim released): tool-graphic T1-T3 on claude/tool-graphic-build (from main f6f29d8); T4/T5 not started
+- Also touched: hal/interface.py + hal/live_backend.py (work_position), gui/components/{tool_graphic_item,position_graph,graph_widget,sim_viewer}.py, gui/manual/manual_tab.py, gui/run_tab.py, gui/main_window.py
 - Plan merged to main f6f29d8 (docs only). Claimed paths: geometry/tool_outline.py (new), tools/tool_card_data.py,
   tools/tool_table_io.py, tools/insert_geometry_lookup.py, models/tool.py, gui/components/orientation_graphic.py,
   gui/components/tool_geometry_row.py, gui/tools_tab.py (IC field), tests/unit/test_tool_outline*.py.
