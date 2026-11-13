@@ -1,6 +1,6 @@
 # Claude status
 
-## 2026-11-12 — CLAIM: threading follow-up on claude/threading-build (NPT tap drill -> ASME B1.20.1 K0)
+## 2026-11-12 — REVIEW-READY (claim released): threading follow-up 2f1b132 (NPT pilot -> ASME B1.20.1 K0); tests pending (LinuxCNC was up)
 - Owner: tap drills must come from Machinery's Handbook / ASME, not web charts. Paths: models/thread_data.py (NPT),
   gui/components/threading_panel.py (NPT hint), tests/unit/test_thread*.py, threading plan doc section 10.
 
