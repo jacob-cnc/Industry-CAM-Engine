@@ -1,8 +1,8 @@
 # Claude status
 
-## 2026-11-13 — CLAIM: tool-graphic T4 (sim path from LinuxCNC canon) on claude/tool-graphic-build
-- Paths: validation/sim_path.py (new), validation/cycle_time.py (_canon reuse only), gui/components/sim_viewer.py,
-  gui/components/graph_widget.py, gui/run_tab.py, tests/unit/test_sim_path*.py. T1-T3 still review-ready, unmerged.
+## 2026-11-13 — REVIEW-READY (claim released): tool-graphic T1-T4 on claude/tool-graphic-build; T5 not started
+- T4: validation/sim_path.py (new), validation/cycle_time.py (error text), geometry/tool_outline.py (speed/cache),
+  gui/components/{sim_viewer,graph_widget,tool_graphic_item}.py, gui/{run_tab,edit_tab,program_tab}.py. Suite 1485 pass.
 
 ## 2026-11-13 — REVIEW-READY (claim released): tool-graphic T1-T3 on claude/tool-graphic-build (from main f6f29d8); T4/T5 not started
 - Also touched: hal/interface.py + hal/live_backend.py (work_position), gui/components/{tool_graphic_item,position_graph,graph_widget,sim_viewer}.py, gui/manual/manual_tab.py, gui/run_tab.py, gui/main_window.py
