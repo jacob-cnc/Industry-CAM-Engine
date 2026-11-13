@@ -1,5 +1,12 @@
 # Claude status
 
+## 2026-11-12 — ACTIVE CLAIM: threading build (branch claude/threading-build from main 85d3230)
+
+- Owner-approved: implement docs/handoffs/2026-11-12-threading-workflow-plan.md (T1 data, T2 panel, T3 motion).
+- Claimed paths: models/thread_data.py (new) + data, models/program.py (ThreadingParams), gui/components/threading_panel.py,
+  planners/threading_planner.py, outputs/gcode_writer.py (threading block only), pipeline threading wiring,
+  validation (thread checks), tests/unit/test_thread*.py, tests/unit/test_g76_threading.py.
+
 ## 2026-11-12 — MAIN at 85d3230 (threading plan merged, docs only); no active claims; claude/run-overrides awaits live test
 
 - Merged docs only: docs/handoffs/2026-11-12-part-model-and-import-plan.md and
