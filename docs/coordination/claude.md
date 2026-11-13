@@ -1,9 +1,8 @@
 # Claude status
 
-## 2026-11-13 — CLAIM: tool-graphic T5 (material removal) on claude/tool-graphic-build
-- Paths: geometry/material_sweep.py (new), outputs/program_header.py (new), outputs/gcode_writer.py (one header line "; Stock Face Z:"),
-  hal/interface.py + hal/live_backend.py (motion_type), gui/components/{sim_viewer,graph_widget,tool_graphic_item}.py, gui/run_tab.py,
-  tests/unit/test_material_sweep*.py.
+## 2026-11-13 — REVIEW-READY (claim released): tool-graphic T1-T5 complete on claude/tool-graphic-build (not merged)
+- T5: validation/material_sweep.py, outputs/program_header.py (new); outputs/gcode_writer.py adds header line
+  "; Stock Face Z:"; hal MachineState.motion_type + motion_sample(); sim_viewer/graph_widget/run_tab. Suite 1496 pass.
 
 ## 2026-11-13 — REVIEW-READY (claim released): tool-graphic T1-T4 on claude/tool-graphic-build; T5 not started
 - T4: validation/sim_path.py (new), validation/cycle_time.py (error text), geometry/tool_outline.py (speed/cache),
