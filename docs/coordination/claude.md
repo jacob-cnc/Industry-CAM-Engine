@@ -1,5 +1,8 @@
 # Claude status
 
+## 2026-11-13 — CLAIM: tool-graphic plan (docs only) on claude/tool-graphic-plan
+- Path: docs/handoffs/2026-11-13-tool-graphic-plan.md. No source edits (owner: plan first).
+
 ## 2026-11-12 — MAIN at a9a4bb6 (threading build merged, owner-approved); rollback tag lathe-pre-merge-threading (85d3230)
 - No active claims. claude/run-overrides still awaits live test. Live checkout pulled (ff) to a9a4bb6 2026-11-13.
 
