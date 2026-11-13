@@ -1539,9 +1539,12 @@ class ProgramTab(QWidget):
         tool_def = self._resolve_tool_for_block(block)
         try:
             lim = _limits(self._ini_path())
-            vz, az = lim.vz, lim.az
-        except Exception:
-            vz, az = 0.75, 2.0
+        except OSError as exc:
+            self._thread_errors.append(
+                f"{block.display_label}: can't read the Z limits from industry-cam.ini ({exc}) - "
+                f"the threading speed can't be checked")
+            return [f"; === THREADING ({params.designation}) NOT GENERATED - see the checks ==="]
+        vz, az = lim.vz, lim.az
         plan = ThreadingPlanner().plan_thread(params, vz, az, tool=tool_def)
         for w in plan.warnings:
             self._generate_notes.append(f"{block.display_label}: {w}")
