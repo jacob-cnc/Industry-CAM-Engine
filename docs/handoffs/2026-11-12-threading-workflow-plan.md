@@ -1,6 +1,6 @@
 # Plan: threading as a field-driven operation (straight and tapered, standard thread lists, hints)
 
-Status: PLAN ONLY (nothing implemented). Written 2026-11-12 by Claude at the owner's request; owner
+Status: IMPLEMENTED on branch `claude/threading-build` (2026-11-12, owner said go) - see section 10. Not merged; needs owner review + air cut. Written 2026-11-12 by Claude at the owner's request; owner
 decisions recorded the same day (section 8).
 Change classification when implemented: **Motion-affecting** (new tapered-thread motion, new ID retract).
 Companion to `2026-11-12-part-model-and-import-plan.md` (threads do NOT use profile segments).
@@ -46,8 +46,8 @@ Follow-up (verbatim, 2026-11-12):
 | # of starts | entered | As today: P = lead; each start shifted one pitch in Z. |
 | Entry angle | filled by form, editable | Compound infeed angle (G76 Q): 29.5 for 60 deg forms, 14.5 for Acme (29 deg), 15 for Tr (30 deg), 0 = straight plunge. |
 
-Kept in the background (defaults, shown under "Advanced"): depth degression (G76 R, default 1.0 = constant
-area per pass); the first-pass depth is derived from the depth, passes and degression as today.
+Kept in the background (defaults, shown under "Advanced"): depth degression (G76 R, default 2.0 = constant
+area per pass - LinuxCNC: R1 = constant depth, R2 = constant area); the first-pass depth is derived from the depth, passes and degression as today.
 
 No LH threads (owner, at this time): Z end is always behind Z start (cutting toward the chuck, M3).
 
@@ -172,3 +172,60 @@ Each difference is listed per program for the owner to review before merge.
 | T3 | Planner / writer: X start / end, derived depth, pilot, owner retract at Z end, G33 tapers, Generate checks | rs274 canon tests (section 6), corpus diff review, air cut |
 
 Independent of the part-model phases; threads stay their own operation (owner 2026-11-12).
+
+## 10. Implementation notes (2026-11-12, branch claude/threading-build)
+
+Files: `models/thread_data.py` (new: catalogue, class limits, depths, tap drills, legacy
+converter), `models/program.py` (ThreadingParams), `models/results.py` (ThreadPlan),
+`planners/threading_planner.py`, `outputs/gcode_writer.py` (threading block),
+`gui/components/threading_panel.py`, `gui/program_tab.py` (wiring, checks),
+`gui/components/block_list.py` (OD / ID changes the block type). Tests:
+`test_thread_data.py`, `test_g76_threading.py`, `test_threading_panel.py`.
+
+Data, checked against published tables (sources in `tests/unit/test_thread_data.py`):
+
+- UN 2A / 3A / 2B / 3B: ASME B1.1 formulas with its rounding order; matches the tables to the
+  last digit (1/4-20 UNR minor .1875 vs table .1876 - rounding).
+- Metric 6g: ISO 965-1 formulas + R40 rounding, es table; matches M6, M10, M12, M20. 4h:
+  grade factor applied to the ROUNDED grade-6 value (reproduces the ISO widths incl. Td(4)
+  P1.75 = 170). Internal (H): root = basic major; no internal PD window is computed (the ID
+  hint is the tap drill only).
+- Tr 7e / 7H: ISO 2901 profile (es on d2 only; d3 = d - 2(.5P + ac); D4 = d + 2ac). The 7e
+  pitch-diameter limits are TABLE values, so **only the 5 sizes found in the published table
+  are offered**: Tr10x2, Tr16x4, Tr20x4, Tr24x5, Tr40x7 (more can be added from the owner's
+  handbook).
+- Acme 2G / 3G: B1.5 relations (allowance a = .020 / .010, minor max = D - P - a, internal
+  major min = D + a; PD allowance .008 / .006 sqrt(D), tolerance .006 sqrt(D) + .030 sqrt(P) /
+  .0028 sqrt(D) + .014 sqrt(P)). Matches the handbook tables for 1/2-10, 3/4-6, 1-5, 1-1/2-4.
+  The handbook's allowance table is computed per diameter RANGE; the other offered sizes use
+  the sqrt(D) relation directly (can differ by .0001 - owner to spot-check one).
+- NPT: E0 = D - (.05D + 1.1)p, E1 = E0 + L1/16, h = .8P, L1 from the table; matches 1/8 - 2.
+  NPT pilot (owner 2026-11-12: Machinery's Handbook / ASME only, no web charts): B1.20.1
+  lists no drill sizes, so the ID pilot offered is K0 = E0 - h, the minor at the small end of
+  hand-tight engagement (1/2 .7013, 3/4 .9105, 1 1.1441 match the B1.20.1 table). The ID hint
+  shows "Pilot max: K0" and L1 with a plug-gauge note; the user picks the drill.
+  Owner decisions: Tr stays at 5 sizes for now; Acme sqrt(D) .0001 differences accepted;
+  no Advanced (degression / first pass) settings for now.
+- Acme / Tr "tap drill" = the internal minor (D - P); no standard drill sizes.
+
+Depth: external root = the class's max minor (UNR for UN, d3 for metric / Tr, D - P - a for
+Acme); internal root = the class's min major; internal crest = the pilot.
+
+Motion findings (rs274):
+
+- G76 J printed to .0001 and rounded DOWN made LinuxCNC add a sliver pass (7 instead of 6):
+  J is now rounded UP (`first_cut_dia`).
+- G76's retract between passes goes past the drive line by (K - current depth) - outward for
+  OD, toward the centre for ID; the planner refuses an ID thread where that would pass X0.
+- G76 shifts each pass start (and end) by -depth x tan(Q); the G33 taper passes use the same
+  start shift (verified: the G33 pass starts equal G76's for a straight thread) and all end
+  at Z end (the owner's pull-out point).
+- Tapered passes that lie inside the retract X (ID: inside the pilot hole) are air cuts and
+  are left in (no material).
+
+Generate: plan errors (Z speed > 90% of [AXIS_Z]MAX_VELOCITY with the highest usable RPM,
+Z end not behind Z start, pilot >= major, taper > 45 deg, ID too small for G76's retract)
+block the hand-off to Edit / Run like the other checks; warnings (lead-in from
+[AXIS_Z]MAX_ACCELERATION, insert angle vs form) are Generate notes. Old saved threading
+blocks load through `thread_data.from_saved` (designation mapped onto the catalogue; class 1A
+-> 2A; pull-out chamfer dropped with a note).

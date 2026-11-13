@@ -256,6 +256,14 @@ class BlockListWidget(QWidget):
                 self._refresh_item(i)
                 break
 
+    def update_block_type(self, block_id: int, block_type: str):
+        """Change a block's type (threading OD <-> ID from the panel's side field)."""
+        for i, b in enumerate(self._blocks):
+            if b.block_id == block_id:
+                b.block_type = block_type
+                self._refresh_item(i)
+                break
+
     def update_block_label(self, block_id: int, label: str):
         """Update the display label for a block."""
         for i, b in enumerate(self._blocks):

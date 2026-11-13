@@ -51,13 +51,15 @@ def test_block_generators_select_diameter_mode_before_motion(operation):
     writer = GCodeWriter()
     tool = _make_simple_plan_result().tool
     if operation == "threading":
-        params = ThreadingParams(
-            "UNC", "1/2-13", 0.5, 1 / 13, 0.04, 0.1, -0.5,
-            "radial", 8, 1, 0.0, False, 200, 1,
-        )
+        from models import thread_data
+        params = thread_data.params_from_fields(dict(
+            thread_type="UNC", designation="1/2-13 UNC", thread_class="2A", form="60",
+            x_start=0.5, x_end=0.5, start_z=0.1, end_z=-0.5, pitch=1 / 13, pilot_dia=0.0,
+            num_passes=8, spring_passes=1, num_starts=1, entry_angle=0.0, spindle_rpm=200,
+            tool_number=1), False)
         from planners.threading_planner import ThreadingPlanner
-        g76 = ThreadingPlanner().compute_g76_params(params)
-        lines = writer.write_threading_block(params, g76, tool, 1.0)
+        plan = ThreadingPlanner().plan_thread(params)
+        lines = writer.write_threading_block(params, plan, tool)
     elif operation == "grooving":
         params = GroovingParams(
             "single", False, -0.2, -0.3, 0.1, 1.0,
