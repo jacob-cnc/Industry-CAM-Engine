@@ -1,5 +1,9 @@
 # Claude status
 
+## 2026-11-12 — CLAIM: threading follow-up on claude/threading-build (NPT tap drill -> ASME B1.20.1 K0)
+- Owner: tap drills must come from Machinery's Handbook / ASME, not web charts. Paths: models/thread_data.py (NPT),
+  gui/components/threading_panel.py (NPT hint), tests/unit/test_thread*.py, threading plan doc section 10.
+
 ## 2026-11-12 — REVIEW-READY (claim released): threading build, branch claude/threading-build 62e0835 (from main 85d3230)
 
 - Owner-approved: implement docs/handoffs/2026-11-12-threading-workflow-plan.md (T1 data, T2 panel, T3 motion).
