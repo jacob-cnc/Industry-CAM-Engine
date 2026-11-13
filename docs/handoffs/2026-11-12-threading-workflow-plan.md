@@ -200,9 +200,12 @@ Data, checked against published tables (sources in `tests/unit/test_thread_data.
   The handbook's allowance table is computed per diameter RANGE; the other offered sizes use
   the sqrt(D) relation directly (can differ by .0001 - owner to spot-check one).
 - NPT: E0 = D - (.05D + 1.1)p, E1 = E0 + L1/16, h = .8P, L1 from the table; matches 1/8 - 2.
-  **Tap drills: published charts disagree by 1/64 - 1/32** (engineersedge NPT chart, used here:
-  1/8 R, 1/4 7/16, 3/8 37/64, 1/2 23/32, 3/4 59/64, 1 1-5/32, 1-1/4 1-1/2, 1-1/2 1-47/64,
-  2 2-7/32; Briggs / Dryseal charts are a size smaller). Owner to confirm the chart he uses.
+  NPT pilot (owner 2026-11-12: Machinery's Handbook / ASME only, no web charts): B1.20.1
+  lists no drill sizes, so the ID pilot offered is K0 = E0 - h, the minor at the small end of
+  hand-tight engagement (1/2 .7013, 3/4 .9105, 1 1.1441 match the B1.20.1 table). The ID hint
+  shows "Pilot max: K0" and L1 with a plug-gauge note; the user picks the drill.
+  Owner decisions: Tr stays at 5 sizes for now; Acme sqrt(D) .0001 differences accepted;
+  no Advanced (degression / first pass) settings for now.
 - Acme / Tr "tap drill" = the internal minor (D - P); no standard drill sizes.
 
 Depth: external root = the class's max minor (UNR for UN, d3 for metric / Tr, D - P - a for

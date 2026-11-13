@@ -381,8 +381,8 @@ class ThreadingPanel(QWidget):
         elif f["thread_type"] == "NPT":
             npt = td.npt_data(f["designation"])
             if internal:
-                s = td.size(f["designation"])
-                lines.append(f'Tap drill: {s.tap_drill[0]} ({s.tap_drill[1]:.4f}")')
+                lines.append(f'Pilot max: K0 {npt.e0 - npt.h:.4f}" (ASME B1.20.1 minor at small end)')
+                lines.append(f'L1 hand-tight: {npt.l1:.3f}" - check with an L1 plug gauge')
             else:
                 lines.append(f'L1 hand-tight: {npt.l1:.3f}" - check with an L1 ring gauge')
         elif internal:

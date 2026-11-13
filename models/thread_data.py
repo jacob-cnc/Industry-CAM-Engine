@@ -268,17 +268,26 @@ def _tr_ac(p_mm: float) -> float:
 # ---------------------------------------------------------------------------
 
 _NPT = [
-    # (label, pipe OD D, tpi, L1 hand-tight, tap drill label, dia)
-    ("1/8", 0.405, 27, 0.1615, "R", 0.3390),
-    ("1/4", 0.540, 18, 0.2278, "7/16", 0.4375),
-    ("3/8", 0.675, 18, 0.240, "37/64", 0.5781),
-    ("1/2", 0.840, 14, 0.320, "23/32", 0.7188),
-    ("3/4", 1.050, 14, 0.339, "59/64", 0.9219),
-    ("1", 1.315, 11.5, 0.400, "1-5/32", 1.1562),
-    ("1-1/4", 1.660, 11.5, 0.420, "1-1/2", 1.5000),
-    ("1-1/2", 1.900, 11.5, 0.420, "1-47/64", 1.7344),
-    ("2", 2.375, 11.5, 0.436, "2-7/32", 2.2188),
+    # (label, pipe OD D, tpi, L1 hand-tight) - ASME B1.20.1 table 2.
+    # Pilot: B1.20.1 gives no drill sizes. The pilot offered is K0, the minor
+    # diameter at the small end of hand-tight engagement (E0 - h), the deepest
+    # (smallest) minor an L1-deep internal thread reaches. The user picks the drill.
+    ("1/8", 0.405, 27, 0.1615),
+    ("1/4", 0.540, 18, 0.2278),
+    ("3/8", 0.675, 18, 0.240),
+    ("1/2", 0.840, 14, 0.320),
+    ("3/4", 1.050, 14, 0.339),
+    ("1", 1.315, 11.5, 0.400),
+    ("1-1/4", 1.660, 11.5, 0.420),
+    ("1-1/2", 1.900, 11.5, 0.420),
+    ("2", 2.375, 11.5, 0.436),
 ]
+
+
+def _npt_e0_h(D: float, tpi: float) -> Tuple[float, float]:
+    """ASME B1.20.1: E0 = D - (.05D + 1.1)p, h = .8p."""
+    p = 1.0 / tpi
+    return D - (0.05 * D + 1.1) * p, 0.8 * p
 
 
 @dataclass(frozen=True)
@@ -299,11 +308,10 @@ class NptData:
 
 
 def npt_data(label: str) -> NptData:
-    for name, D, tpi, l1, _dl, _dd in _NPT:
+    for name, D, tpi, l1 in _NPT:
         if f"{name} NPT" == label:
-            p = 1.0 / tpi
-            e0 = D - (0.05 * D + 1.1) * p
-            return NptData(size(label), e0, e0 + l1 * NPT_TAPER, l1, 0.8 * p)
+            e0, h = _npt_e0_h(D, tpi)
+            return NptData(size(label), e0, e0 + l1 * NPT_TAPER, l1, h)
     raise KeyError(label)
 
 
@@ -341,8 +349,10 @@ def _build() -> Dict[str, List[ThreadSize]]:
     for name, D, tpi, drill_label, drill in _ACME:
         out["Acme"].append(ThreadSize("Acme", f"{name}-{tpi:g} ACME", D, 1.0 / tpi, "acme",
                                       (drill_label, drill)))
-    for name, D, tpi, _l1, dl, dd in _NPT:
-        out["NPT"].append(ThreadSize("NPT", f"{name} NPT", D, 1.0 / tpi, "npt", (dl, dd)))
+    for name, D, tpi, _l1 in _NPT:
+        e0, h = _npt_e0_h(D, tpi)
+        out["NPT"].append(ThreadSize("NPT", f"{name} NPT", D, 1.0 / tpi, "npt",
+                                     ("K0 (minor at small end, B1.20.1)", e0 - h)))
     return out
 
 

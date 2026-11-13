@@ -120,3 +120,13 @@ def test_legacy_block_converts():
                                    "spindle_rpm": 300, "tool_number": 3}, False)
     assert fields["designation"] == "M10x1.5" and fields["thread_class"] == "6g"
     assert fields["entry_angle"] == 0.0 and any("chamfer" in n for n in notes)
+
+
+@pytest.mark.parametrize("label, k0", [
+    # ASME B1.20.1 table 2, K0 = minor diameter at the small end of the external thread
+    ("1/2 NPT", 0.7013), ("3/4 NPT", 0.9105), ("1 NPT", 1.1441),
+])
+def test_npt_pilot_is_asme_k0(label, k0):
+    """Owner 2026-11-12: drill data from Machinery's Handbook / ASME only, not web charts.
+    B1.20.1 has no drill sizes, so the pilot offered is K0 from the standard."""
+    assert td.size(label).tap_drill[1] == pytest.approx(k0, abs=5e-5)

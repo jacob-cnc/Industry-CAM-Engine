@@ -117,3 +117,9 @@ def test_every_size_and_class_displays_on_both_sides():
     finally:
         sys.excepthook = old
     assert not errors, errors[0]
+
+
+def test_npt_internal_hint_is_the_asme_k0():
+    p = _panel("NPT", "1/2 NPT", internal=True)
+    assert "K0 0.7013" in p._hint.text() and "plug gauge" in p._hint.text()
+    assert p.get_values()["pilot_dia"] == pytest.approx(0.7013, abs=5e-5)
