@@ -131,6 +131,9 @@ class MachineState:
     program_file: str = ""
     current_line: int = 0
     motion_line: int = 0
+    # LinuxCNC stat.motion_type of the move executing: 0 none, 1 rapid,
+    # 2 feed, 3 arc, 4 tool change, 5 probe, 6 rotary index
+    motion_type: int = 0
 
     # Active G-codes (modal state)
     active_gcodes: str = ""         # e.g., "G20 G90 G95 G54"
@@ -205,6 +208,13 @@ class HALBackend(ABC):
         """
         s = self.state
         return (s.x.position, s.z.position)
+
+    def motion_sample(self):
+        """(x_diameter, z, motion_type) read together, for the live material
+        sweep (tool-graphic plan T5): the type belongs to the same instant as
+        the position. Same rules as work_position()."""
+        s = self.state
+        return (s.x.position, s.z.position, s.motion_type)
 
     # ------------------------------------------------------------------
     # Mode Control

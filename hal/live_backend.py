@@ -171,6 +171,11 @@ class LiveBackend(HALBackend):
         z = s.actual_position[2] - s.g5x_offset[2] - s.g92_offset[2] - s.tool_offset[2]
         return (x, z)
 
+    def motion_sample(self):
+        """(x diameter, z, motion_type) from one stat poll (no side effects)."""
+        pos = self.work_position()
+        return None if pos is None else (pos[0], pos[1], int(self._stat.motion_type))
+
     def poll(self) -> None:
         """Poll LinuxCNC stat channel and rebuild state snapshot.
 
@@ -339,6 +344,7 @@ class LiveBackend(HALBackend):
             program_file=s.file or "",
             current_line=s.current_line,
             motion_line=s.motion_line,
+            motion_type=int(s.motion_type),
             active_gcodes=gcodes,
             active_mcodes=mcodes,
             tool_in_spindle=s.tool_in_spindle,

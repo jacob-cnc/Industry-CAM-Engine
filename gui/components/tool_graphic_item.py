@@ -20,8 +20,8 @@ from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from gui.colors import COLORS
 
-_BODY_FILL = "#5B7A99AA"
-_BODY_LINE = "#C8D3DE"
+_BODY_FILL = "#C9A23CB4"          # carbide gold: distinct from the steel-grey bar
+_BODY_LINE = "#F2DFA0"
 _EDGE = "#E56E72"
 _Z = 20
 

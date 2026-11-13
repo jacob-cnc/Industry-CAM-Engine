@@ -181,3 +181,71 @@ def test_nominal_size_is_marked_on_the_screen():
     c = _card(iso_code="")
     out, note = graphic_for(c, 4, _offset(c))
     assert out is not None and not out.size_known and "size not set" in note
+
+
+# ------------------------------------------------- T5: material removal
+
+_MAT_PROG = ("; Industry CAM Engine - Generated Program\n; Units: inch\n; Mode: OD\n;\n"
+             "; === STOCK ===\n; Diameter: 1.0000\n; Z Start: 0.0000\n; Z End: -1.0000\n;\n"
+             "; === TOOL ===\nG18 G20 G7 G90 G95\nT4 M6 G43\nS500 M3\nG0 X1.1 Z0.1\n"
+             "G0 X0.9\nG1 Z-0.5 F.004\nG1 X1.1\nG0 Z0.1\nM2\n")
+
+
+def _loaded_viewer(tmp_path, prog=_MAT_PROG):
+    from gui.components.sim_viewer import SimViewerWidget, build_sim_moves
+    from outputs.gcode_parser import parse as parse_gcode
+    from outputs.graph_adapter import convert_from_moves
+    moves, note = build_sim_moves(prog, _sim_table(tmp_path))
+    v = SimViewerWidget()
+    v.load(convert_from_moves(parse_gcode(prog)), prog, moves, note)
+    assert v._material_worker is not None
+    v._material_worker.wait(30000)
+    _app.processEvents()
+    return v, moves
+
+
+@pytest.mark.skipif(__import__("shutil").which("rs274") is None, reason="rs274 not installed")
+def test_sim_material_steps_through_the_cut(tmp_path):
+    v, moves = _loaded_viewer(tmp_path)
+    run = v._material
+    assert run is not None and "no rubs" in v.material_note()
+    stock = run.stock.area
+    cut = next(i for i, m in enumerate(moves) if m.move_type == "feed")
+    first, last = v._move_start[cut], v._move_start[cut + 1] - 1
+    mid = (first + last) // 2
+    a_mid = v.material_at_step(mid).area
+    assert run.after[cut].area < a_mid < stock                   # partway through the pass
+    assert v.material_at_step(last).equals(run.after[cut])
+    assert v.material_at_step(0).equals(run.stock)
+    # .45 radius pass over Z0..-.5 on a .5 radius bar: .05 x .5 removed (less the nose fillet at the end)
+    assert stock - run.after[-1].area == pytest.approx(0.05 * 0.5, abs=3e-4)
+
+
+@pytest.mark.skipif(__import__("shutil").which("rs274") is None, reason="rs274 not installed")
+def test_sim_material_needs_the_header_stock(tmp_path):
+    from gui.components.sim_viewer import SimViewerWidget, build_sim_moves
+    from outputs.gcode_parser import parse as parse_gcode
+    from outputs.graph_adapter import convert_from_moves
+    prog = _MAT_PROG.split("; === TOOL ===\n", 1)[1]
+    moves, note = build_sim_moves(prog, _sim_table(tmp_path))
+    v = SimViewerWidget()
+    v.load(convert_from_moves(parse_gcode(prog)), prog, moves, note)
+    assert v._material_worker is None and "no stock" in v.material_note()
+
+
+@pytest.mark.skipif(__import__("shutil").which("rs274") is None, reason="rs274 not installed")
+def test_live_material_only_while_cutting(tmp_path):
+    v, moves = _loaded_viewer(tmp_path)
+    c = _card(iso_code="CNMG431")
+    v.set_live_tool_outline(graphic_for(c, 4, _offset(c))[0])
+    v.start_live_material()
+    whole = v._live_material.area
+    for r, z in ((0.45, -0.2), (0.6, -0.2), (0.6, 0.1), (0.45, 0.1)):
+        v.live_material_sample(r, z, False)                      # rapid / spindle off: nothing
+    v.flush_live_material()
+    assert v._live_material.area == pytest.approx(whole)
+    v.live_material_sample(0.45, -0.2, True)                     # feed, spindle on: Z0 to -.2
+    v.flush_live_material()
+    assert whole - v._live_material.area == pytest.approx(0.05 * 0.2, rel=0.02)
+    v.end_live_material()
+    assert v._live_material is None

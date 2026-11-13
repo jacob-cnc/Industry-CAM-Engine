@@ -315,3 +315,30 @@ and `blade=` today. LinuxCNC ignores the comment, so `tool.tbl` remains a valid 
   with `param_at_point` (~.03 s) and outlines are cached. This also removes a >1 s freeze on a tool
   change on Manual / Run (T2/T3). A 318-line program builds its sim in ~.4 s.
 
+
+### T5 (2026-11-13, branch claude/tool-graphic-build)
+- `validation/material_sweep.py` (not `geometry/` as section 5 said: the architecture rule allows
+  Shapely only in validation/, where cut_regions does its sweeps).
+  - Each move removes the insert outline swept along the interpreter's own points. The outline is
+    convex, so each straight step sweeps exactly the convex hull of the two placements. The nose
+    arc is kept at full resolution; the rest of the body is simplified to .0001.
+  - Only feed / arc / thread moves cut. Only the steps where the insert meets the stock are swept.
+  - **Rub:** stock met by a LEADING non-cutting edge (anything but the nose and its two edges) on a
+    feed move. **Rapid into stock:** stock in a rapid's sweep. Both count only where the material is
+    thicker than .004 (GRAZE): the nose-radius cusp a pass leaves at a shoulder, grazed by the
+    retract, is not a crash.
+- Stock: from the program header (`outputs/program_header.py`). A program without one gets no material
+  and says so (never guessed). The writer now adds `; Stock Face Z:` (StockDef.face_at_z0). Older
+  programs use cut_regions' rule (face at Z Start, not ahead of Z0) and the note says so.
+- Sim: computed in a background thread after loading (~.3 s for the GCH bore, ~7 s for a 3,600-line
+  roughing program). Playback looks up each move's result; inside a cutting move the part done so
+  far is swept on the spot (median 12 ms, p95 16 ms per frame). Rubs / rapids are drawn red hatched
+  and listed in the info line. "Hide Material" button.
+- Live (Run tab): when a program starts the bar resets (Run From: the sim's bar before that line).
+  The spindle tool is swept between 30 Hz feedback samples while the measured spindle speed is over
+  5 RPM and LinuxCNC's motion_type is feed / arc (new `motion_type` in MachineState and
+  `motion_sample()` read with the position). Redrawn ~10x a second; kept after the program ends until
+  the sim is played.
+- Found with it: "Regenerated 2026-11-10 (arc fix)/GUI Conv Test (T4).ngc" on the Desktop has 27 arcs
+  that LinuxCNC runs as 353-359 deg near-full circles (e.g. line 177, N1040 G02). Do not run that
+  file. The same job regenerated with current main has no long arcs and no warnings.

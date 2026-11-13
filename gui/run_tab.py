@@ -293,10 +293,25 @@ class RunTab(QWidget):
         """Rebuild the tool graphic on the next poll (tool table edited / reloaded)."""
         self._tool_graphic_rev += 1
 
+    # spindle turning: measured RPM above this (manual spindle, encoder)
+    _CUT_RPM = 5.0
+
     def _on_graphic_tick(self):
-        pos = self._backend.work_position()
-        if pos is not None:
-            self._sim_viewer.move_live_tool(pos[0] / 2.0, pos[1])
+        sample = self._backend.motion_sample()
+        if sample is None:
+            return
+        x_dia, z, motion_type = sample
+        self._sim_viewer.move_live_tool(x_dia / 2.0, z)
+        if self._is_running:
+            # material removal (tool-graphic plan T5): the spindle tool swept
+            # between samples, only while the spindle turns on a feed / arc move
+            state = self._backend.state
+            cutting = (abs(state.spindle.speed) > self._CUT_RPM
+                       and motion_type in (2, 3))         # MOTION_TYPE_FEED, _ARC
+            self._sim_viewer.live_material_sample(x_dia / 2.0, z, cutting)
+            self._live_flush = getattr(self, "_live_flush", 0) + 1
+            if self._live_flush % 3 == 0:                 # redraw ~10x a second
+                self._sim_viewer.flush_live_material()
 
     def _update_tool_graphic(self, state):
         from gui.components.tool_graphic_item import graphic_for
@@ -675,9 +690,13 @@ class RunTab(QWidget):
         self._btn_open.setEnabled(False)
         self._btn_preview.setEnabled(False)
         self._btn_pause.setText("Pause")
+        plan = getattr(self, "_resume_plan", None)
+        self._sim_viewer.start_live_material(plan.start_index if plan is not None else 0)
+        self._live_flush = 0
 
     def _set_idle_state(self):
         """Update UI for idle state."""
+        self._sim_viewer.flush_live_material()
         if getattr(self, "_estimate", None) is not None:
             self._status_time.setText(f"Est. {self._estimate.text()}")
         self._is_running = False

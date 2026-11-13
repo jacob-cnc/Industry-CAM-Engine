@@ -86,6 +86,8 @@ class MachiningGraphWidget(pg.PlotWidget):
         self._setup_crosshair()
         self._tool_graphic = None
         self._tool_shown = None
+        self._material_items = None
+        self._material_visible = True
         self._live_tool = (None, "")      # (outline, note) of the spindle tool
         self._next_seg_item = None
         self._rapid_items = []
@@ -194,6 +196,7 @@ class MachiningGraphWidget(pg.PlotWidget):
         self._setup_crosshair()
         self._tool_graphic = None
         self._tool_shown = None
+        self._material_items = None
         self._next_seg_item = None
         self._profile_overlay_items = []
         self._uncut_overlay_items = []
@@ -254,6 +257,67 @@ class MachiningGraphWidget(pg.PlotWidget):
         if self._tool_graphic is not None and (self._tool_shown or ("",))[0] == "live":
             self._tool_shown = ("live", id(outline), note)
             self._tool_graphic.set_outline(outline, note)
+
+    # -- material removal (tool-graphic plan 2026-11-13, T5) ----------------
+    MATERIAL_FILL = "#7F8FA3C0"          # the bar, steel grey (#RRGGBBAA)
+    MATERIAL_EDGE = "#C8D3DE"
+    MATERIAL_HIT = "#FF3B5CE0"            # rub / rapid into stock
+
+    def _material_layer(self):
+        """(material item, warning item), created after any clear()."""
+        from PyQt5.QtWidgets import QGraphicsPathItem
+        if self._material_items is None:
+            mat, hit = QGraphicsPathItem(), QGraphicsPathItem()
+            mat.setBrush(pg.mkBrush(pg.mkColor(self.MATERIAL_FILL)))
+            pen = pg.mkPen(self.MATERIAL_EDGE, width=1)
+            pen.setCosmetic(True)
+            mat.setPen(pen)
+            mat.setZValue(self.CUT_Z - 0.2)              # under the toolpath, over the sections
+            brush = pg.mkBrush(pg.mkColor(self.MATERIAL_HIT))
+            brush.setStyle(QtCore.Qt.DiagCrossPattern)
+            hit.setBrush(brush)
+            hpen = pg.mkPen(self.MATERIAL_HIT, width=2)
+            hpen.setCosmetic(True)
+            hit.setPen(hpen)
+            hit.setZValue(4.6)
+            for it in (mat, hit):
+                it.setVisible(self._material_visible)
+                self.addItem(it, ignoreBounds=True)
+            self._material_items = (mat, hit)
+        return self._material_items
+
+    @staticmethod
+    def _rings_path(rings):
+        from PyQt5.QtGui import QPainterPath
+        path = QPainterPath()
+        path.setFillRule(QtCore.Qt.OddEvenFill)
+        for ring in rings or ():
+            if len(ring) < 3:
+                continue
+            path.moveTo(ring[0][0], ring[0][1])
+            for zz, rr in ring[1:]:
+                path.lineTo(zz, rr)
+            path.closeSubpath()
+        return path
+
+    def set_material(self, rings, hit_rings=None):
+        """The bar as it is now: rings of (Z, X radius) points (exterior and
+        holes, odd-even). hit_rings: rub / rapid-into-stock areas (None = keep)."""
+        mat, hit = self._material_layer()
+        mat.setPath(self._rings_path(rings))
+        if hit_rings is not None:
+            hit.setPath(self._rings_path(hit_rings))
+
+    def clear_material(self):
+        if self._material_items is not None:
+            for it in self._material_items:
+                it.setPath(self._rings_path(()))
+
+    def set_material_visible(self, visible: bool):
+        self._material_visible = visible
+        if self._material_items is not None:
+            for it in self._material_items:
+                it.setVisible(visible)
 
     def set_tool_position(self, x_radius: float, z: float, live: bool = False,
                           sim_graphic=None):
@@ -474,6 +538,7 @@ class MachiningGraphWidget(pg.PlotWidget):
         self._setup_crosshair()
         self._tool_graphic = None
         self._tool_shown = None
+        self._material_items = None
         self._graph_data = None
 
     def _get_segment_color(self, segment: ToolpathSegment) -> str:
