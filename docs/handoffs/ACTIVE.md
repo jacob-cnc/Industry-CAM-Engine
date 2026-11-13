@@ -16,7 +16,8 @@ the distinction between the owner's verbatim request and later design advice.
   - Owner 2026-11-12: no implementation yet; import does not set the stock; threads not on segments.
 
 - [Plan: true-scale tool graphic on Manual / Run / sim screens](2026-11-13-tool-graphic-plan.md)
-  - Status: PLAN ONLY (2026-11-13), owner questions in section 9 (holder, IC source, bar, live removal).
+  - Status: PLAN ONLY, owner decisions 2026-11-13: insert only (no holder / bar), IC from ISO code or field,
+    material removal in sim and live.
 
 - [Plan: field-driven threading (straight + tapered, thread lists, hints)](2026-11-12-threading-workflow-plan.md)
   - Status: MERGED main a9a4bb6 (2026-11-12); live checkout pulled; air cut pending. Fields OD/ID, tool #, X start / end (major),

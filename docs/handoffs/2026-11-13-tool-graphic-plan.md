@@ -1,7 +1,7 @@
 # Plan: true-scale tool graphic on the Manual, Run and sim screens
 
-Status: PLAN ONLY (2026-11-13). Written by Claude at the owner's request; no implementation until
-the owner approves it and answers section 9.
+Status: PLAN ONLY, owner decisions recorded 2026-11-13 (section 9): insert only (no holder, no bar),
+IC from ISO code or field, material removal in sim AND live. Written by Claude at the owner's request.
 
 ## Owner's request (verbatim, 2026-11-13)
 
@@ -151,17 +151,31 @@ and `blade=` today. LinuxCNC ignores the comment, so `tool.tbl` remains a valid 
   between samples, so the swept shape is fine. Fast rapids are excluded anyway.
 
 ## 8. Phases (each one is shippable and testable on its own)
-1. **T1 - outline model + data.** The `tool_outline` model, IC from the ISO code / editor field,
-   the holder data (per Q1), and the tool editor picture switched to the model. Unit tests (4.1).
+1. **T1 - outline model + data.** The `tool_outline` model (insert only), IC from the ISO code / editor
+   field, and the tool editor picture switched to the model. Unit tests (4.1).
 2. **T2 - Manual screen.** Tool graphic in place of the dot once a tool is loaded, the cross at the
    controlled point, 30 Hz update, and an update on tool change and wear edit. Render test (4.3).
 3. **T3 - Run screen, live.** The same item on the Run graph during program runs.
 4. **T4 - Sim from LinuxCNC's canon.** Compensated path, G76/G33 as LinuxCNC runs them, tool
    change per T word. Comp test (4.2). Owner air-cut check (4.4).
 5. **T5 - material removal (secondary).** The sim sweep first, then the live sweep, with the
-   holder / back-of-insert rub warning.
+   back-of-insert rub warning.
 
-## 9. Questions for the owner
+## 9. Owner decisions (2026-11-13)
+
+> 1: no holder representation  2: yes  3: not going to represent the bar itself
+> 4: both during real cuts and simulation if possible
+
+- **No holder** and **no boring bar** are drawn. The graphic is the insert only: the nose arc, the
+  cutting edges and the insert body at its true IC size. The holder rows in sections 3.1 and 3.2 and
+  the holder-collision part of the warning in 3.6 are dropped. The warning in 3.6 is kept only for
+  the **back / non-cutting side of the insert** touching the stock in the sim.
+- **Insert size:** read the IC from a full ISO code (CNMG432 -> 1/2") when one is typed, otherwise from
+  a plain IC field in the tool editor.
+- **Material removal:** both the sim (computed in advance from the canon) and real cuts (live sweep
+  between feedback samples, spindle on, feed moves only), as in 3.6 / phase 5.
+
+### Original questions (answered above)
 1. **Holder:** how much of the holder to draw?
    - (a) insert only;
    - (b) insert plus a generic holder outline sized from a shank width / head length typed per tool
