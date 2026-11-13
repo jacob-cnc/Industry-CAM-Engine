@@ -1,6 +1,6 @@
 # Claude status
 
-## 2026-11-12 — ACTIVE CLAIM: threading build (branch claude/threading-build from main 85d3230)
+## 2026-11-12 — REVIEW-READY (claim released): threading build, branch claude/threading-build 62e0835 (from main 85d3230)
 
 - Owner-approved: implement docs/handoffs/2026-11-12-threading-workflow-plan.md (T1 data, T2 panel, T3 motion).
 - Claimed paths: models/thread_data.py (new) + data, models/program.py (ThreadingParams), gui/components/threading_panel.py,
