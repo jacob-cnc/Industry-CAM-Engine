@@ -136,3 +136,34 @@ class PlanResult:
     generation_time_ms: float = 0.0
     pass_count: int = 0
     move_count: int = 0
+
+
+@dataclass(frozen=True)
+class ThreadPass:
+    """One synchronized threading pass (diameter X)."""
+    x_start: float
+    z_start: float
+    x_end: float
+    z_end: float
+
+
+@dataclass(frozen=True)
+class ThreadPlan:
+    """A planned threading operation (planners/threading_planner.py).
+
+    mode "g76": straight thread, LinuxCNC's G76 cycle with ``g76`` words.
+    mode "g33": taper, one G33 per pass in ``passes`` (one list per start).
+    Retract X: external max(X) + .020, internal pilot - .005 (owner 2026-11-12).
+    """
+    mode: str
+    retract_x: float
+    lead: float
+    z_starts: tuple                    # one per start
+    end_z: float
+    crest: tuple                       # (at Z start, at Z end), diameter
+    root: tuple                        # (at Z start, at Z end), diameter
+    depth: float                       # radial, crest -> root at Z start
+    g76: Optional[dict] = None
+    passes: tuple = ()                 # tuple of tuples of ThreadPass, one per start
+    errors: tuple = ()
+    warnings: tuple = ()

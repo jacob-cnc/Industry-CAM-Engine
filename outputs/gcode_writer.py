@@ -15,6 +15,7 @@ from models.moves import ToolMove, MoveType
 from models.profile import SegmentType, CornerBreakType
 from models.tool import ToolDef, ToolDirection
 from models.program import ThreadingParams, GroovingParams
+from models.results import ThreadPlan
 from models.constants import TOLERANCE, CONTOUR_FEED_IN_DIA
 
 
@@ -674,79 +675,70 @@ class GCodeWriter:
     # ------------------------------------------------------------------
 
     def write_threading_block(
-        self, params: ThreadingParams, g76: dict, tool: ToolDef, stock_dia: float,
-        park_x: float = 3.0, park_z: float = 3.0, unit_mode: str = "inch",
+        self, params: ThreadingParams, plan: ThreadPlan, tool: ToolDef,
+        unit_mode: str = "inch",
     ) -> List[str]:
-        """Generate G-code lines for a threading operation (G76 cycle).
+        """G-code for a threading operation, as planned (ThreadingPlanner.plan_thread).
 
-        This produces a self-contained section that can be appended to a
-        multi-block program. Includes tool change, approach, G76, and retract.
-
-        Args:
-            params: Threading parameters.
-            g76: G76 word values from ThreadingPlanner.compute_g76_params(params)
-                 (the writer only emits; planning happens before it).
-            tool: Threading tool definition.
-            stock_dia: Stock OD for safe retract computation.
-            park_x: Park X position (diameter).
-            park_z: Park Z position.
-            unit_mode: "inch" or "metric".
-
-        Returns:
-            List of G-code lines (strings).
+        Straight threads: one G76 per start from the drive line (= the owner's
+        retract X: external max X + .020, internal pilot - .005), Z end is
+        where the tool pulls out (E0 L0). Tapers: one G33 per pass - rapid to
+        the pass start, G33 to Z end, rapid out to the retract X, rapid back
+        along Z. The writer only emits.
         """
+        if plan.errors:
+            raise ValueError("Threading plan has errors: " + "; ".join(plan.errors))
         conv = 25.4 if unit_mode == "metric" else 1.0
         fmt = "z.3f" if unit_mode == "metric" else "z.4f"
 
+        def n(v):
+            return f"{v * conv:{fmt}}"
+
         lines = []
         is_id = params.is_internal
-
-        # Safe X for threading approach/retract
-        # Where the tool goes is planned (ThreadingPlanner.compute_g76_params);
-        # X_safe never inside the stock for an external thread.
-        safe_x = g76["X_safe"] if is_id else max(g76["X_safe"], stock_dia + 0.050)
-
-        # Section header
-        thread_type = "Internal" if is_id else "External"
-        lines.append(f"; === THREADING ({params.designation}, {thread_type}) ===")
-        lines.append(f"; Pitch: {params.pitch * conv:{fmt}} ({'mm/rev' if unit_mode == 'metric' else 'in/rev'})")
-        lines.append(f"; Depth: {params.thread_depth * conv:{fmt}} per side (G76 J/K are on diameter in G7)")
-        lines.append(f"; Passes: {params.num_passes} + {params.spring_passes} spring")
-        lines.append(f"; Infeed: {params.infeed_method}")
-        if params.num_starts > 1:
-            lines.append(f"; Starts: {params.num_starts} (lead = {params.pitch * params.num_starts * conv:{fmt}})")
+        side = "Internal" if is_id else "External"
+        label = params.designation + (f" {params.thread_class}" if params.thread_class else "")
+        lines.append(f"; === THREADING ({label}, {side}) ===")
+        lines.append(f"; Pitch: {n(params.pitch)} ({'mm' if unit_mode == 'metric' else 'in'})"
+                     + (f", {params.num_starts} starts, lead {n(plan.lead)}" if params.num_starts > 1 else ""))
+        lines.append(f"; Major X: {n(params.x_start)} -> {n(params.x_end)}"
+                     + (" (taper)" if params.is_taper else ""))
+        lines.append(f"; Crest {n(plan.crest[0])}, root {n(plan.root[0])}, depth {n(plan.depth)} per side")
+        if is_id:
+            lines.append(f"; Pilot: {n(params.pilot_dia)}; retract at pilot - .005")
+        else:
+            lines.append("; Retract at major + .020")
+        lines.append(f"; Passes: {params.num_passes} + {params.spring_passes} spring, "
+                     f"entry angle {params.entry_angle:g} deg")
         lines.append("")
-
         lines.append(self._line("G7", "Diameter mode"))
-
-        # Spindle speed for threading (typically lower than roughing)
-        lines.append(self._line(f"S{params.spindle_rpm:.0f} M3", f"Threading speed {params.spindle_rpm:.0f} RPM"))
-
-        # Approach: safe X at the start Z, then the drive line (planned:
-        # crest + .020 external / - .020 internal; G76 needs the tool there).
-        x_drive = g76["X_drive"]
-        z_starts = g76["Z_start"]
-
-        def g76_word(z_end):
-            return (f"G76 P{g76['P'] * conv:{fmt}} Z{z_end * conv:{fmt}} "
-                    f"I{g76['I'] * conv:{fmt}} J{g76['J'] * conv:{fmt}} K{g76['K'] * conv:{fmt}} "
-                    f"R{g76['R']:.1f} Q{g76['Q']:.1f} H{g76['H']} "
-                    f"E{g76['E'] * conv:{fmt}} L{int(g76['L'])}")
-
-        for k, z0 in enumerate(z_starts):
-            label = f"start {k + 1}" if len(z_starts) > 1 else "thread start"
-            lines.append(self._rapid(safe_x, z0, f"Approach: safe X at {label} Z"))
-            lines.append(self._rapid(x_drive, z0, f"Rapid to the drive line ({'crest - .020' if is_id else 'crest + .020'})"))
-            lines.append(self._line(g76_word(g76["Z"]),
-                                    f"Thread cycle: {params.designation}"
-                                    + (f", {label} of {len(z_starts)}" if len(z_starts) > 1 else "")))
-            self._x, self._z = x_drive, g76["Z"]            # G76 ends at the end of the drive line
-            # Retract: straight off the thread form in X, then out along Z
-            # (an internal thread must leave the hole along Z).
-            lines.append(self._rapid(safe_x, g76["Z"], "Retract X clear of the thread"))
-            lines.append(self._rapid(safe_x, z0, "Retract along Z"))
+        lines.append(self._line(f"S{params.spindle_rpm:.0f} M3",
+                                f"Threading speed {params.spindle_rpm:.0f} RPM"))
+        rx = plan.retract_x
+        many = len(plan.z_starts) > 1
+        if plan.mode == "g76":
+            g = plan.g76
+            word = (f"G76 P{n(g['P'])} Z{n(g['Z'])} I{n(g['I'])} J{n(g['J'])} K{n(g['K'])} "
+                    f"R{g['R']:.1f} Q{g['Q']:.1f} H{g['H']} E{n(0.0)} L0")
+            for k, z0 in enumerate(plan.z_starts):
+                tag = f", start {k + 1} of {len(plan.z_starts)}" if many else ""
+                lines.append(self._rapid(rx, z0, "Approach: drive line at the thread start"
+                                         + tag))
+                lines.append(self._line(word, f"Thread cycle: {label}{tag}"))
+                self._x, self._z = rx, g["Z"]
+                lines.append(self._rapid(rx, z0, "Retract along Z"))
+        else:
+            for k, (z0, passes) in enumerate(zip(plan.z_starts, plan.passes)):
+                tag = f" (start {k + 1} of {len(plan.z_starts)})" if many else ""
+                for i, tp in enumerate(passes):
+                    lines.append(self._rapid(rx, tp.z_start, f"Pass {i + 1}{tag}: to the start"))
+                    lines.append(self._rapid(tp.x_start, tp.z_start, None))
+                    lines.append(self._line(f"G33 X{n(tp.x_end)} Z{n(tp.z_end)} K{n(plan.lead)}",
+                                            "Tapered thread pass" if i == 0 else None))
+                    self._x, self._z = tp.x_end, tp.z_end
+                    lines.append(self._rapid(rx, tp.z_end, None))
+                lines.append(self._rapid(rx, z0, "Retract along Z"))
         lines.append("")
-
         return lines
 
     # ------------------------------------------------------------------
