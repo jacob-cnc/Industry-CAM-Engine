@@ -1,5 +1,12 @@
 # Claude status
 
+## 2026-11-16 — MACHINE-VERIFIED (owner): threading and tool graphic T1-T5 both work on the lathe
+- Owner ran them on the machine and reported both good. lathe-2026-11-16-working (71ce670) is therefore a
+  PROVEN rollback point, not an assumed one.
+- Still NOT machine-tested: the run-overrides merge (main 78a3d50) - feed/rapid MPG re-routing during a run,
+  green-button-while-paused single step, M1 optional stop. It changes industry-cam.hal, so a failed start is
+  the first thing to watch; roll back to lathe-2026-11-16-working.
+
 ## 2026-11-16 — MAIN at 78a3d50 (run-overrides merged, owner-approved); no active claims
 - ROLLBACK POINT: lathe-2026-11-16-working = 71ce670, owner-confirmed good on the machine
   (tool-graphic T1-T5 + threading + Tools-tab label fix). Post-merge tag lathe-2026-11-16-run-overrides.
