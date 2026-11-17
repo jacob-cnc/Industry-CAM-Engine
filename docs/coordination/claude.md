@@ -1,5 +1,19 @@
 # Claude status
 
+## 2026-11-16 — MAIN at 78a3d50 (run-overrides merged, owner-approved); no active claims
+- ROLLBACK POINT: lathe-2026-11-16-working = 71ce670, owner-confirmed good on the machine
+  (tool-graphic T1-T5 + threading + Tools-tab label fix). Post-merge tag lathe-2026-11-16-run-overrides.
+- Merged claude/run-overrides via claude/run-overrides-integration (cb5d6d1 merged main in first).
+  One conflict, outputs/gcode_writer.py: the branch predated the threading/G76 rework and carried the
+  old threading header. Took main's header, kept only _optional_stop("before threading"), placed after
+  the header comments and before G7 / S M3 (tool at park).
+- Verified LinuxCNC down: suite 1509 pass on the lathe runtime; architecture check 15 errors, same as
+  main before the merge. HAL re-checked after the merge: main never touched industry-cam.hal since the
+  fork, all six new components loaded + addf'd, and the two override nets are extra READERS on the
+  existing mpg-x-counts / mpg-z-counts signals (drivers unchanged: encoder.03 / encoder.02).
+- NOT MACHINE-TESTED: feed/rapid MPG re-routing during a run, green-button-while-paused single step,
+  M1 optional stop. Also still unverified on the machine: tool graphic T1-T5, threading.
+
 ## 2026-11-16 — MAIN at 71ce670 (Tools-tab spindle-tool label merged, owner-approved); no active claims
 - Rollback tag lathe-pre-merge-2026-11-16 = 9c255f9; post-merge tag lathe-2026-11-16-merged.
 - Verified with LinuxCNC down: full suite 1502 pass on the lathe runtime (was 1496 + 6 new);
