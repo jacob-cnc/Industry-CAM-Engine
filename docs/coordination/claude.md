@@ -1,5 +1,12 @@
 # Claude status
 
+## 2026-11-16 — MAIN at 71ce670 (Tools-tab spindle-tool label merged, owner-approved); no active claims
+- Rollback tag lathe-pre-merge-2026-11-16 = 9c255f9; post-merge tag lathe-2026-11-16-merged.
+- Verified with LinuxCNC down: full suite 1502 pass on the lathe runtime (was 1496 + 6 new);
+  architecture check 15 errors on the branch AND on main before the merge - no new violations.
+- Live checkout is on main; it still needs `git pull` to reach 71ce670. Tool graphic T1-T5 and
+  threading remain NOT machine-tested. claude/run-overrides still awaits a live test.
+
 ## 2026-11-16 — REVIEW-READY (claim released): Tools-tab spindle-tool label, branch claude/tools-tab-current-tool 6a60861 (from main 9c255f9)
 - The TopButtonBar label is built as QLabel("Offline") and ToolsTab.refresh_current_tool_display() had no caller
   anywhere in the repo, so it read "Offline" all session with a live controller. Now called on showEvent and after
