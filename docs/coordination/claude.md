@@ -1,5 +1,17 @@
 # Claude status
 
+## 2026-11-16 — REVIEW-READY (claim released): Tools-tab spindle-tool label, branch claude/tools-tab-current-tool 6a60861 (from main 9c255f9)
+- The TopButtonBar label is built as QLabel("Offline") and ToolsTab.refresh_current_tool_display() had no caller
+  anywhere in the repo, so it read "Offline" all session with a live controller. Now called on showEvent and after
+  _accept_table. Paths: gui/tools_tab.py, tests/unit/test_tools_tab_current_tool_label.py (new, 6 cases).
+- NOT RUN YET: owner deferred the suite until LinuxCNC is down (scripts/run_tests.sh refuses while it is up).
+  Compile-checked only. Live checkout left on main 9c255f9; branch pushed, not merged.
+- Also 2026-11-16: live checkout PULLED to main 9c255f9 (tool graphic T1-T5 + threading now on the machine,
+  neither machine-tested). Owner hit a TOOL MISMATCH pause from the generated o9001 tool check - correct
+  behaviour, the controller's table was stale (T3 D0.032 vs file D0.000000); resolved by Tools tab -> Load Table.
+- Owner decision: the .194 bore / .1875 pilot retract will be hand-edited in G-code. Per-block retract stays
+  bookmarked, NOT scheduled. Noted for anyone scoping transitions/transition_planner.py::_get_safe_x.
+
 ## 2026-11-13 — REVIEW-READY (claim released): tool-graphic T1-T5 complete on claude/tool-graphic-build (not merged)
 - T5: validation/material_sweep.py, outputs/program_header.py (new); outputs/gcode_writer.py adds header line
   "; Stock Face Z:"; hal MachineState.motion_type + motion_sample(); sim_viewer/graph_widget/run_tab. Suite 1496 pass.
