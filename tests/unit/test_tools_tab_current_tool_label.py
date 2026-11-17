@@ -15,7 +15,7 @@ from PyQt5.QtWidgets import QApplication  # noqa: E402
 _app = QApplication.instance() or QApplication([])
 
 import gui.tools_tab as tools_tab_module  # noqa: E402
-from gui.tools_tab import ToolsTab  # noqa: E402
+from gui.tools_tab import Tools_Tab  # noqa: E402
 from tools.tool_card_data import ToolCardData  # noqa: E402
 
 
@@ -44,7 +44,7 @@ def _card(number, desc):
 def tab(monkeypatch):
     """A Tools tab built in offline mode, so no test ever touches a live controller."""
     monkeypatch.setattr(tools_tab_module, "HAS_LINUXCNC", False)
-    t = ToolsTab()
+    t = Tools_Tab()
     t.set_cards([_card(1, "CCMT boring bar"), _card(3, "Solid carbide .1875 min bore")])
     return t
 
