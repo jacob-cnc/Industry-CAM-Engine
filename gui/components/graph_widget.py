@@ -84,7 +84,11 @@ class MachiningGraphWidget(pg.PlotWidget):
 
         self._setup_plot()
         self._setup_crosshair()
-        self._tool_dot = None
+        self._tool_graphic = None
+        self._tool_shown = None
+        self._material_items = None
+        self._material_visible = True
+        self._live_tool = (None, "")      # (outline, note) of the spindle tool
         self._next_seg_item = None
         self._rapid_items = []
         self._graph_data: Optional[GraphData] = None
@@ -190,7 +194,9 @@ class MachiningGraphWidget(pg.PlotWidget):
         """Load complete graph data. Replaces all current display items."""
         self.clear()
         self._setup_crosshair()
-        self._tool_dot = None
+        self._tool_graphic = None
+        self._tool_shown = None
+        self._material_items = None
         self._next_seg_item = None
         self._profile_overlay_items = []
         self._uncut_overlay_items = []
@@ -244,18 +250,90 @@ class MachiningGraphWidget(pg.PlotWidget):
         # Auto-fit view to show everything (small padding for grid visibility at edges)
         self.getViewBox().autoRange(padding=0.05)
 
-    def set_tool_position(self, x_radius: float, z: float):
-        """Update animated tool dot position during playback."""
-        if self._tool_dot is None:
-            self._tool_dot = pg.ScatterPlotItem(
-                size=16,
-                brush=pg.mkBrush(COLORS['graph_tool_dot']),
-                pen=pg.mkPen('#00000099', width=2),
-            )
-            self._tool_dot.setZValue(20)
-            self.addItem(self._tool_dot)
+    def set_live_tool_outline(self, outline, note: str = ""):
+        """The spindle tool's outline (geometry.tool_outline) for live
+        positions; None = the dot (tool-graphic plan 2026-11-13)."""
+        self._live_tool = (outline, note)
+        if self._tool_graphic is not None and (self._tool_shown or ("",))[0] == "live":
+            self._tool_shown = ("live", id(outline), note)
+            self._tool_graphic.set_outline(outline, note)
 
-        self._tool_dot.setData([z], [x_radius])
+    # -- material removal (tool-graphic plan 2026-11-13, T5) ----------------
+    MATERIAL_FILL = "#7F8FA3C0"          # the bar, steel grey (#RRGGBBAA)
+    MATERIAL_EDGE = "#C8D3DE"
+    MATERIAL_HIT = "#FF3B5CE0"            # rub / rapid into stock
+
+    def _material_layer(self):
+        """(material item, warning item), created after any clear()."""
+        from PyQt5.QtWidgets import QGraphicsPathItem
+        if self._material_items is None:
+            mat, hit = QGraphicsPathItem(), QGraphicsPathItem()
+            mat.setBrush(pg.mkBrush(pg.mkColor(self.MATERIAL_FILL)))
+            pen = pg.mkPen(self.MATERIAL_EDGE, width=1)
+            pen.setCosmetic(True)
+            mat.setPen(pen)
+            mat.setZValue(self.CUT_Z - 0.2)              # under the toolpath, over the sections
+            brush = pg.mkBrush(pg.mkColor(self.MATERIAL_HIT))
+            brush.setStyle(QtCore.Qt.DiagCrossPattern)
+            hit.setBrush(brush)
+            hpen = pg.mkPen(self.MATERIAL_HIT, width=2)
+            hpen.setCosmetic(True)
+            hit.setPen(hpen)
+            hit.setZValue(4.6)
+            for it in (mat, hit):
+                it.setVisible(self._material_visible)
+                self.addItem(it, ignoreBounds=True)
+            self._material_items = (mat, hit)
+        return self._material_items
+
+    @staticmethod
+    def _rings_path(rings):
+        from PyQt5.QtGui import QPainterPath
+        path = QPainterPath()
+        path.setFillRule(QtCore.Qt.OddEvenFill)
+        for ring in rings or ():
+            if len(ring) < 3:
+                continue
+            path.moveTo(ring[0][0], ring[0][1])
+            for zz, rr in ring[1:]:
+                path.lineTo(zz, rr)
+            path.closeSubpath()
+        return path
+
+    def set_material(self, rings, hit_rings=None):
+        """The bar as it is now: rings of (Z, X radius) points (exterior and
+        holes, odd-even). hit_rings: rub / rapid-into-stock areas (None = keep)."""
+        mat, hit = self._material_layer()
+        mat.setPath(self._rings_path(rings))
+        if hit_rings is not None:
+            hit.setPath(self._rings_path(hit_rings))
+
+    def clear_material(self):
+        if self._material_items is not None:
+            for it in self._material_items:
+                it.setPath(self._rings_path(()))
+
+    def set_material_visible(self, visible: bool):
+        self._material_visible = visible
+        if self._material_items is not None:
+            for it in self._material_items:
+                it.setVisible(visible)
+
+    def set_tool_position(self, x_radius: float, z: float, live: bool = False,
+                          sim_graphic=None):
+        """Move the tool. live=True: the machine's position, drawn as the
+        spindle tool. live=False (sim playback): sim_graphic = (outline, note)
+        of the tool that move runs with (validation/sim_path), None = the dot."""
+        from gui.components.tool_graphic_item import ToolGraphic
+        if self._tool_graphic is None:
+            self._tool_graphic = ToolGraphic(self, dot_size=16)
+            self._tool_shown = None
+        want = self._live_tool if live else (sim_graphic or (None, ""))
+        key = ("live", id(want[0]), want[1]) if live else ("sim", id(want[0]), want[1])
+        if key != self._tool_shown:
+            self._tool_shown = key
+            self._tool_graphic.set_outline(*want)
+        self._tool_graphic.set_position(x_radius, z)
 
     def highlight_next_segment(self, move_index: int):
         """Show the upcoming segment as a dotted preview line (next move to be executed).
@@ -458,7 +536,9 @@ class MachiningGraphWidget(pg.PlotWidget):
         """Clear toolpath display (return to preview mode)."""
         self.clear()
         self._setup_crosshair()
-        self._tool_dot = None
+        self._tool_graphic = None
+        self._tool_shown = None
+        self._material_items = None
         self._graph_data = None
 
     def _get_segment_color(self, segment: ToolpathSegment) -> str:

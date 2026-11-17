@@ -820,6 +820,7 @@ class ProgramTab(QWidget):
 
         # Threading/grooving panel changes
         self._threading_panel.params_changed.connect(self._on_field_changed)
+        self._threading_panel.side_changed.connect(self._on_thread_side_changed)
         self._grooving_panel.params_changed.connect(self._on_field_changed)
         self._parting_panel.params_changed.connect(self._on_field_changed)
 
@@ -910,6 +911,13 @@ class ProgramTab(QWidget):
 
         self._on_field_changed()
 
+    def _on_thread_side_changed(self, internal: bool):
+        """The threading panel's OD / ID field sets the block type."""
+        block = self._block_list.get_block_by_id(self._active_block_id)
+        if block is not None and block.is_threading:
+            self._block_list.update_block_type(
+                block.block_id, "threading_id" if internal else "threading_od")
+
     def _on_block_selected(self, block_id: int):
         """Handle block selection in the block list — save current, restore new."""
         block = self._block_list.get_block_by_id(block_id)
@@ -974,6 +982,10 @@ class ProgramTab(QWidget):
             }
         elif block.is_threading:
             block.params_data = self._threading_panel.get_values()
+            # the panel's Tool field is the block's tool (list label, tool change)
+            if block.tool_number != self._threading_panel.get_tool_number():
+                self._block_list.update_block_tool(
+                    block.block_id, self._threading_panel.get_tool_number())
         elif block.is_grooving:
             if block.block_type == "parting":
                 block.params_data = self._parting_panel.get_values()
@@ -983,6 +995,8 @@ class ProgramTab(QWidget):
     def _restore_block_data(self, block):
         """Restore field values from a block's params_data into the UI."""
         data = block.params_data
+        if block.is_threading and not data:
+            self._threading_panel.set_side(block.block_type == "threading_id")
         if not data and not block.is_profile:
             return
 
@@ -1025,7 +1039,7 @@ class ProgramTab(QWidget):
             self._refresh_finish_doc()
 
         elif block.is_threading:
-            self._threading_panel.set_values(data)
+            self._threading_panel.set_values(data, block.block_type == "threading_id")
         elif block.is_grooving:
             if block.block_type == "parting":
                 self._parting_panel.set_values(data)
@@ -1134,14 +1148,28 @@ class ProgramTab(QWidget):
         shade only the uncut regions (never a guessed picture)."""
         from validation.cut_regions import compute_sections, CutRegionsUnavailable, geom_rings
         from shapely.ops import unary_union
+        from validation.rapid_collision import HIT_ERROR, check_rapids, operator_findings
         parts = {k: [] for k in ("face", "rough", "cleanup", "finish", "finished", "uncut",
                                  "gouge", "not_removed")}
+        self._program_errors = list(getattr(self, "_thread_errors", []))
         try:
             for gcode_text, plan_result, outlines in getattr(self, "_section_inputs", []):
                 sec = compute_sections(gcode_text, plan_result, outlines)
                 for k in parts:
                     parts[k].append(getattr(sec, k))
-                self._generate_notes.extend(sec.notes)
+                # The program as LinuxCNC runs it may not cut into the part
+                # (a gouge - incl. an arc LinuxCNC would run as a full circle)
+                # nor rapid into material that is still there (2026-11-12).
+                for note in sec.notes:
+                    (self._program_errors if "cuts into the finished part" in note
+                     else self._generate_notes).append(note)
+                reports = check_rapids(gcode_text, plan_result)
+                errors, notes = operator_findings(reports)
+                self._program_errors.extend(errors)
+                self._generate_notes.extend(notes)
+                # only the errors are hatched red; harmless brushes are a note
+                parts["gouge"].extend(r.hit_geom for r in reports
+                                      if r.hit_geom is not None and r.hit_depth > HIT_ERROR)
         except CutRegionsUnavailable as exc:
             self._generate_notes.append(f"Shaded sections not shown: {exc}")
             self._sim_viewer.set_uncut_overlay(getattr(self, "_uncut_outlines", []))
@@ -1225,6 +1253,7 @@ class ProgramTab(QWidget):
             # Generate each block — collect G-code sections and the first plan_result
             all_gcode_sections = []
             self._generate_notes = []
+            self._thread_errors = []
             self._uncut_outlines = []
             self._section_inputs = []          # (gcode, plan_result, uncut outlines) per profile block
             self._arc_split_notes = []
@@ -1281,15 +1310,33 @@ class ProgramTab(QWidget):
                 graph_data = graph_convert(first_plan_result)
 
             stage = "sim_load"
-            from gui.components.sim_viewer import parse_gcode_for_sim
-            sim_moves = parse_gcode_for_sim(combined_gcode)
-            self._sim_viewer.load(graph_data, combined_gcode, sim_moves)
+            from gui.components.sim_viewer import build_sim_moves
+            sim_moves, sim_note = build_sim_moves(combined_gcode)
+            self._sim_viewer.load(graph_data, combined_gcode, sim_moves, sim_note)
 
             if hasattr(self, '_profile_contour_segments') and self._profile_contour_segments:
                 self._sim_viewer.set_profile_overlay(self._profile_contour_segments)
             # Drawn profile (above) AND what the program cuts: shaded sections
             # from the G-code as LinuxCNC runs it (validation/cut_regions.py)
             self._show_cut_sections()
+
+            if getattr(self, "_program_errors", None):
+                # Shown (hatched red on the graph) but NOT handed on to Edit / Run.
+                self.set_state(ProgramState.DISPLAYING)
+                n = len(self._program_errors)
+                self._status_label.setText(
+                    f"✖ Program NOT sent to Edit/Run - {n} problem{'s' if n > 1 else ''} "
+                    f"(hover for details)")
+                self._status_label.setToolTip("\n\n".join(self._program_errors))
+                self._status_label.setStyleSheet(
+                    f"color: {COLORS['status_error']}; font-size: {FONTS['small_size']}pt;")
+                QMessageBox.critical(
+                    self, "Program not sent to Edit/Run",
+                    "Checking the G-code as LinuxCNC will run it found:\n\n- "
+                    + "\n- ".join(self._program_errors)
+                    + "\n\nThe places are hatched red on the graph. This is an engine fault "
+                      "or a setup the engine can't cut safely - please report it.")
+                return
 
             # Emit signals
             self._last_gcode_text = combined_gcode
@@ -1302,6 +1349,14 @@ class ProgramTab(QWidget):
             block_count = len(active_blocks)
             ready = (f"Program ready — {block_count} block{'s' if block_count > 1 else ''}, "
                      f"{len(sim_moves)} moves")
+            # Cycle-time estimate from the program as LinuxCNC runs it (validation/cycle_time.py)
+            self._cycle_estimate = None
+            try:
+                from validation.cycle_time import estimate_for_machine
+                self._cycle_estimate = estimate_for_machine(combined_gcode)
+                ready += f" — {self._cycle_estimate.text()}"
+            except Exception:
+                logger.exception("cycle-time estimate failed")
             notes = getattr(self, "_generate_notes", [])
             if notes:
                 # Not an error: the program runs. The part differs from the
@@ -1309,12 +1364,12 @@ class ProgramTab(QWidget):
                 self._status_label.setText(
                     f"⚠ {ready} — {len(notes)} note{'s' if len(notes) > 1 else ''} "
                     f"(hover for details)")
-                self._status_label.setToolTip("\n\n".join(notes))
+                self._status_label.setToolTip("\n\n".join(notes + self._estimate_details()))
                 self._status_label.setStyleSheet(
                     f"color: {COLORS['status_warning']}; font-size: {FONTS['small_size']}pt;")
             else:
                 self._status_label.setText(ready)
-                self._status_label.setToolTip("")
+                self._status_label.setToolTip("\n\n".join(self._estimate_details()))
                 self._status_label.setStyleSheet(
                     f"color: {COLORS['text_secondary']}; font-size: {FONTS['small_size']}pt;"
                 )
@@ -1335,6 +1390,13 @@ class ProgramTab(QWidget):
             dlg.show_exception(e, tb_str, stage=stage)
 
             self.set_state(ProgramState.READY)
+
+    def _estimate_details(self) -> list:
+        est = getattr(self, "_cycle_estimate", None)
+        if est is None:
+            return []
+        from validation.cycle_time import details
+        return [details(est)]
 
     def _generate_profile_block(self, block, writer):
         """Generate a profile block through the full pipeline.
@@ -1457,51 +1519,50 @@ class ProgramTab(QWidget):
         return gcode_text, plan_result
 
     def _generate_threading_block(self, block, writer, prev_tool_number):
-        """Generate G-code lines for a threading block."""
-        from models.program import ThreadingParams
+        """G-code lines for a threading block (field-driven, owner plan 2026-11-12).
+
+        Plan errors (Z speed, pilot, taper, ...) go to the Generate checks and
+        stop the hand-off to Edit / Run; warnings become Generate notes."""
+        from models import thread_data
         from planners.threading_planner import ThreadingPlanner
+        from validation.cycle_time import _limits
 
         data = block.params_data
         if not data:
             return [f"; === THREADING BLOCK (no parameters set) ==="]
+        internal = block.block_type == "threading_id"
+        fields, notes = thread_data.from_saved(data, internal)
+        for note in notes:
+            self._generate_notes.append(f"{block.display_label}: {note}")
+        params = thread_data.params_from_fields(fields, internal)
+        block.tool_number = params.tool_number          # the panel's Tool field
+        tool_def = self._resolve_tool_for_block(block)
+        try:
+            lim = _limits(self._ini_path())
+        except OSError as exc:
+            self._thread_errors.append(
+                f"{block.display_label}: can't read the Z limits from industry-cam.ini ({exc}) - "
+                f"the threading speed can't be checked")
+            return [f"; === THREADING ({params.designation}) NOT GENERATED - see the checks ==="]
+        vz, az = lim.vz, lim.az
+        plan = ThreadingPlanner().plan_thread(params, vz, az, tool=tool_def)
+        for w in plan.warnings:
+            self._generate_notes.append(f"{block.display_label}: {w}")
+        if plan.errors:
+            self._thread_errors.extend(f"{block.display_label}: {e}" for e in plan.errors)
+            return [f"; === THREADING ({params.designation}) NOT GENERATED - see the checks ==="]
 
         lines = []
-
-        # Tool change if needed
         if prev_tool_number is not None and block.tool_number != prev_tool_number:
-            tool_def = self._resolve_tool_for_block(block)
-            rpm = data.get("spindle_rpm", 400)
-            lines.extend(writer.write_tool_change(tool_def, rpm))
-
-        # Build ThreadingParams
-        params = ThreadingParams(
-            thread_standard=data.get("thread_standard", "UNC"),
-            designation=data.get("designation", ""),
-            major_diameter=data.get("major_diameter", 0.5),
-            pitch=data.get("pitch", 1.0 / 13.0),
-            thread_depth=data.get("thread_depth", 0.0416),
-            start_z=data.get("start_z", 0.05),
-            end_z=data.get("end_z", -0.75),
-            infeed_method=data.get("infeed_method", "modified_flank"),
-            num_passes=data.get("num_passes", 6),
-            spring_passes=data.get("spring_passes", 2),
-            chamfer_threads=data.get("chamfer_threads", 1.0),
-            is_internal=block.block_type == "threading_id",
-            spindle_rpm=data.get("spindle_rpm", 400),
-            tool_number=block.tool_number,
-            num_starts=data.get("num_starts", 1),
-        )
-
-        tool_def = self._resolve_tool_for_block(block)
-        # Use a reasonable stock diameter for safe_x calculation
-        stock_dia = data.get("major_diameter", 0.5) + 0.1
-        from planners.threading_planner import ThreadingPlanner
-        g76 = ThreadingPlanner().compute_g76_params(params)
+            lines.extend(writer.write_tool_change(tool_def, params.spindle_rpm))
         lines.extend(writer.write_threading_block(
-            params, g76, tool_def, stock_dia=stock_dia,
-            unit_mode=unit_state.mode.value,
-        ))
+            params, plan, tool_def, unit_mode=unit_state.mode.value))
         return lines
+
+    def _ini_path(self):
+        import os
+        return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "industry-cam.ini")
 
     def _generate_grooving_block(self, block, writer, prev_tool_number):
         """Generate G-code lines for a grooving/parting block."""
@@ -1747,10 +1808,10 @@ class ProgramTab(QWidget):
 
             # Convert to graph data and load into SimViewerWidget
             from outputs.graph_adapter import convert_from_moves
-            from gui.components.sim_viewer import parse_gcode_for_sim
+            from gui.components.sim_viewer import build_sim_moves
             graph_data = convert_from_moves(moves)
-            sim_moves = parse_gcode_for_sim(gcode_text)
-            self._sim_viewer.load(graph_data, gcode_text, sim_moves)
+            sim_moves, sim_note = build_sim_moves(gcode_text)
+            self._sim_viewer.load(graph_data, gcode_text, sim_moves, sim_note)
 
             # Emit G-code to Edit tab
             self._last_gcode_text = gcode_text

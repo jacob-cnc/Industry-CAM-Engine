@@ -68,6 +68,7 @@ class Tools_Tab(QWidget):
 
     tool_changed = pyqtSignal(int)
     tool_selected = pyqtSignal(object)
+    tools_reloaded = pyqtSignal()       # a table was loaded (tool graphics rebuild)
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -141,6 +142,19 @@ class Tools_Tab(QWidget):
         if 0 <= self._selected_index < len(self._cards):
             return self._cards[self._selected_index].get_data()
         return None
+
+    def showEvent(self, event):
+        """Refresh the spindle-tool label every time the tab is shown.
+
+        The label is built as "Offline" (components/top_button_bar.py) and
+        refresh_current_tool_display() had no caller anywhere in the repo, so
+        it read "Offline" for a whole session even with a live controller
+        (owner, 2026-11-16). A tool change is made on the Manual tab, so
+        returning to this tab is when the label can be stale - refreshing on
+        show covers it without adding a timer.
+        """
+        super().showEvent(event)
+        self.refresh_current_tool_display()
 
     def refresh_current_tool_display(self) -> None:
         """Refresh the current tool display in the TopButtonBar.
@@ -575,6 +589,10 @@ class Tools_Tab(QWidget):
         self._loaded_tools = deepcopy(tools)
         self.set_cards(tools)
         self._button_bar.set_table_name(os.path.basename(path))
+        self.tools_reloaded.emit()
+        # The label carries the spindle tool's description, which comes from
+        # the cards just replaced.
+        self.refresh_current_tool_display()
 
     def _live_table_path(self):
         ini_name = os.environ.get("INI_FILE_NAME") or getattr(self._linuxcnc_stat, "ini_filename", None)

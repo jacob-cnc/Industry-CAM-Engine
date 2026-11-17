@@ -26,7 +26,7 @@ from PyQt5.QtWidgets import (
 
 from gui.components.elided_label import ElidedLabel
 from gui.colors import COLORS, FONTS
-from gui.components.sim_viewer import SimViewerWidget, parse_gcode_for_sim, GCodePanel
+from gui.components.sim_viewer import SimViewerWidget, build_sim_moves, GCodePanel
 from outputs.graph_adapter import convert_from_moves
 from outputs.gcode_parser import parse as parse_gcode
 from hal import get_backend
@@ -79,6 +79,14 @@ class RunTab(QWidget):
         self._poll_timer = QTimer(self)
         self._poll_timer.timeout.connect(self._poll)
         self._poll_timer.setInterval(100)  # 10 Hz
+        # Tool graphic (tool-graphic plan 2026-11-13): the spindle tool's
+        # outline, moved at ~30 Hz from a side-effect-free position read.
+        self._tool_card_resolver = None
+        self._tool_graphic_key = None
+        self._tool_graphic_rev = 0
+        self._graphic_timer = QTimer(self)
+        self._graphic_timer.setInterval(33)
+        self._graphic_timer.timeout.connect(self._on_graphic_tick)
 
     # =================================================================
     # UI Construction
@@ -355,6 +363,15 @@ class RunTab(QWidget):
         self._status_line.setMinimumWidth(80)
         bar_layout.addWidget(self._status_line)
 
+        # Cycle-time estimate (validation/cycle_time.py): total when loaded,
+        # time left while running.
+        self._status_time = QLabel("")
+        self._status_time.setStyleSheet(
+            f"color: {COLORS['text_secondary']};"
+            f" font-family: {FONTS['mono_family']}, {FONTS['fallback_mono']};")
+        self._status_time.setMinimumWidth(90)
+        bar_layout.addWidget(self._status_time)
+
         sep4 = QLabel("|")
         sep4.setStyleSheet(f"color: {COLORS['border_normal']};")
         bar_layout.addWidget(sep4)
@@ -399,8 +416,51 @@ class RunTab(QWidget):
         self._active = active
         if active:
             self._poll_timer.start()
+            self._graphic_timer.start()
         else:
             self._poll_timer.stop()
+            self._graphic_timer.stop()
+
+    def set_tool_card_resolver(self, resolver):
+        """resolver(tool_number) -> ToolCardData or None (the Tools tab)."""
+        self._tool_card_resolver = resolver
+        self.refresh_tool_graphic()
+
+    def refresh_tool_graphic(self):
+        """Rebuild the tool graphic on the next poll (tool table edited / reloaded)."""
+        self._tool_graphic_rev += 1
+
+    # spindle turning: measured RPM above this (manual spindle, encoder)
+    _CUT_RPM = 5.0
+
+    def _on_graphic_tick(self):
+        sample = self._backend.motion_sample()
+        if sample is None:
+            return
+        x_dia, z, motion_type = sample
+        self._sim_viewer.move_live_tool(x_dia / 2.0, z)
+        if self._is_running:
+            # material removal (tool-graphic plan T5): the spindle tool swept
+            # between samples, only while the spindle turns on a feed / arc move
+            state = self._backend.state
+            cutting = (abs(state.spindle.speed) > self._CUT_RPM
+                       and motion_type in (2, 3))         # MOTION_TYPE_FEED, _ARC
+            self._sim_viewer.live_material_sample(x_dia / 2.0, z, cutting)
+            self._live_flush = getattr(self, "_live_flush", 0) + 1
+            if self._live_flush % 3 == 0:                 # redraw ~10x a second
+                self._sim_viewer.flush_live_material()
+
+    def _update_tool_graphic(self, state):
+        from gui.components.tool_graphic_item import graphic_for
+        t = state.tool_in_spindle
+        key = (t, round(state.tool_offset_x, 9), round(state.tool_offset_z, 9),
+               self._tool_graphic_rev)
+        if key == self._tool_graphic_key:
+            return
+        self._tool_graphic_key = key
+        card = self._tool_card_resolver(t) if (self._tool_card_resolver and t > 0) else None
+        outline, note = graphic_for(card, t, (state.tool_offset_x, state.tool_offset_z))
+        self._sim_viewer.set_live_tool_outline(outline, note)
 
     _TOOL_CHECK_RE = re.compile(
         r";\s*--- tool check: program generated for T(\d+) D([0-9.]+) Q(\d+)")
@@ -508,6 +568,7 @@ class RunTab(QWidget):
         self._btn_preview.setEnabled(True)
         self._btn_run_from.setEnabled(True)
         self._status_file.setText(filename)
+        self._update_estimate()
         self._status_file.setToolTip(path)
         self._status_file.setStyleSheet(
             f"color: {COLORS['text_primary']}; font-size: 9pt;"
@@ -546,10 +607,10 @@ class RunTab(QWidget):
             graph_data = convert_from_moves(moves)
 
             # Parse for sim (with line_idx tracking for highlighting)
-            sim_moves = parse_gcode_for_sim(self._gcode_text)
+            sim_moves, sim_note = build_sim_moves(self._gcode_text)
 
             # Load everything into the SimViewerWidget
-            self._sim_viewer.load(graph_data, self._gcode_text, sim_moves)
+            self._sim_viewer.load(graph_data, self._gcode_text, sim_moves, sim_note)
 
             logger.info("Preview loaded: %d moves, %d sim moves",
                         len(moves), len(sim_moves))
@@ -778,9 +839,15 @@ class RunTab(QWidget):
         self._btn_open.setEnabled(False)
         self._btn_preview.setEnabled(False)
         self._btn_pause.setText("Pause")
+        plan = getattr(self, "_resume_plan", None)
+        self._sim_viewer.start_live_material(plan.start_index if plan is not None else 0)
+        self._live_flush = 0
 
     def _set_idle_state(self):
         """Update UI for idle state."""
+        self._sim_viewer.flush_live_material()
+        if getattr(self, "_estimate", None) is not None:
+            self._status_time.setText(f"Est. {self._estimate.text()}")
         self._is_running = False
         has_file = bool(self._gcode_path)
         self._btn_start.setEnabled(has_file)
@@ -802,6 +869,31 @@ class RunTab(QWidget):
     # =================================================================
     # Polling — Live Updates During Execution
     # =================================================================
+
+    def _update_estimate(self):
+        """Estimate the loaded program's cycle time (shown until it runs)."""
+        self._estimate = None
+        self._status_time.setText("")
+        self._status_time.setToolTip("")
+        if not self._gcode_text:
+            return
+        try:
+            from validation.cycle_time import details, estimate_for_machine
+            self._estimate = estimate_for_machine(self._gcode_text)
+        except Exception:
+            logger.exception("cycle-time estimate failed")
+            return
+        self._status_time.setText(f"Est. {self._estimate.text()}")
+        self._status_time.setToolTip(details(self._estimate))
+
+    def _show_time_left(self, source_line_1based: int):
+        est = getattr(self, "_estimate", None)
+        if est is None or source_line_1based <= 0:
+            return
+        from validation.cycle_time import fmt_duration
+        left = est.remaining_after_line.get(source_line_1based - 1)
+        if left is not None:
+            self._status_time.setText(f"~{fmt_duration(left)} left")
 
     def _poll(self):
         """Timer callback — update line highlighting and status from machine state."""
@@ -837,6 +929,7 @@ class RunTab(QWidget):
                 # motion_line is 1-based from LinuxCNC, sim_line_changed expects 0-based
                 self._sim_viewer.sim_line_changed.emit(motion_line - 1)
                 self._status_line.setText(f"Line: {motion_line}")
+                self._show_time_left(motion_line)
             else:
                 self._sim_viewer.sim_line_changed.emit(-1)
                 self._status_line.setText("Line: —")
@@ -860,6 +953,7 @@ class RunTab(QWidget):
         # program has work (interp may be IDLE mid-cut, see program_busy).
         x_r = state.x.position / 2.0
         z = state.z.position
+        self._update_tool_graphic(state)
         if state.program_busy:
             self._sim_viewer.update_live_position(motion_line, x_r, z)
         elif not self._sim_viewer.is_playing():

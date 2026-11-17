@@ -97,6 +97,8 @@ class ToolGeometryRow(QWidget):
             x_wear=self._wear_x_field.value() / 2.0,       # diameter → radius
             z_wear=self._wear_z_field.value(),
             blade_width=self._blade_width_field.value(),
+            iso_code=self._iso_edit.text().strip(),
+            ic=self._ic_field.value(),
         )
 
     def set_data(self, data: ToolCardData) -> None:
@@ -153,6 +155,8 @@ class ToolGeometryRow(QWidget):
             self._wear_z_field.set_value(data.z_wear)
             self._nose_radius_field.set_value(data.nose_radius)
             self._blade_width_field.set_value(data.blade_width)
+            self._iso_edit.setText(data.iso_code)
+            self._ic_field.set_value(data.ic)
 
             # Angles: if both are 0.0 and insert code is in lookup, auto-fill
             # This handles legacy .tbl files that didn't store I/J angles
@@ -177,14 +181,8 @@ class ToolGeometryRow(QWidget):
             # Wear highlighting
             self._update_wear_highlight()
 
-            # Update orientation graphic with current angle values
-            self._orientation_graphic.set_params(
-                insert_code=data.insert_code,
-                orientation=data.orientation,
-                nose_radius=data.nose_radius if data.nose_radius > 0 else self._nose_radius_field.value(),
-                front_angle=self._front_angle_field.value(),
-                back_angle=self._back_angle_field.value(),
-            )
+            # Update orientation graphic with current values
+            self._update_orientation_graphic()
         finally:
             self._suppress_signals = False
 
@@ -387,6 +385,34 @@ class ToolGeometryRow(QWidget):
         self._back_angle_field.setFixedWidth(90)
         self._back_angle_field.value_changed.connect(self._on_geometry_changed)
         params_row.addWidget(self._back_angle_field)
+
+        # Insert size for the true-scale screen graphic (owner 2026-11-13: read
+        # from a full ISO code when given, otherwise the IC field).
+        params_row.addSpacing(20)
+        iso_label = QLabel("ISO:")
+        iso_label.setStyleSheet(f"color: {COLORS['text_secondary']}; background: transparent;")
+        params_row.addWidget(iso_label)
+        self._iso_edit = QLineEdit()
+        self._iso_edit.setPlaceholderText("e.g. CNMG432")
+        self._iso_edit.setFixedWidth(130)
+        self._iso_edit.setToolTip("Full ISO insert code. Sets the insert size (IC) for the screen "
+                                  "graphic when the IC field is 0.")
+        self._iso_edit.editingFinished.connect(self._on_field_changed)
+        params_row.addWidget(self._iso_edit)
+        ic_label = QLabel("IC:")
+        ic_label.setStyleSheet(f"color: {COLORS['text_secondary']}; background: transparent;")
+        params_row.addWidget(ic_label)
+        self._ic_field = NumericField(NumericFieldConfig(
+            min_value=0.0, max_value=2.0, decimals=4, default_value=0.0
+        ))
+        self._ic_field.setFixedWidth(90)
+        self._ic_field.setToolTip("Insert inscribed circle (round: diameter; grooving: blade "
+                                  "length). 0 = from the ISO code.")
+        self._ic_field.value_changed.connect(self._on_field_changed)
+        params_row.addWidget(self._ic_field)
+        self._insert_note = QLabel("")
+        self._insert_note.setStyleSheet(f"color: {COLORS['status_warning']}; background: transparent;")
+        params_row.addWidget(self._insert_note)
 
         params_row.addStretch()
         main_layout.addLayout(params_row, 2, 0, 1, 6)
@@ -678,11 +704,15 @@ class ToolGeometryRow(QWidget):
         self.delete_requested.emit(self._tool_number)
 
     def _update_orientation_graphic(self) -> None:
-        """Update the orientation graphic with current field values."""
-        self._orientation_graphic.set_params(
-            insert_code=self._insert_combo.currentText(),
-            orientation=self._orientation_value(),
-            nose_radius=self._nose_radius_field.value(),
-            front_angle=self._front_angle_field.value(),
-            back_angle=self._back_angle_field.value(),
-        )
+        """Update the graphic from the same insert model the screens use."""
+        from tools.tool_card_data import insert_spec, iso_radius_mismatch
+        from tools.insert_geometry_lookup import parse_iso_code
+        data = self.get_data()
+        notes = []
+        if data.iso_code and parse_iso_code(data.iso_code) is None:
+            notes.append(f"ISO code {data.iso_code!r} has no size I can read")
+        mismatch = iso_radius_mismatch(data)
+        if mismatch:
+            notes.append(mismatch)
+        self._orientation_graphic.set_spec(insert_spec(data))
+        self._insert_note.setText("; ".join(notes))

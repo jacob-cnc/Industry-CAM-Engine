@@ -11,50 +11,58 @@ from dataclasses import dataclass, field
 
 @dataclass(frozen=True)
 class ThreadingParams:
-    """Parameters for a threading operation (G76 cycle).
+    """A threading operation - field driven (owner plan 2026-11-12,
+    docs/handoffs/2026-11-12-threading-workflow-plan.md).
 
-    Thread geometry is computed from standard + designation lookup,
-    but all fields are user-overridable.
+    Diameters in inches. X start / X end are the NOMINAL MAJOR at Z start / Z end
+    (equal = straight, different = taper). The cut depth is never typed: the
+    thread data (models/thread_data.py) gives ``root_offset`` = root - X for the
+    chosen standard and class (Custom: the form's basic depth), so
 
-    Coordinates:
-        major_diameter: Thread major diameter (DIAMETER, inches)
-        pitch: Distance per revolution (inches). Computed as 1/TPI for inch threads.
-        thread_depth: Full thread depth (RADIUS, inches). Computed from standard formula.
-        start_z: Z position where threading begins (inches)
-        end_z: Z position where threading ends (inches, more negative)
-        taper_amount: For NPT — taper per inch on diameter (inches/inch). 0 for parallel.
+        external   crest = X              root = X + root_offset   (root_offset < 0)
+        internal   crest = pilot (tap drill)  root = X + root_offset (>= 0)
+
+    Z end is where the tool pulls out (no pull-out chamfer). RH only.
     """
-    # Thread identification
-    thread_standard: str        # "UNC", "UNF", "UNEF", "NPT", "Metric", "ACME"
-    designation: str            # "1/2-13 UNC", "M10x1.5", etc. (display label)
-
-    # Core geometry
-    major_diameter: float       # Thread major OD (DIAMETER, inches)
-    pitch: float                # Distance per revolution (inches)
-    thread_depth: float         # Full thread depth (RADIUS, inches)
-
-    # Z extent
-    start_z: float              # Where threading begins (Z position)
-    end_z: float                # Where threading ends (more negative Z)
-
-    # Cycle parameters
-    infeed_method: str          # "radial", "flank", "modified_flank", "alternating"
-    num_passes: int             # Number of cutting passes (excluding spring passes)
-    spring_passes: int          # Passes at full depth with no additional infeed
-    chamfer_threads: float      # Pullout chamfer amount (0, 0.5, 1.0, 1.5 threads)
-
-    # Mode
-    is_internal: bool           # True = ID (bore) threading, False = OD (external)
-
-    # Machine settings
+    designation: str            # "1/4-20 UNC", "M6x1", ... or "Custom"
+    thread_type: str            # "UNC", ..., "NPT" or "Custom"
+    thread_class: str           # "2A", "6H", "2G", ... ("" for NPT / Custom)
+    form: str                   # thread_data.FORMS key: "60", "acme", "tr", "npt"
+    is_internal: bool
+    x_start: float              # nominal major at Z start (DIAMETER)
+    x_end: float                # nominal major at Z end (DIAMETER)
+    start_z: float
+    end_z: float                # where the tool pulls out
+    pitch: float                # inches per thread
+    root_offset: float          # root - X (DIAMETER), from the standard / class
+    pilot_dia: float            # internal: the crest (tap drill); 0 for external
+    num_passes: int
+    spring_passes: int
+    num_starts: int
+    entry_angle: float          # compound infeed angle (G76 Q), degrees
     spindle_rpm: float
     tool_number: int
+    degression: float = 2.0     # G76 R: 2.0 = constant area per pass (LinuxCNC)
 
-    # Advanced
-    num_starts: int = 1         # Multi-start thread (lead = pitch * num_starts)
-    taper_amount: float = 0.0   # NPT taper (inches per inch on diameter). 0 = parallel.
-    first_pass_depth: float = 0.0  # J word: initial cut depth (0 = auto-compute)
-    degression: float = 2.0     # R word: depth degression (2.0 = constant area / sqrt)
+    @property
+    def is_taper(self) -> bool:
+        return abs(self.x_end - self.x_start) > 1e-9
+
+    @property
+    def lead(self) -> float:
+        return self.pitch * max(1, int(self.num_starts))
+
+    def root_at(self, x: float) -> float:
+        return x + self.root_offset
+
+    def crest_at(self, x: float, form_depth: float) -> float:
+        """Crest diameter where the nominal major is x. Internal straight threads
+        use the pilot; internal tapers follow the root line (form depth)."""
+        if not self.is_internal:
+            return x
+        if not self.is_taper:
+            return self.pilot_dia
+        return self.root_at(x) - 2.0 * form_depth
 
 
 @dataclass(frozen=True)

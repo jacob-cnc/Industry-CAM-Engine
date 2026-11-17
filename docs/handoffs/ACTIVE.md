@@ -6,6 +6,26 @@ the distinction between the owner's verbatim request and later design advice.
 
 ## Proposed
 
+- [Plan: one part model, operations on segment groups, STEP / DXF import](2026-11-12-part-model-and-import-plan.md)
+  - Status: PLAN ONLY (owner request 2026-11-12, owner answers recorded). Profile segments move out of
+    blocks into one Part (OD / ID chains, may meet at the face); operations target segment runs; groove parameters
+    come from the geometry (threads stay field-driven); STEP import from faces of revolution (a boolean section gives
+    B-splines - probed on the NX fixture); DXF = the radial revolve sketch; recognised fillets / chamfers
+    become corner breaks when the solver reproduces them exactly. Phases 1 (import into today's builder)
+    -> 2 (v3 model + converter, corpus identical) -> 3 (Program tab) -> 4 (in-process stock, rest machining).
+  - Owner 2026-11-12: no implementation yet; import does not set the stock; threads not on segments.
+
+- [Plan: true-scale tool graphic on Manual / Run / sim screens](2026-11-13-tool-graphic-plan.md)
+  - Status: PLAN ONLY, owner decisions 2026-11-13: insert only (no holder / bar), IC from ISO code or field,
+    material removal in sim and live.
+
+- [Plan: field-driven threading (straight + tapered, thread lists, hints)](2026-11-12-threading-workflow-plan.md)
+  - Status: MERGED main a9a4bb6 (2026-11-12); live checkout pulled; air cut pending. Fields OD/ID, tool #, X start / end (major),
+    Z start, Z end (= pull-out point), pitch, pilot (ID), RPM, passes, spring passes, starts, entry angle;
+    depth DERIVED from standard + class. UNC/UNF (2A/2B, 3A/3B), metric (6g/6H, 4h/5H), Tr (7e/7H),
+    Acme (2G/3G), NPT preset, Custom. Hints: PD window (OD), tap drill (ID). Retract major + .020 (OD),
+    pilot - .005 (ID); tapers as G33 passes; no LH. Next: owner says when to implement (T1 data -> T2 panel -> T3 motion).
+
 - [Hand-math inquiry: findings, walls, next steps](2026-11-12-hand-math-inquiry.md)
   - Status: branch `claude/hand-math-kernel` (from `claude/structure-cleanup`) pushed, NOT merged.
     Fixed: "wires not planar" for contours ending on the back face (F1); finish contour from the

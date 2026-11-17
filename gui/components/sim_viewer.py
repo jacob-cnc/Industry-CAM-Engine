@@ -22,7 +22,7 @@ from PyQt5.QtWidgets import (
     QPushButton, QLabel, QComboBox, QSlider, QSplitter, QPlainTextEdit,
     QTextEdit,
 )
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal
 from PyQt5.QtGui import QFont, QTextCursor, QColor, QTextCharFormat
 
 from gui.components.graph_widget import MachiningGraphWidget
@@ -48,6 +48,70 @@ class SimMove:
     feed_rate: float = 0.0
     center_i: float = 0.0
     center_k: float = 0.0
+    # From LinuxCNC's interpreter (build_sim_moves): the controlled-point path
+    # (r, z) evenly spaced, and (outline, note) of the tool this move runs with.
+    points: Optional[list] = None
+    graphic: Optional[tuple] = None
+    path: Optional[tuple] = None          # the interpreter's own points (material sweep)
+
+
+# ---------------------------------------------------------------------------
+# The sim from LinuxCNC's interpreter (tool-graphic plan 2026-11-13, T4)
+# ---------------------------------------------------------------------------
+
+_PER_INCH = {"rapid": 20, "feed": 80, "arc": 80, "thread": 80}
+
+
+def build_sim_moves(gcode_text: str, tool_table: Optional[str] = None):
+    """(sim moves, note) for gcode_text as LinuxCNC will run it
+    (validation/sim_path): cutter comp applied, G76 / G33 passes as LinuxCNC
+    makes them, each move drawn with the tool it runs with (outline from the
+    same tool table the interpreter read). note says what the sim can't show:
+    the interpreter stopping early (path up to there), or - with no rs274
+    installed (not the lathe) - that the path is the plain G-code, uncompensated.
+    """
+    from validation.sim_path import REPO, interpreter_available, sim_path
+    import os
+    if not interpreter_available():
+        return (parse_gcode_for_sim(gcode_text),
+                "Approximate: LinuxCNC's interpreter is not installed - path without cutter comp")
+    tool_table = tool_table or os.path.join(REPO, "tool.tbl")
+    path = sim_path(gcode_text, os.path.join(REPO, "industry-cam.ini"), tool_table)
+    graphics = _sim_graphics(path.segments, tool_table)
+    moves = []
+    for seg in path.segments:
+        (r0, z0), (r1, z1) = seg.pts[0], seg.pts[-1]
+        moves.append(SimMove(
+            move_type=seg.kind, start_x=2 * r0, start_z=z0, end_x=2 * r1, end_z=z1,
+            line_idx=seg.line_idx, points=seg.resampled(_PER_INCH[seg.kind]),
+            graphic=graphics[(seg.tool, seg.tool_offset)], path=seg.pts))
+    note = f"LinuxCNC's interpreter stops here: {path.problem}" if path.problem else ""
+    return moves, note
+
+
+def _sim_graphics(segments, tool_table: str) -> dict:
+    """(tool, offset) -> (outline or None, note), one outline per tool."""
+    from gui.components.tool_graphic_item import graphic_for
+    from tools.tool_table_io import load_tool_table
+    try:
+        cards = {c.tool_number: c for c in load_tool_table(tool_table)}
+        table_note = ""
+    except (OSError, ValueError, KeyError) as exc:
+        cards, table_note = {}, f"tool table unreadable: {exc}"
+    out = {}
+    for seg in segments:
+        key = (seg.tool, seg.tool_offset)
+        if key in out:
+            continue
+        card = cards.get(seg.tool)
+        if table_note and seg.tool > 0:
+            out[key] = (None, table_note)
+            continue
+        # no G43 after the change: the controlled point is the spindle's
+        # reference, which is the tool's tip only for a zero offset
+        offset = seg.tool_offset if seg.tool_offset is not None else (0.0, 0.0)
+        out[key] = graphic_for(card, seg.tool, offset, tol=6e-5)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -271,6 +335,47 @@ def _expand_g76_for_sim(tokens: list, current_x: float, current_z: float,
 # G-code Panel with line highlighting
 # ---------------------------------------------------------------------------
 
+class _MaterialWorker(QThread):
+    """run_material (geometry/material_sweep) off the GUI thread: it takes a
+    few seconds on a long program. Shapely releases the GIL in its array
+    operations, so the GUI keeps running."""
+    done = pyqtSignal(int, object)
+
+    def __init__(self, gen: int, stock, items, parent=None):
+        super().__init__(parent)
+        self._gen, self._stock, self._items = gen, stock, items
+
+    def run(self):
+        from validation.material_sweep import run_material
+        try:
+            result = run_material(self._stock, self._items)
+        except Exception as exc:                      # shown to the operator, not swallowed
+            result = exc
+        self.done.emit(self._gen, result)
+
+
+def _rings(geom):
+    from validation.cut_regions import geom_rings
+    return geom_rings(geom)
+
+
+def material_summary(run, moves) -> str:
+    """One line for the info label: what the material sweep found."""
+    from validation.material_sweep import FEEDS
+    hits = run.warnings
+    parts = []
+    for k, what, _area in hits[:3]:
+        word = "insert body rubs" if what == "rub" else "rapid into stock"
+        parts.append(f"{word} at line {moves[k].line_idx + 1}")
+    more = f" (+{len(hits) - 3} more)" if len(hits) > 3 else ""
+    blind = sorted({mv.graphic[1] for mv, c in zip(moves, run.cuts)
+                    if c is None and mv.move_type in FEEDS and mv.graphic and mv.graphic[1]})
+    text = ("Material: " + "; ".join(parts) + more) if parts else "Material: no rubs or rapids into stock"
+    if blind:
+        text += " - not tracked for " + ", ".join(blind)
+    return text
+
+
 class GCodePanel(QPlainTextEdit):
     """Read-only G-code display with line highlighting."""
 
@@ -352,6 +457,19 @@ class SimViewerWidget(QWidget):
         super().__init__(parent)
         self._show_gcode_panel = show_gcode_panel
         self._sim_moves: List[SimMove] = []
+        self._sim_note = ""
+        # material removal (T5): sim result, worker generation, live cut
+        self._material = None
+        self._material_note = ""
+        self._material_gen = 0
+        self._material_worker = None
+        self._material_visible = True
+        self._move_start: List[int] = []
+        self._body_cache: dict = {}
+        self._shown_material_key = None
+        self._live_material = None            # polygon while a real program cuts
+        self._live_pending: list = []
+        self._live_prev = None
         self._sim_step = 0
         self._sim_timer = QTimer(self)
         self._sim_timer.timeout.connect(self._sim_advance)
@@ -371,9 +489,12 @@ class SimViewerWidget(QWidget):
 
         self._setup_ui()
 
-    def load(self, graph_data: GraphData, gcode_text: str, sim_moves: List[SimMove]):
-        """Load data into the viewer. Call after pipeline or file open."""
+    def load(self, graph_data: GraphData, gcode_text: str, sim_moves: List[SimMove],
+             note: str = ""):
+        """Load data into the viewer. Call after pipeline or file open.
+        note: shown under the graph (build_sim_moves)."""
         self._sim_moves = sim_moves
+        self._sim_note = note
         self._sim_step = 0
 
         # Pre-compute interpolated path
@@ -381,9 +502,12 @@ class SimViewerWidget(QWidget):
         self._path_len = len(self._path)
 
         # Build SimMove-to-tool_moves index mapping
-        self._sim_to_toolmoves = self._build_sim_to_toolmoves_mapping(
-            sim_moves, graph_data
-        )
+        if any(mv.points is not None for mv in sim_moves):
+            self._sim_to_toolmoves = self._map_by_line(sim_moves, gcode_text, graph_data)
+        else:
+            self._sim_to_toolmoves = self._build_sim_to_toolmoves_mapping(
+                sim_moves, graph_data
+            )
 
         # Build G-code line_idx → sim_move index for live execution tracking
         self._line_to_sim_idx = {sm.line_idx: i for i, sm in enumerate(sim_moves)}
@@ -405,7 +529,9 @@ class SimViewerWidget(QWidget):
         # Update slider
         self._slider.setMaximum(self._path_len - 1 if self._path_len > 0 else 0)
         self._frame_label.setText(f"0 / {self._path_len}")
-        self._info_label.setText("Ready")
+        self._info_label.setText(self._idle_text())
+
+        self._start_material(gcode_text)
 
         # Show all toolpath by default after generating
         self._sim_show_all()
@@ -418,7 +544,16 @@ class SimViewerWidget(QWidget):
     def show_machine_position(self, x_r: float, z: float):
         """Show the machine's current position (work coords, X radius) without
         touching toolpath reveal — used when no program is running."""
-        self._graph.set_tool_position(x_r, z)
+        self._graph.set_tool_position(x_r, z, live=True)
+
+    def set_live_tool_outline(self, outline, note: str = ""):
+        """The spindle tool for live positions (see GraphWidget)."""
+        self._graph.set_live_tool_outline(outline, note)
+
+    def move_live_tool(self, x_r: float, z: float):
+        """Fast graphics refresh: move only the live tool (no reveal)."""
+        if not self.is_playing():
+            self._graph.set_tool_position(x_r, z, live=True)
 
     def update_live_position(self, motion_line_1based: int, x_r: float, z: float):
         """Update tool dot and toolpath reveal for live machine execution.
@@ -433,7 +568,7 @@ class SimViewerWidget(QWidget):
         """
         import bisect
 
-        self._graph.set_tool_position(x_r, z)
+        self._graph.set_tool_position(x_r, z, live=True)
 
         if motion_line_1based <= 0 or not self._line_to_sim_idx:
             return
@@ -462,6 +597,21 @@ class SimViewerWidget(QWidget):
 
         self._graph.reveal_toolpath_up_to(toolmoves_idx)
         self._graph.highlight_next_segment(toolmoves_idx + 1)
+
+    def _map_by_line(self, sim_moves: List[SimMove], gcode_text: str,
+                     graph_data: GraphData) -> dict:
+        """Interpreter moves -> drawn toolpath segments, by source line.
+
+        The drawn toolpath is the PROGRAMMED path (outputs/gcode_parser), so it
+        is matched to the program's own lines by endpoint (as before), and each
+        interpreter move - compensated, or one of many G76 passes - takes the
+        segment of the line it came from."""
+        plain = parse_gcode_for_sim(gcode_text)
+        line_tm: dict = {}
+        for si, tm in self._build_sim_to_toolmoves_mapping(plain, graph_data).items():
+            ln = plain[si].line_idx
+            line_tm[ln] = max(tm, line_tm.get(ln, tm))
+        return {i: line_tm[mv.line_idx] for i, mv in enumerate(sim_moves) if mv.line_idx in line_tm}
 
     def _build_sim_to_toolmoves_mapping(
         self, sim_moves: List[SimMove], graph_data: GraphData
@@ -695,6 +845,11 @@ class SimViewerWidget(QWidget):
         self._btn_toggle_profile.setStyleSheet(btn_style)
         self._btn_toggle_profile.clicked.connect(self._toggle_profile)
         bar_layout.addWidget(self._btn_toggle_profile)
+
+        self._btn_toggle_material = QPushButton("Hide Material")
+        self._btn_toggle_material.setStyleSheet(btn_style)
+        self._btn_toggle_material.clicked.connect(self._toggle_material)
+        bar_layout.addWidget(self._btn_toggle_material)
         self._profile_visible = True
 
         speed_label = QLabel("Speed:")
@@ -802,7 +957,12 @@ class SimViewerWidget(QWidget):
         MIN_POINTS = 3
 
         path = []
+        self._move_start = []
         for i, mv in enumerate(sim_moves):
+            self._move_start.append(len(path))
+            if mv.points is not None:                 # interpreter path, already spaced
+                path.extend((r, z, i) for r, z in mv.points)
+                continue
             sx_r = mv.start_x / 2.0
             sz = mv.start_z
             ex_r = mv.end_x / 2.0
@@ -862,6 +1022,165 @@ class SimViewerWidget(QWidget):
 
         return path
 
+    # --- Material removal (tool-graphic plan 2026-11-13, T5) ---
+
+    def _stock_geom(self, gcode_text: str):
+        """The bar from the program header, or None (no header: not guessed)."""
+        from outputs.program_header import stock_from_header
+        from validation.material_sweep import stock_box
+        st = stock_from_header(gcode_text)
+        self._stock_face_note = "" if (st is None or st.face_known) else \
+            " (bar face taken at Z Start - program has no 'Stock Face Z' line)"
+        return None if st is None else stock_box(*st.rect())
+
+    def _start_material(self, gcode_text: str):
+        self._material_gen += 1
+        self._material = None
+        self._shown_material_key = None
+        self._graph.clear_material()
+        self._stock = self._stock_geom(gcode_text)
+        moves = self._sim_moves
+        if not any(mv.path is not None for mv in moves):
+            self._material_note = ""                     # plain G-code path: no tool shapes
+            return
+        if self._stock is None:
+            self._material_note = "Material: no stock in the program header"
+            return
+        items = [(mv.move_type, mv.graphic[0] if mv.graphic else None, mv.path or ())
+                 for mv in moves]
+        self._material_note = "Material: computing..."
+        worker = _MaterialWorker(self._material_gen, self._stock, items, self)
+        worker.done.connect(self._on_material_done)
+        worker.finished.connect(worker.deleteLater)
+        self._material_worker = worker
+        worker.start()
+
+    def _on_material_done(self, gen: int, result):
+        if gen != self._material_gen:
+            return                                        # a newer program was loaded
+        self._material_worker = None
+        if isinstance(result, Exception):
+            self._material_note = f"Material: could not compute ({result})"
+            self._update_info_idle()
+            return
+        self._material = result
+        self._material_note = material_summary(result, self._sim_moves) + self._stock_face_note
+        hits = []
+        for _k, _what, area in result.warnings:
+            hits.extend(_rings(area))
+        self._graph.set_material(_rings(result.stock), hits)
+        self._shown_material_key = None
+        self._show_sim_material()
+        self._update_info_idle()
+
+    def material_note(self) -> str:
+        return self._material_note
+
+    def _update_info_idle(self):
+        at_end = self._path and self._sim_step >= self._path_len - 1
+        if not self.is_playing() and (at_end or not (self._sim_step > 0 and self._path)):
+            self._info_label.setText(self._idle_text())
+
+    def _idle_text(self) -> str:
+        return " | ".join(t for t in (self._sim_note, self._material_note) if t) or "Ready"
+
+    def _body(self, outline):
+        from validation.material_sweep import outline_polygon
+        key = id(outline)
+        if key not in self._body_cache:
+            self._body_cache[key] = (outline, outline_polygon(outline))
+        return self._body_cache[key][1]
+
+    def material_at_step(self, step: int):
+        """The bar at path step `step` (sim result; None before it is ready).
+        Within a move that cuts, the part of the move done so far is swept
+        on the spot; at a move's end it is the precomputed state."""
+        run = self._material
+        if run is None or not self._path:
+            return None
+        if step <= 0:
+            return run.stock
+        step = min(step, self._path_len - 1)
+        k = self._path[step][2]
+        if k >= len(run.after):
+            return run.after[-1]
+        cut = run.cuts[k]
+        start = self._move_start[k] if k < len(self._move_start) else 0
+        last = (self._move_start[k + 1] - 1) if k + 1 < len(self._move_start) else self._path_len - 1
+        if cut is None or cut.removed.is_empty or step >= last:
+            return run.after[k]
+        from validation.material_sweep import apply_sweeps, step_hulls
+        pts = [(r, z) for r, z, _i in self._path[start:step + 1]]
+        if len(pts) < 2:
+            return run.before(k)
+        body = self._body(self._sim_moves[k].graphic[0])
+        return apply_sweeps(run.before(k), step_hulls(body, pts))
+
+    def _show_sim_material(self):
+        if self._live_material is not None or self._material is None:
+            return
+        step = self._sim_step if self._sim_step > 0 else 0
+        k = self._path[min(step, self._path_len - 1)][2] if (self._path and step > 0) else -1
+        key = (step,) if (k >= 0 and self._material.cuts[k] is not None
+                          and not self._material.cuts[k].removed.is_empty) else ("move", k)
+        if key == self._shown_material_key:
+            return
+        self._shown_material_key = key
+        geom = self.material_at_step(step)
+        if geom is not None:
+            self._graph.set_material(_rings(geom))
+
+    def _toggle_material(self):
+        self._material_visible = not self._material_visible
+        self._graph.set_material_visible(self._material_visible)
+        self._btn_toggle_material.setText("Hide Material" if self._material_visible else "Show Material")
+
+    # live cut (Run tab): the spindle tool swept between feedback samples
+
+    def start_live_material(self, from_line: int = 0):
+        """A real program started: the bar is whole again - or, running from
+        source line `from_line` (0-based), as the sim leaves it before that line."""
+        stock = getattr(self, "_stock", None)
+        if from_line > 0 and self._material is not None:
+            k = next((i for i, mv in enumerate(self._sim_moves) if mv.line_idx >= from_line),
+                     len(self._sim_moves))
+            stock = self._material.before(k) if k < len(self._material.after) else self._material.after[-1]
+        self._live_material = stock
+        self._live_pending = []
+        self._live_prev = None
+        if stock is not None:
+            self._graph.set_material(_rings(stock), [])
+
+    def live_material_sample(self, x_r: float, z: float, cutting: bool):
+        """One feedback sample. cutting: spindle turning and a feed / arc move
+        executing - only then does the swept insert remove material."""
+        from validation.material_sweep import step_hulls
+        prev, self._live_prev = self._live_prev, (x_r, z)
+        if self._live_material is None or prev is None or not cutting:
+            return
+        outline = self._graph._live_tool[0]
+        if outline is None or prev == (x_r, z):
+            return
+        self._live_pending.extend(step_hulls(self._body(outline), [prev, (x_r, z)]))
+
+    def flush_live_material(self):
+        """Apply the samples so far and redraw (called ~10x a second)."""
+        from validation.material_sweep import apply_sweeps
+        if self._live_material is None or not self._live_pending:
+            return
+        self._live_material = apply_sweeps(self._live_material, self._live_pending)
+        self._live_pending = []
+        if not self.is_playing():
+            self._graph.set_material(_rings(self._live_material))
+
+    def end_live_material(self):
+        """Back to the sim's material (the operator plays / steps the sim)."""
+        if self._live_material is None:
+            return
+        self._live_material = None
+        self._shown_material_key = None
+        self._show_sim_material()
+
     # --- Playback controls ---
 
     def _toggle_play(self):
@@ -877,6 +1196,7 @@ class SimViewerWidget(QWidget):
                 if self._material_enabled:
                     self._graph.set_material_to_stock()
             self._step_accum = 0.0
+            self.end_live_material()
             self._sim_timer.start(self._sim_speed)
             self._btn_play.setText("Pause")
             self.playing_changed.emit(True)
@@ -928,6 +1248,7 @@ class SimViewerWidget(QWidget):
         self._graph.show_all_toolpath()
         self._emit_line()
         self._update_display()
+        self._info_label.setText(self._idle_text())
         if self._material_enabled:
             self._graph.set_material_to_final()
 
@@ -991,7 +1312,8 @@ class SimViewerWidget(QWidget):
     def _update_display(self):
         if self._sim_step > 0 and self._path:
             x_r, z, move_idx = self._path[min(self._sim_step, self._path_len - 1)]
-            self._graph.set_tool_position(x_r, z)
+            mv = self._sim_moves[move_idx] if move_idx < len(self._sim_moves) else None
+            self._graph.set_tool_position(x_r, z, sim_graphic=mv.graphic if mv else None)
             # Reveal toolpath segments up to current move
             # Convert sim_moves index to tool_moves index (toolpath_segments align with tool_moves)
             toolpath_idx = self._sim_to_toolmoves.get(move_idx, None)
@@ -1022,7 +1344,9 @@ class SimViewerWidget(QWidget):
             else:
                 self._info_label.setText("")
         else:
-            self._info_label.setText("Ready")
+            self._info_label.setText(self._idle_text())
+
+        self._show_sim_material()
 
         # --- Material removal state update ---
         if self._material_enabled and self._sim_step > 0 and self._path:

@@ -34,29 +34,32 @@ def _retract(p):
 
 
 def test_od_targets_stock_then_previous_pass_plus_005_at_a_wall():
-    ps = plan_rough_links([_pass(1.9, 0.0, -1.0), _pass(1.8, 0.0, -1.0), _pass(1.7, 0.0, -1.0)],
+    ps = plan_rough_links([_pass(1.9, 0.0, -1.0), _pass(1.8, 0.0, -1.0), _pass(1.7, 0.0, -1.0),
+                           _pass(1.6, 0.0, -1.0)],
                           _Stock(2.0), False, 0.01, WALL)
-    assert [_retract(p)[0] for p in ps] == pytest.approx([2.005, 1.905, 1.805])
+    # last pass: full exit (see test_last_pass_exits_fully...)
+    assert [_retract(p)[0] for p in ps] == pytest.approx([2.005, 1.905, 1.805, 2.005])
 
 
 def test_od_free_end_uses_010_and_retracts_straight_in_x():
-    ps = plan_rough_links([_pass(1.9, 0.0, -1.0), _pass(1.8, 0.0, -1.0), _pass(1.7, 0.0, -1.0)],
+    ps = plan_rough_links([_pass(1.9, 0.0, -1.0), _pass(1.8, 0.0, -1.0), _pass(1.7, 0.0, -1.0),
+                           _pass(1.6, 0.0, -1.0)],
                           _Stock(2.0), False, 0.01, NO_WALL)
-    assert [_retract(p)[0] for p in ps] == pytest.approx([2.005, 1.91, 1.81])   # pass 1: stock + .005
+    assert [_retract(p)[0] for p in ps] == pytest.approx([2.005, 1.91, 1.81, 2.005])   # pass 1: stock + .005
     assert all(_retract(p)[1] == pytest.approx(-1.0) for p in ps)          # straight X, no wall
 
 
 def test_id_targets_pilot_minus_001_then_previous_pass_minus_005():
-    ps = plan_rough_links([_pass(1.05, 0.0, -1.0), _pass(1.10, 0.0, -1.0)],
+    ps = plan_rough_links([_pass(1.05, 0.0, -1.0), _pass(1.10, 0.0, -1.0), _pass(1.15, 0.0, -1.0)],
                           _Stock(3.0, pilot=1.0), True, 0.01, WALL)
-    assert [_retract(p)[0] for p in ps] == pytest.approx([0.999, 1.045])
-    ps = plan_rough_links([_pass(1.05, 0.0, -1.0), _pass(1.10, 0.0, -1.0)],
+    assert [_retract(p)[0] for p in ps] == pytest.approx([0.999, 1.045, 0.999])
+    ps = plan_rough_links([_pass(1.05, 0.0, -1.0), _pass(1.10, 0.0, -1.0), _pass(1.15, 0.0, -1.0)],
                           _Stock(3.0, pilot=1.0), True, 0.01, NO_WALL)
-    assert [_retract(p)[0] for p in ps] == pytest.approx([0.999, 1.04])      # free end: .010
+    assert [_retract(p)[0] for p in ps] == pytest.approx([0.999, 1.04, 0.999])      # free end: .010
 
 
 def test_45_degree_pull_off_at_a_wall_capped_by_the_pass_length():
-    ps = plan_rough_links([_pass(1.9, 0.0, -1.0), _pass(1.8, 0.0, -0.01)],
+    ps = plan_rough_links([_pass(1.9, 0.0, -1.0), _pass(1.8, 0.0, -0.01), _pass(1.7, 0.0, -0.01)],
                           _Stock(2.0), False, 0.01, WALL)
     x, z = _retract(ps[0])                    # 2.005 from 1.9: .0525 radial -> +Z .0525
     assert (x, z) == pytest.approx((2.005, -1.0 + 0.0525))
@@ -109,3 +112,15 @@ def test_traverse_with_no_covering_pass_exits_to_the_stock():
                           _Stock(2.0), False, 0.01, NO_WALL)
     a = ps[1].approach_moves
     assert a[0].x == pytest.approx(2.005)
+
+
+def test_last_pass_exits_fully_so_the_next_section_starts_clear():
+    """A neck: the last roughing pass is in the recess. Its retract goes to the
+    stock (pass-1 target), not just beyond the previous pass - the cleanup
+    approach rises along Z from there (2026-11-12: from X1.005 it ran .0225
+    into the cleanup band on the Ø1.0 section)."""
+    ps = plan_rough_links([_pass(1.3, 0.0, -1.2), _pass(1.05, 0.0, -0.4),
+                           _pass(0.95, -0.4, -0.8), _pass(0.75, -0.4, -0.8)],
+                          _Stock(1.4), False, 0.01, WALL)
+    assert _retract(ps[-1])[0] == pytest.approx(1.405)
+    assert _retract(ps[-2])[0] < 1.4                     # earlier passes keep the rule
