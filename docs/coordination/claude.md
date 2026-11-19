@@ -1,5 +1,33 @@
 # Claude status
 
+## 2026-11-19 04:52 UTC — REVIEW-READY (claims released): 1254c9b on origin/claude/run-from-open-race
+- Base main 78a3d50. NOT merged, NOT machine-tested; owner wants it off main while cutting. Rollback point
+  remains lathe-2026-11-16-working (71ce670).
+- Run From root cause fixed: live_backend.program_open now wait_complete()s and confirms stat.file is the file
+  it asked for (bounded 1 s, realpath) or returns False; _ensure_mode waits up to 1 s for an idle interpreter
+  and aborts only when task_mode == MODE_MDI, instead of aborting any non-idle interp state and so discarding
+  the just-issued open; program_run/program_step log open file + tool + G54 X/Z + tool offset + G7/G18.
+- Edit-tab segfault hardening: faulthandler.enable() in main_window.main() (next segfault leaves a Python
+  stack in /tmp/lcnc_gui.log); _highlight_editor_line no longer touches the caret and stands down while the
+  editor has focus; GCodeEditor is NoWrap; the gutter paint loop no longer measures an invalid block. The Qt
+  frame (QTextLine::textStart, null engine) is confirmed from the faulting address; the Python path that
+  reached it is NOT proven - faulthandler is what will prove it.
+- Verification, LinuxCNC down, lathe runtime: suite 1520 passed / 0 failed (main was 1509 + 11 new cases);
+  architecture check 15 errors / 130 warnings, identical to main 78a3d50 in the live checkout; git diff
+  --check clean. LiveBackend itself is untestable under the suite (conftest makes the linuxcnc binding
+  unimportable), so the new tests pin the run_tab half: tests/unit/test_run_from_open_guard.py and
+  tests/unit/test_edit_tab_playback_highlight.py.
+- Deliberately NOT changed: _state_async logs "estop_reset: command accepted (5.00 s)" after
+  linuxcnc.command().state() returns on its own 5 s timeout, so an unresponsive task reads as success (seen
+  again in the 18:25 incident). Safety-adjacent; separate change, owner's call.
+- Not established: which move tripped joint 0's -0.05 soft limit. The source program was regenerated at 17:55
+  PST, after the failures, so its line 53 at the time is gone, and nothing logged offsets or the open file.
+- Details, including the machine checks still owed:
+  session-notes/2026-11-18-run-from-open-race-and-edit-tab-crash.md.
+- Claimed paths released: hal/live_backend.py, gui/run_tab.py (untouched in the end), gui/main_window.py,
+  gui/edit_tab.py.
+- To Codex: no CAM, writer, HAL, INI, offset or tool-table changes in this branch.
+
 ## 2026-11-19 04:41 UTC — ACTIVE (claim): cold-session Run-From failure + two GUI crash fixes
 - State: active. Application branch: claude/run-from-open-race, base main 78a3d50. No HAL/INI/offsets/tool-table changes.
 - Owner symptoms (2026-11-18, lathe): (1) GUI segfault while working in the Edit tab (18:16:49 PST, kernel:
