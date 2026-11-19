@@ -23,7 +23,7 @@ import pytest  # noqa: E402
 from PyQt5.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
 from hal.factory import get_backend  # noqa: E402
-from hal.interface import InterpState, TaskMode  # noqa: E402
+from hal.interface import InterpState, TaskMode, TaskState  # noqa: E402
 
 _app = QApplication.instance() or QApplication([])
 
@@ -44,10 +44,17 @@ N100 M2
 @pytest.fixture
 def run_tab(monkeypatch):
     b = get_backend(force_mock=True)
-    b.estop_reset()
-    b.machine_on()
+    # get_backend() is a module-level singleton shared with every other test in
+    # the run, and widgets those tests left alive can still drive it. Set the
+    # state these tests need outright, then poll(): MockBackend.state returns a
+    # MachineState built by poll(), so raw attribute writes are invisible until
+    # then.
+    b._task_state = TaskState.ON
+    b._machine_on = True
     b._interp_state = InterpState.IDLE
     b._task_mode = TaskMode.MANUAL
+    b.poll()
+    assert b.state.machine_on, "fixture could not turn the mock machine on"
 
     from gui.main_window import MainWindow
     w = MainWindow()
@@ -94,3 +101,38 @@ def test_confirmed_open_runs_the_resume_file(run_tab, monkeypatch):
     assert runs == [0], "the resume program runs from its own first line"
     assert opened, "nothing was opened"
     assert opened[-1].endswith("- from line 8.ngc"), opened[-1]
+
+
+# --------------------------------------------------------------------------
+# A refusal the owner cannot see is a silent failure. Before 2026-11-19 both
+# of these paths only wrote logger.warning("program_run failed") and left the
+# screen unchanged: the green button did nothing and said nothing.
+# --------------------------------------------------------------------------
+
+def test_refused_run_from_tells_the_operator(run_tab, monkeypatch):
+    tab, b = run_tab
+    monkeypatch.setattr(b, "program_open", lambda path: True)
+    monkeypatch.setattr(b, "program_run", lambda start_line=0: False)
+    shown = []
+    monkeypatch.setattr(tab, "show_error", lambda text: shown.append(text))
+
+    tab._line_spin.setValue(80)
+    tab._on_run_from_line()
+
+    assert shown, "Run From was refused with nothing shown on screen"
+    assert "did not start" in shown[-1]
+    assert "8" in shown[-1]                      # the source line asked for
+
+
+def test_refused_cycle_start_tells_the_operator(run_tab, monkeypatch):
+    tab, b = run_tab
+    monkeypatch.setattr(b, "program_run", lambda start_line=0: False)
+    monkeypatch.setattr(b, "program_step", lambda: False)
+    shown = []
+    monkeypatch.setattr(tab, "show_error", lambda text: shown.append(text))
+
+    assert tab.cycle_start("test") == "failed"
+
+    assert shown, "Cycle Start was refused with nothing shown on screen"
+    assert "did not start the program" in shown[-1]
+    assert "lcnc_gui.log" in shown[-1]           # where to look next

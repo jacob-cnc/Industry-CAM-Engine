@@ -51,16 +51,25 @@ class FinishingParams:
 
     def __post_init__(self):
         if type(self.passes) is not int or self.passes < 1:
-            raise ValueError("Finish cutting passes must be a positive integer.")
+            raise ValueError(
+                f"Finish cutting passes must be a whole number of 1 or more. "
+                f"Got: {self.passes!r}")
         if not isfinite(self.feed) or self.feed <= 0:
-            raise ValueError("Finish feed must be positive and finite.")
+            raise ValueError(
+                f"Finish feed must be a positive number of inches per revolution. "
+                f"Got: {self.feed!r}")
 
     @staticmethod
     def doc_from_allowance(allowance: float, passes: int) -> float:
         if type(passes) is not int or passes < 1:
-            raise ValueError("Finish cutting passes must be a positive integer.")
+            raise ValueError(
+                f"Finish cutting passes must be a whole number of 1 or more. "
+                f"Got: {passes!r}")
         if not isfinite(allowance) or allowance < 0:
-            raise ValueError("Finish allowance must be finite and nonnegative.")
+            raise ValueError(
+                f"Finish allowance must be zero or a positive diameter. Got: {allowance!r}")
         if allowance == 0 and passes > 1:
-            raise ValueError("Multiple cutting passes require a positive finish allowance.")
+            raise ValueError(
+                f"{passes} finish cutting passes need material to divide between them, "
+                "but the finish allowance is zero. Set an allowance, or use 1 pass.")
         return allowance / passes

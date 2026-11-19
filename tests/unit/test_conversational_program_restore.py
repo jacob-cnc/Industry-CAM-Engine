@@ -80,7 +80,7 @@ def test_explicit_active_block_and_input_models_survive_id_collision(tab):
 
 def test_invalid_schema_does_not_replace_existing_program(tab):
     tab._load_program_data(program())
-    with pytest.raises(ValueError, match="block list"):
+    with pytest.raises(ValueError, match="list of blocks"):
         tab._load_program_data(dict(version=2, blocks={}))
     assert tab._active_block_id == 2
     assert tab._stock_diameter.value() == 4

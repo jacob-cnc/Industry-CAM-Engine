@@ -278,7 +278,11 @@ class GCodeWriter:
                 lines.extend(self._emit_contour_pass(p, "Cleanup move", is_id))
 
             if pr.cleanup_passes[-1].retract_moves is None:
-                raise ValueError("Cleanup pass is missing its planned diagonal retract.")
+                raise ValueError(
+                    f"The last of {len(pr.cleanup_passes)} cleanup pass(es) has no planned "
+                    "retract, so the writer has no safe way out of the cut. This is a "
+                    "planner fault, not a settings problem - report it with this program's "
+                    "inputs.")
             lines.append(self._line("G40", "Cutter comp off - exit"))
             for retract in pr.cleanup_passes[-1].retract_moves:
                 lines.append(self._emit_move(retract, "Diagonal retract after cleanup"))
@@ -301,11 +305,17 @@ class GCodeWriter:
             cuts = sum(not p.is_spring_pass for p in pr.finish_passes)
             springs = sum(p.is_spring_pass for p in pr.finish_passes)
             if cuts != pr.finishing_params.passes or springs != int(pr.finishing_params.spring_pass):
-                raise ValueError("Planned finish/spring counts do not match finishing parameters.")
+                raise ValueError(
+                    f"The planner produced {cuts} finish cut(s) and {springs} spring "
+                    f"pass(es), but the block asks for {pr.finishing_params.passes} and "
+                    f"{int(pr.finishing_params.spring_pass)}. Refusing to emit a program "
+                    "that does not match the finishing settings.")
             previous_cut = None
+            cut_number = 0
             for planned in pr.finish_passes:
                 if planned.is_spring_pass:
                     continue
+                cut_number += 1
                 signature = []
                 for move in planned.moves:
                     values = [move.x, move.z]
@@ -313,7 +323,13 @@ class GCodeWriter:
                         values += [move.center_i, move.center_k] if self._arc_format == "ijk" else [abs(move.radius)]
                     signature.append((move.move_type, tuple(format(value * conv, fmt) for value in values)))
                 if signature == previous_cut:
-                    raise ValueError("Finish cuts coincide at output precision; reduce cutting passes or increase finish allowance.")
+                    raise ValueError(
+                        f"Finish cutting pass {cut_number} of {cuts} lands on exactly the same "
+                        "path as the one before it once rounded to the output's decimal "
+                        f"places, so it would cut air. {pr.finishing_params.passes} passes "
+                        f"over a {pr.roughing_params.fin_allowance:.4f} allowance leaves "
+                        f"only {pr.finishing_params.doc_dia:.4f} per pass: use fewer "
+                        "passes, or a larger finish allowance.")
                 previous_cut = signature
             # Tool change needed if no cleanup handled it and tools differ
             if not pr.cleanup_passes and not same_tool:
@@ -336,7 +352,12 @@ class GCodeWriter:
             for pass_number, p in enumerate(pr.finish_passes):
                 if pass_number > 0:
                     if not p.approach_moves:
-                        raise ValueError("Finish pass is missing its planned retract/approach link.")
+                        raise ValueError(
+                            f"Finish pass {pass_number + 1} of {len(pr.finish_passes)} has "
+                            "no planned retract/approach link from the pass before it, so "
+                            "the writer has no safe path between them. This is a planner "
+                            "fault, not a settings problem - report it with this program's "
+                            "inputs.")
                     lines.append(self._line("G40", "Cutter comp off - exit"))
                     for link in p.approach_moves:
                         lines.append(self._emit_move(link, "Finish retract/approach"))
@@ -347,7 +368,11 @@ class GCodeWriter:
 
         if pr.finish_passes:
             if pr.finish_passes[-1].retract_moves is None:
-                raise ValueError("Finish pass is missing its planned diagonal retract.")
+                raise ValueError(
+                    f"The last of {len(pr.finish_passes)} finish/spring pass(es) has no "
+                    "planned retract, so the writer has no safe way out of the final cut. "
+                    "This is a planner fault, not a settings problem - report it with this "
+                    "program's inputs.")
             lines.append(self._line("G40", "Cutter comp off - exit"))
             for retract in pr.finish_passes[-1].retract_moves:
                 lines.append(self._emit_move(retract, "Diagonal retract after final finish/spring"))

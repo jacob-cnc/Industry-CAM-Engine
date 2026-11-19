@@ -85,5 +85,5 @@ def test_writer_refuses_missing_terminal_retract():
     p, s, r, f = build_from_fields(**fields)
     plan = execute(p, s, fields["tool_def"], r, f).plan_result
     broken = replace(plan, finish_passes=[replace(plan.finish_passes[0], retract_moves=None)])
-    with pytest.raises(ValueError, match="planned diagonal retract"):
+    with pytest.raises(ValueError, match="no planned retract"):
         GCodeWriter().write(broken)

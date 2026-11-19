@@ -54,7 +54,7 @@ def test_entry_fits_linuxcnc_full_line_and_rewrite_buffer(tmp_path):
     before = path.read_bytes()
     oversized = tool()
     oversized.description = "x" * 95
-    with pytest.raises(ValueError, match="256-byte"):
+    with pytest.raises(ValueError, match="stores only 255"):
         save_tool_table([oversized], str(path))
     assert path.read_bytes() == before
 

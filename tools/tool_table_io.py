@@ -61,8 +61,13 @@ def serialize_tool(tool: ToolCardData) -> str:
     Returns:
         A single line string in .tbl format (no trailing newline).
     """
-    if tool.tool_number < 1 or tool.orientation not in range(1, 10):
-        raise ValueError("Tool number must be positive and orientation must be Q1 through Q9.")
+    if tool.tool_number < 1:
+        raise ValueError(
+            f"Tool number must be 1 or greater; this tool has T{tool.tool_number}.")
+    if tool.orientation not in range(1, 10):
+        raise ValueError(
+            f"T{tool.tool_number}: orientation must be Q1 through Q9; got "
+            f"Q{tool.orientation}. Set the tip orientation on the tool card.")
     # Only D is a diameter; X is a radius machine-unit offset.
     x_applied = tool.x_offset + tool.x_wear
     nose_diameter = tool.nose_radius * 2.0
@@ -84,11 +89,22 @@ def serialize_tool(tool: ToolCardData) -> str:
         + (f"ic={tool.ic:.4f}|" if tool.ic > 0 else "")
         + f"desc={quote(tool.description, safe=' ')}"
     )
-    if not all(math.isfinite(v) for v in (x_applied, tool.z_offset + tool.z_wear,
-            nose_diameter, tool.front_angle, tool.back_angle, tool.x_wear, tool.z_wear)):
-        raise ValueError("Tool table values must be finite.")
-    if len(metadata.encode("utf-8")) > 200:
-        raise ValueError("Tool metadata is too long for a reliable LinuxCNC comment round-trip.")
+    _fields = {
+        "X offset+wear": x_applied, "Z offset+wear": tool.z_offset + tool.z_wear,
+        "nose diameter D": nose_diameter, "front angle I": tool.front_angle,
+        "back angle J": tool.back_angle, "X wear": tool.x_wear, "Z wear": tool.z_wear,
+    }
+    _bad = [f"{name}={value}" for name, value in _fields.items() if not math.isfinite(value)]
+    if _bad:
+        raise ValueError(
+            f"T{tool.tool_number}: these tool values are not real numbers: "
+            + ", ".join(_bad) + ". Correct them on the tool card before saving.")
+    _meta_len = len(metadata.encode("utf-8"))
+    if _meta_len > 200:
+        raise ValueError(
+            f"T{tool.tool_number}: the description/insert/ISO text needs {_meta_len} bytes "
+            "but only 200 fit in a LinuxCNC comment. Shorten the description by about "
+            f"{_chars(_meta_len - 200)}.")
 
     # Assemble the line
     line = (
@@ -105,8 +121,13 @@ def serialize_tool(tool: ToolCardData) -> str:
         f"D{nose_diameter:+f} X{x_applied:+f} Z{tool.z_offset + tool.z_wear:+f} "
         f"I{tool.front_angle:+f} J{tool.back_angle:+f} Q{tool.orientation} ;{metadata}\n"
     )
-    if max(len((line + "\n").encode("utf-8")), len(rewritten.encode("utf-8"))) >= 256:
-        raise ValueError("Tool entry exceeds LinuxCNC's 256-byte line/rewrite limit; shorten its description.")
+    _line_len = max(len((line + "\n").encode("utf-8")), len(rewritten.encode("utf-8")))
+    if _line_len >= 256:
+        raise ValueError(
+            f"T{tool.tool_number}: the tool table row needs {_line_len} bytes including its "
+            "line ending, but LinuxCNC stores only 255 and would truncate the rest the next "
+            "time it rewrites the table (G10 L1), corrupting the row. Shorten the "
+            f"description by about {_chars(_line_len - 255)}.")
     return line
 
 
@@ -129,26 +150,51 @@ def deserialize_tool(line: str, *, unversioned_x_units: str | None = None) -> To
     for token in numeric.split():
         match = re.fullmatch(r"([A-Z])([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][+-]?\d+)?)", token, re.I)
         if not match:
-            raise ValueError(f"Malformed tool table token: {token!r}")
+            raise ValueError(
+                f"{token!r} is not a tool table word - expected a letter followed by a "
+                "number, like X-1.234 or Q3.")
         key, value = match.group(1).upper(), float(match.group(2))
-        if key in words or not math.isfinite(value):
-            raise ValueError("Duplicate or non-finite tool table field.")
+        if key in words:
+            raise ValueError(
+                f"{key} appears twice in this row ({key}{_num(words[key])} and "
+                f"{key}{_num(value)}); LinuxCNC would use only one of them.")
+        if not math.isfinite(value):
+            raise ValueError(f"{token!r} is not a real number.")
         if key not in "TPXYZABCUVWDIJQ":
-            raise ValueError(f"Unsupported tool table field: {key}")
+            raise ValueError(
+                f"{key} is not a LinuxCNC tool table word (expected one of "
+                "T P X Y Z A B C U V W D I J Q).")
         words[key] = value
-    if "T" not in words or words["T"] < 1 or not words["T"].is_integer():
-        raise ValueError("Tool table row requires a positive integer T number.")
-    if any(value != 0 for key, value in words.items() if key in "YABCUVW"):
-        raise ValueError("This two-axis tool editor cannot preserve nonzero extra-axis offsets.")
+    if "T" not in words:
+        raise ValueError("This row has no T word, so there is no tool number to load.")
+    if words["T"] < 1 or not words["T"].is_integer():
+        raise ValueError(
+            f"T{_num(words['T'])} is not a usable tool number - it must be a whole "
+            "number of 1 or greater.")
+    _extra = sorted(f"{key}{_num(value)}" for key, value in words.items()
+                    if key in "YABCUVW" and value != 0)
+    if _extra:
+        raise ValueError(
+            f"T{int(words['T'])} has offsets on axes this two-axis lathe editor cannot "
+            f"keep ({', '.join(_extra)}); saving would silently drop them. Edit this row "
+            "in a text editor, or zero those words if the machine does not use them.")
     if words.get("P", words["T"]) != words["T"]:
-        raise ValueError("This QCTP editor requires pocket P equal to tool T; refusing to remap pockets.")
+        raise ValueError(
+            f"T{int(words['T'])} sits in pocket P{_num(words['P'])}. This QCTP editor "
+            "requires P to equal T and will not remap pockets; set "
+            f"P{int(words['T'])} for this tool.")
     if words.get("Q", 0) not in range(1, 10):
-        raise ValueError("This lathe editor requires an orientation Q1 through Q9.")
+        _q = f"Q{_num(words['Q'])}" if "Q" in words else "no Q word"
+        raise ValueError(
+            f"T{int(words['T'])} has {_q}; a lathe tool needs an orientation of Q1 "
+            "through Q9 (see the orientation diagram on the Tools tab).")
     metadata = _parse_metadata(comment.strip())
     version = metadata.get("ice")
     applied_x, applied_z = words.get("X", 0.0), words.get("Z", 0.0)
     if unversioned_x_units not in (None, "radius", "diameter"):
-        raise ValueError("Unversioned X units must be explicitly radius or diameter.")
+        raise ValueError(
+            f"unversioned_x_units={unversioned_x_units!r} is not a choice; pass "
+            "'radius' or 'diameter' to say how an unversioned table's X is measured.")
     if version is None and applied_x != 0:
         if unversioned_x_units is None:
             raise LegacyToolTableError(
@@ -159,13 +205,28 @@ def deserialize_tool(line: str, *, unversioned_x_units: str | None = None) -> To
         if unversioned_x_units == "diameter":
             applied_x /= 2.0
     if version not in (None, "2"):
-        raise ValueError(f"Unsupported tool metadata version: {version}")
-    if version and not all(key in metadata for key in ("xwear", "zwear")):
-        raise ValueError("Tool wear metadata is incomplete; refusing to guess the geometry/wear split.")
-    x_wear = float(metadata["xwear"]) if version else 0.0
-    z_wear = float(metadata["zwear"]) if version else 0.0
-    if not math.isfinite(x_wear) or not math.isfinite(z_wear):
-        raise ValueError("Wear values must be finite.")
+        raise ValueError(
+            f"T{int(words['T'])} was written by a newer tool editor (metadata ice={version}, "
+            "this one reads ice=2). Update the application rather than loading this table.")
+    if version:
+        _missing = [key for key in ("xwear", "zwear") if key not in metadata]
+        if _missing:
+            raise ValueError(
+                f"T{int(words['T'])} is missing its {' and '.join(_missing)} metadata, so the "
+                "row's X/Z cannot be split back into geometry and wear. Re-enter this tool's "
+                "wear on the Tools tab, or delete the ice=2 comment to load X/Z as pure "
+                "geometry with zero wear.")
+    try:
+        x_wear = float(metadata["xwear"]) if version else 0.0
+        z_wear = float(metadata["zwear"]) if version else 0.0
+        bad_wear = not (math.isfinite(x_wear) and math.isfinite(z_wear))
+    except ValueError:
+        bad_wear = True
+    if bad_wear:
+        raise ValueError(
+            f"T{int(words['T'])} has unusable wear metadata (xwear="
+            f"{metadata.get('xwear')!r}, zwear={metadata.get('zwear')!r}); both must be "
+            "real numbers. Re-enter this tool's wear on the Tools tab.")
     return ToolCardData(
         tool_number=int(words["T"]),
         tool_type=_KEY_TO_TYPE.get(metadata.get("type", ""), "Turning RH"),
@@ -201,6 +262,16 @@ def _parse_metadata(comment: str) -> dict:
     return result
 
 
+def _chars(n: int) -> str:
+    """'1 character' / '4 characters' - error text the owner reads should read."""
+    return f"{n} character" + ("" if n == 1 else "s")
+
+
+def _num(value: float) -> str:
+    """Format a tool table number the way the file shows it (no trailing .0)."""
+    return f"{value:g}"
+
+
 def _safe_float(value: str, default: float) -> float:
     """Convert a string to float, returning default on failure."""
     try:
@@ -223,8 +294,17 @@ def save_tool_table(tools: List[ToolCardData], path: str) -> None:
         tools: List of ToolCardData instances to save.
         path: Destination file path.
     """
-    if len({tool.tool_number for tool in tools}) != len(tools):
-        raise ValueError("Duplicate tool numbers are not allowed.")
+    _seen, _dupes = set(), []
+    for tool in tools:
+        if tool.tool_number in _seen and tool.tool_number not in _dupes:
+            _dupes.append(tool.tool_number)
+        _seen.add(tool.tool_number)
+    if _dupes:
+        raise ValueError(
+            "Two tools cannot share a number: "
+            + ", ".join(f"T{n}" for n in sorted(_dupes))
+            + f" {'appears' if len(_dupes) == 1 else 'appear'} more than once. "
+            "Renumber or delete the duplicate before saving.")
     lines = [serialize_tool(tool) for tool in tools]
     content = "\n".join(lines) + "\n" if lines else ""
 
@@ -261,19 +341,29 @@ def load_tool_table(path: str, *, unversioned_x_units: str | None = None) -> Lis
     """
     tools: List[ToolCardData] = []
     with open(path, "r", encoding="utf-8") as f:
-        for line in f:
+        for number, line in enumerate(f, start=1):
             stripped = line.strip()
             if not stripped or stripped.startswith(";"):
                 continue
             try:
                 tool = deserialize_tool(stripped, unversioned_x_units=unversioned_x_units)
                 if any(existing.tool_number == tool.tool_number for existing in tools):
-                    raise ValueError(f"Duplicate tool number T{tool.tool_number}.")
+                    raise ValueError(
+                        f"T{tool.tool_number} is already defined earlier in this file; "
+                        "two rows cannot describe the same tool.")
                 tools.append(tool)
-            except (ValueError, KeyError):
-                # Never silently drop a real tool or an ambiguous legacy row.
+            except (ValueError, KeyError) as exc:
+                # Never silently drop a real tool or an ambiguous legacy row. Say which
+                # row of which file was rejected - the message is all the owner gets.
                 if re.match(r"T\d", stripped, re.I):
-                    raise
+                    # Keep LegacyToolTableError so callers can offer the units choice;
+                    # anything else reads better to the owner as a plain ValueError.
+                    kind = (LegacyToolTableError
+                            if isinstance(exc, LegacyToolTableError) else ValueError)
+                    raise kind(
+                        f"{os.path.basename(path)} line {number} was not loaded: {exc}\n\n"
+                        f"  {stripped}"
+                    ) from exc
                 continue
     return tools
 

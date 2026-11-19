@@ -128,13 +128,31 @@ def build_zones(
     keep_faces = keep_zone_face.faces() if hasattr(keep_zone_face, 'faces') else []
 
     if not stock_faces or not keep_faces:
-        raise RuntimeError("Zone construction failed: could not extract faces for boolean operation")
+        missing = " and ".join(
+            name for name, got in (("the stock area to rough", stock_faces),
+                                   ("the finish-allowance keep zone", keep_faces))
+            if not got)
+        raise RuntimeError(
+            f"The geometry kernel produced no face for {missing}. With stock "
+            f"\u00d8{stock.diameter:.4f} from Z{stock.z_start:+.4f} to "
+            f"Z{stock.physical_z_end:+.4f} (pilot \u00d8{stock.pilot_hole_dia:.4f}, finish "
+            f"allowance {roughing_params.fin_allowance:.4f}), this usually means the "
+            "profile leaves nothing to cut, or the finish allowance is larger than the "
+            "material available. Check the stock size and the profile against each other.")
 
     from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
     cut_op = BRepAlgoAPI_Cut(stock_faces[0].wrapped, keep_faces[0].wrapped)
     cut_op.Build()
+    # Architecture rule: this failure must stay a hard stop. Never substitute an
+    # approximate material-to-rough zone - every pass would be planned against it.
     if not cut_op.IsDone():
-        raise RuntimeError("Boolean subtraction (stock - keep_zone) failed. Do NOT create a fallback.")
+        raise RuntimeError(
+            "The geometry kernel could not subtract the finished part from the stock, "
+            f"so there is no material-to-rough zone. Stock \u00d8{stock.diameter:.4f} "
+            f"from Z{stock.z_start:+.4f} to Z{stock.physical_z_end:+.4f}, finish "
+            f"allowance {roughing_params.fin_allowance:.4f}. No program can be "
+            "generated from this input - check the profile for self-intersections or "
+            "segments outside the stock.")
     
     from build123d import Face as B3dFace
     material_to_rough_face = B3dFace(cut_op.Shape())
@@ -335,7 +353,9 @@ def _build_face_from_coords(coords: List[dict], profile: ClosedProfile, *, close
     with BuildSketch() as sketch:
         with BuildLine() as contour:
             if not coords:
-                raise ValueError("Empty coordinate list for face construction")
+                raise ValueError(
+                    "No profile coordinates were given, so there is no shape to build. "
+                    "Add at least one profile segment.")
 
             for i in range(len(coords) if closed else len(coords) - 1):
                 edge_from_coords(coords[i], coords[(i + 1) % len(coords)])
