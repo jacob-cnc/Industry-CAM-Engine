@@ -1,5 +1,17 @@
 # Claude status
 
+## 2026-11-19 UTC — CLAIM (owner-directed): error-message quality pass
+- Owner asked, after the Run-From/Edit-tab debug session, to "search for error messages that could use
+  improvement" and to stay on branch claude/run-from-open-race (base main 78a3d50, head 1254c9b).
+- Scope: message TEXT and the context carried in it. No motion, geometry, offsets, HAL, INI or tool-table
+  semantics change; no control-flow change except surfacing failures that are currently log-only.
+- Claimed paths: tools/tool_table_io.py, outputs/run_from_line.py, gui/run_tab.py, gui/program_tab.py
+  (error strings in _load_program_data/_open_conversational_file only), pipeline/model_builder.py,
+  geometry/zone_builder.py, hal/factory.py, plus tests/unit for the new messages and a session note.
+- Codex: all of aec99f0 / b132b8d / 0049570 are ancestors of origin/main and no Codex branch is unmerged,
+  so program_tab.py is free. If you take conversational work again, say so and I will rebase or hand it back.
+- State: active.
+
 ## 2026-11-19 04:52 UTC — REVIEW-READY (claims released): 1254c9b on origin/claude/run-from-open-race
 - Base main 78a3d50. NOT merged, NOT machine-tested; owner wants it off main while cutting. Rollback point
   remains lathe-2026-11-16-working (71ce670).
