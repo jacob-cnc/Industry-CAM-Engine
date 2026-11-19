@@ -1,16 +1,40 @@
 # Claude status
 
-## 2026-11-19 UTC — CLAIM (owner-directed): error-message quality pass
-- Owner asked, after the Run-From/Edit-tab debug session, to "search for error messages that could use
-  improvement" and to stay on branch claude/run-from-open-race (base main 78a3d50, head 1254c9b).
-- Scope: message TEXT and the context carried in it. No motion, geometry, offsets, HAL, INI or tool-table
-  semantics change; no control-flow change except surfacing failures that are currently log-only.
-- Claimed paths: tools/tool_table_io.py, outputs/run_from_line.py, gui/run_tab.py, gui/program_tab.py
-  (error strings in _load_program_data/_open_conversational_file only), pipeline/model_builder.py,
-  geometry/zone_builder.py, hal/factory.py, plus tests/unit for the new messages and a session note.
-- Codex: all of aec99f0 / b132b8d / 0049570 are ancestors of origin/main and no Codex branch is unmerged,
-  so program_tab.py is free. If you take conversational work again, say so and I will rebase or hand it back.
-- State: active.
+## 2026-11-19 UTC — REVIEW-READY (claims released): a749104 on origin/claude/run-from-open-race
+- Error-message quality pass, owner-directed, on top of 1254c9b. Message TEXT plus the context carried
+  in it. No motion, geometry, offsets, HAL, INI or tool-table semantics changed.
+- ONE behaviour change, deliberate: gui/run_tab.py refused Cycle Start and refused Run From used to end
+  with only logger.warning("program_run failed") - the owner pressed the button and saw nothing at all.
+  Both now show_error() and log task_mode/interp_state. Same failure shape as the 2026-11-18 incident.
+- tools/tool_table_io.py: load_tool_table re-raised a row error with NO row indication, so a hand-edited
+  tool.tbl produced only "Duplicate or non-finite tool table field." Now names the file, the line number
+  as a text editor counts it, the reason, and the row verbatim; every field check names the tool and the
+  value. LegacyToolTableError still propagates as itself. Also fixed: corrupt wear metadata escaped as a
+  bare float() message because float() ran before the isfinite check.
+- outputs/run_from_line.py: "Start line is outside the program" covered both line 1 and past-the-end and
+  was false for line 1. Split; canned-cycle and unclosed-o refusals name the cycle/o-number and its line
+  (new ModalState.motion_line, o_stack carries the line); new describe_missing_n() gives the N range and
+  nearest blocks. gui/program_tab.py: JSONDecodeError line/column/reason reported instead of discarded;
+  schema checks name the block and value. Plus pipeline/model_builder.py, geometry/zone_builder.py
+  ("Do NOT create a fallback" moved from owner-facing text to a code comment with its reason),
+  outputs/gcode_writer.py, models/params.py, hal/factory.py.
+- Checks: 1539 passed / 0 failed on the lathe runtime, LinuxCNC down. Architecture 15 errors / 130
+  warnings, warning list byte-identical to the pre-change tree. diff --check clean. Every reworded path
+  fired once and read (34 engine/IO + 14 GUI); that caught two defects in these edits the suite missed.
+- New tests/unit/test_error_message_context.py (17) pins the facts into the text; +2 cases for the
+  formerly silent refusals. Eight existing raises(match=) regexes retargeted. test_run_from_open_guard's
+  fixture was order-dependent on the shared mock singleton (machine_on() only works from ESTOP_RESET and
+  state is built by poll()); fixed.
+- Codex: NOTE if you touch these files. gui/program_tab.py error strings in _load_program_data and
+  _open_conversational_file changed; your conversational-restore logic (aec99f0) is untouched otherwise.
+  If you have tests asserting on old wording in tool_table_io, run_from_line, model_builder, zone_builder,
+  gcode_writer or params, they will need the new text. Claims released.
+- NOT done, deliberately: hal/factory.py still falls back to MockBackend with only a log line, so a
+  fallback caused by NML being down rather than Mesa is not announced on screen; and _state_async still
+  logs a 5 s timeout as "command accepted". Both are behaviour changes and safety-adjacent - owner's call.
+- No machine verification. Nothing here changes motion. Session note:
+  session-notes/2026-11-19-error-message-quality-pass.md.
+- State: idle. Branch claude/run-from-open-race now holds 1254c9b + a749104, base main 78a3d50.
 
 ## 2026-11-19 04:52 UTC — REVIEW-READY (claims released): 1254c9b on origin/claude/run-from-open-race
 - Base main 78a3d50. NOT merged, NOT machine-tested; owner wants it off main while cutting. Rollback point
