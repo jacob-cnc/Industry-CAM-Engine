@@ -592,6 +592,14 @@ def _show_at_live_size(window: QMainWindow):
 
 def main():
     """Launch the Industry CAM Engine GUI application."""
+    # A segfault inside Qt otherwise leaves nothing at all in the log (lathe
+    # 2026-11-18: the GUI died in QTextLine::textStart with a null engine
+    # while the Edit tab was in use, and only the kernel noticed).
+    # faulthandler prints the Python stack to stderr, which display_gui.sh
+    # appends to /tmp/lcnc_gui.log.
+    import faulthandler
+    faulthandler.enable()
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",

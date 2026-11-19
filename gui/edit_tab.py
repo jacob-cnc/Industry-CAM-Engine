@@ -236,6 +236,10 @@ class GCodeEditor(QPlainTextEdit):
         self._update_line_number_area_width(0)
         self._highlight_current_line()
 
+        # One block == one visual row: the line-number gutter and the sim
+        # playback scroll both count blocks, and wrapped G-code is unreadable.
+        self.setLineWrapMode(QPlainTextEdit.NoWrap)
+
         # Configure editor
         font = QFont(FONTS["mono_family"], FONTS["code_size"])
         font.setStyleHint(QFont.Monospace)
@@ -332,6 +336,8 @@ class GCodeEditor(QPlainTextEdit):
                     number,
                 )
             block = block.next()
+            if not block.isValid():
+                break          # past the last block: nothing left to measure
             top = bottom
             bottom = top + int(self.blockBoundingRect(block).height())
             block_number += 1
@@ -960,9 +966,22 @@ class EditTab(QWidget):
     # ------------------------------------------------------------------
 
     def _highlight_editor_line(self, line_idx: int):
-        """Highlight a line in the editor during sim playback and center it."""
+        """Highlight a line in the editor during sim playback and scroll to it.
+
+        Playback is driven by a QTimer, so this can fire while the operator is
+        typing. It must therefore never touch the text cursor: setTextCursor()
+        moved the caret out from under the typist, and driving the cursor and
+        centering machinery while the document is being edited is how Qt ends
+        up laying out a line that does not exist (lathe 2026-11-18: the GUI
+        segfaulted in QTextLine::textStart with a null text engine while the
+        Edit tab was in use). Scroll the viewport instead, and stand down
+        entirely while the editor has focus.
+        """
         from PyQt5.QtGui import QTextCursor, QColor, QTextCharFormat
         from PyQt5.QtWidgets import QTextEdit
+
+        if self._editor.hasFocus():
+            return
 
         doc = self._editor.document()
         if line_idx < 0 or line_idx >= doc.blockCount():
@@ -970,6 +989,10 @@ class EditTab(QWidget):
             return
 
         block = doc.findBlockByNumber(line_idx)
+        if not block.isValid():
+            self._editor.setExtraSelections([])
+            return
+
         cursor = QTextCursor(block)
         cursor.movePosition(QTextCursor.EndOfBlock, QTextCursor.KeepAnchor)
 
@@ -985,10 +1008,12 @@ class EditTab(QWidget):
 
         self._editor.setExtraSelections([selection])
 
-        # Keep highlighted line centered
-        scroll_cursor = QTextCursor(block)
-        self._editor.setTextCursor(scroll_cursor)
-        self._editor.centerCursor()
+        # Centre the line without moving the operator's caret. With NoWrap the
+        # vertical scroll bar counts blocks, so the target is a block number.
+        bar = self._editor.verticalScrollBar()
+        spacing = max(1, self._editor.fontMetrics().lineSpacing())
+        visible_rows = max(1, self._editor.viewport().height() // spacing)
+        bar.setValue(max(0, min(bar.maximum(), line_idx - visible_rows // 2)))
 
     def toggle_editor(self):
         """Toggle the editor panel between collapsed and visible (for external use)."""
