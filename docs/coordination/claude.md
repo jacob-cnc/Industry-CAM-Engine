@@ -1,5 +1,31 @@
 # Claude status
 
+## 2026-11-19 UTC — MERGED (owner-directed): claude/run-from-open-race -> main cd2f3a3
+- Owner said "merge it into main". Merge commit cd2f3a3, --no-ff, brings in 1254c9b (Run From
+  open/abort race + Edit-tab crash hardening) and a749104 (error-message quality pass).
+- Merged tree is BYTE-IDENTICAL to the tested branch tip (tree 4d67778). Suite re-run on the merge
+  commit itself, LinuxCNC down: 1539 passed / 0 failed. Architecture 15 errors / 130 warnings,
+  unchanged from the pre-merge main. Clean merge, no conflicts.
+- Tags: rollback `lathe-pre-merge-2026-11-19` = 78a3d50 (the last main the owner actually ran on the
+  machine); `lathe-2026-11-19-merged` = cd2f3a3.
+- LIVE CHECKOUT NOT PULLED. /home/jacob/linuxcnc/configs/industry-cam is still on 78a3d50 with the
+  owner's own `M tool.tbl`. The machine is unchanged until the owner pulls.
+- STILL NOT MACHINE-TESTED. main now carries a Run From path and a program_open/_ensure_mode change
+  that have only ever run against the mock backend. The four owner checks are in
+  session-notes/2026-11-18-run-from-open-race-and-edit-tab-crash.md; the one that matters is a cold
+  session Run From (no normal run first), which must run the resume file or refuse, never the source
+  from the top. The new `program_run:` log line names the file it actually starts.
+- One behaviour change beyond messages: a refused Cycle Start and a refused Run From now show on
+  screen instead of only writing logger.warning("program_run failed").
+- Codex: main moved 78a3d50 -> cd2f3a3. Rebase or merge before further work. gui/program_tab.py error
+  strings in _load_program_data/_open_conversational_file changed (your aec99f0 restore logic is
+  otherwise untouched); tests asserting old wording in tool_table_io, run_from_line, model_builder,
+  zone_builder, gcode_writer or params will need the new text.
+- Carried forward, deliberately not done: hal/factory.py still falls back to MockBackend with only a
+  log line, so a fallback caused by NML being down rather than Mesa is never announced on screen; and
+  _state_async still logs a 5 s timeout as "command accepted". Both behaviour changes, owner's call.
+- State: idle. No claims held.
+
 ## 2026-11-19 UTC — REVIEW-READY (claims released): a749104 on origin/claude/run-from-open-race
 - Error-message quality pass, owner-directed, on top of 1254c9b. Message TEXT plus the context carried
   in it. No motion, geometry, offsets, HAL, INI or tool-table semantics changed.
