@@ -44,12 +44,12 @@ def test_bore_depth_is_derived_and_stock_behind_it_remains_protected(mode, strat
 
 
 def test_stock_back_face_cannot_be_in_front_of_cutting_depth():
-    with pytest.raises(ValueError, match="Stock back face"):
+    with pytest.raises(ValueError, match="stock back face"):
         build_from_fields(**bore_fields(stock_back_z=-0.4))
 
 
 def test_stock_back_face_must_be_finite():
-    with pytest.raises(ValueError, match="finite"):
+    with pytest.raises(ValueError, match="real number"):
         build_from_fields(**bore_fields(stock_back_z=float("nan")))
 
 

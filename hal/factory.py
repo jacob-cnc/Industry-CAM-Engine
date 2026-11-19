@@ -48,11 +48,19 @@ def get_backend(force_mock: bool = False) -> HALBackend:
             _backend_instance = backend
             return _backend_instance
         else:
-            logger.warning("HAL: linuxcnc module found but not connected, falling back to MockBackend")
+            logger.warning(
+                "HAL: LinuxCNC is installed but this GUI could not attach to it "
+                "(no NML connection). Running on simulated data - the machine will "
+                "NOT move and the position shown is not real.")
     except ImportError:
-        logger.info("HAL: linuxcnc module not available (Windows?), using MockBackend")
+        logger.info(
+            "HAL: no linuxcnc Python module on this system, so this is a development "
+            "session on simulated data - no machine control.")
     except Exception as e:
-        logger.warning("HAL: Failed to connect to LinuxCNC (%s), using MockBackend", e)
+        logger.warning(
+            "HAL: attaching to LinuxCNC failed (%s: %s). Running on simulated data - "
+            "the machine will NOT move and the position shown is not real.",
+            type(e).__name__, e)
 
     from hal.mock_backend import MockBackend
     _backend_instance = MockBackend()

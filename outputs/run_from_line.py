@@ -89,6 +89,7 @@ def _gname(v: float) -> str:
 class ModalState:
     """Modal state the interpreter holds before a given line."""
     motion: Optional[float] = None
+    motion_line: Optional[int] = None    # 1-based line that last set `motion`
     groups: Dict[str, float] = field(default_factory=dict)
     feed: Optional[float] = None
     speed: Optional[float] = None
@@ -134,6 +135,40 @@ def has_n_numbers(text: str) -> bool:
     return any(_N_RE.match(l) for l in text.splitlines())
 
 
+def n_numbers(text: str) -> List[int]:
+    """Every block number in the program, in the order the lines appear."""
+    out = []
+    for line in text.splitlines():
+        m = _N_RE.match(line)
+        if m:
+            out.append(int(m.group(1)))
+    return out
+
+
+def describe_missing_n(text: str, n: int) -> str:
+    """Explain that block N``n`` is absent, naming the blocks around it.
+
+    The owner types a block number from a printout or the preview; when it is
+    not in the file, the useful answer is which numbers are.
+    """
+    present = n_numbers(text)
+    if not present:
+        return f"This program has no N block numbers at all, so N{n} cannot be found."
+    low, high = min(present), max(present)
+    below = max((v for v in present if v < n), default=None)
+    above = min((v for v in present if v > n), default=None)
+    if below is not None and above is not None:
+        near = f" The nearest blocks are N{below} and N{above}."
+    elif below is not None:
+        near = f" The last block is N{below}."
+    elif above is not None:
+        near = f" The first block is N{above}."
+    else:
+        near = ""
+    return (f"Block N{n} is not in this program. It numbers blocks N{low} "
+            f"through N{high}.{near}")
+
+
 def find_n_line(text: str, n: int) -> Optional[int]:
     """0-based index of the first line whose block number is N``n``."""
     for i, line in enumerate(text.splitlines()):
@@ -151,7 +186,7 @@ def scan_modal_state(lines: List[str], stop: int) -> Tuple[ModalState, List[str]
     Raises RunFromError for constructs we cannot restore.
     """
     st = ModalState()
-    o_stack: List[str] = []
+    o_stack: List[tuple] = []        # (o-number, line number it opened on)
     block: List[str] = []           # current o-if block being captured
     last_check: List[str] = []
     for i in range(stop):
@@ -165,7 +200,7 @@ def scan_modal_state(lines: List[str], stop: int) -> Tuple[ModalState, List[str]
         if om:
             kw = om.group(2)
             if kw == "IF":
-                o_stack.append(om.group(1))
+                o_stack.append((om.group(1), i + 1))
                 block = [raw]
             elif kw == "ENDIF":
                 if not o_stack:
@@ -203,7 +238,11 @@ def scan_modal_state(lines: List[str], stop: int) -> Tuple[ModalState, List[str]
         if any(l == "M" and float(v) == 6.0 for l, v in _WORD_RE.findall(text)):
             last_check = []          # a check only counts after the latest M6
     if o_stack:
-        raise RunFromError("The start line is inside an O-word block.")
+        label, opened_at = o_stack[0]
+        raise RunFromError(
+            f"The start line is inside the o{label} if-block that opens on line "
+            f"{opened_at} and never closes before it. Start at or before line "
+            f"{opened_at}, or after that block's endif.")
     return st, last_check
 
 
@@ -215,13 +254,23 @@ def build_resume_program(text: str, start_index: int,
     program's tool the preamble skips M6 (still applies G43).
     """
     lines = text.splitlines()
-    if not 0 < start_index < len(lines):
-        raise RunFromError("Start line is outside the program.")
+    if start_index <= 0:
+        raise RunFromError(
+            "Line 1 is the beginning of the program - press Cycle Start to run it "
+            "from the top instead of running from a line.")
+    if start_index >= len(lines):
+        raise RunFromError(
+            f"Line {start_index + 1} is past the end of this program, which has "
+            f"{len(lines)} lines.")
     start_text = _strip(lines[start_index])
     if not start_text or start_text == "%":
-        raise RunFromError("The start line is blank or a comment - choose a line with a block.")
+        raise RunFromError(
+            f"Line {start_index + 1} is blank or only a comment - there is nothing to "
+            "run from. Choose a line that has a G-code block on it.")
     if _O_RE.match(start_text):
-        raise RunFromError("Start on a G-code block, not an O-word line.")
+        raise RunFromError(
+            f"Line {start_index + 1} is an O-word line, not a motion block. Start on "
+            "the G-code block you want to cut from.")
 
     st, tool_check = scan_modal_state(lines, start_index)
     notes: List[str] = []
@@ -240,7 +289,12 @@ def build_resume_program(text: str, start_index: int,
             f"{_NO_START_MOTION[st.motion]} is the active motion mode - start "
             "before the threading/synchronised block.")
     if st.motion is not None and (80.0 < st.motion <= 89.0 or st.motion == 73.0):
-        raise RunFromError("A canned cycle is active at this line - start at its first block.")
+        _where = (f", commanded on line {st.motion_line}"
+                  if st.motion_line else "")
+        raise RunFromError(
+            f"The {_gname(st.motion)} canned cycle is still active at this line{_where}. "
+            "A cycle repeats from the position it was left in, so start at its first "
+            f"block (the line with {_gname(st.motion)} on it) or after its G80.")
 
     start_words = _WORD_RE.findall(start_text)
     start_g = [float(v) for l, v in start_words if l == "G"]
@@ -353,6 +407,7 @@ def _apply_line(st: ModalState, text: str, idx: int) -> None:
     for gv in gs:
         if gv in _MOTION:
             st.motion = gv
+            st.motion_line = idx + 1
             continue
         for name, members in _GROUPS.items():
             if gv in members:

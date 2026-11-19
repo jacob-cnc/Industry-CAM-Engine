@@ -93,12 +93,12 @@ def test_one_finish_cut_preserves_existing_final_contour(spring):
 
 @pytest.mark.parametrize("passes", [0, -1, 1.5, True])
 def test_invalid_cutting_counts_are_rejected(passes):
-    with pytest.raises(ValueError, match="positive integer"):
+    with pytest.raises(ValueError, match="whole number of 1 or more"):
         FinishingParams(passes=passes)
 
 
 def test_zero_allowance_does_not_invent_multiple_cutting_passes():
-    with pytest.raises(ValueError, match="positive finish allowance"):
+    with pytest.raises(ValueError, match="finish allowance is zero"):
         build_from_fields(**bore_fields(fin_allowance=0, finish_passes=3))
 
 
@@ -155,7 +155,7 @@ def test_rounding_cannot_silently_turn_cutting_passes_into_spring_repeats():
     p, s, r, f = build_from_fields(**fields)
     plan = execute(p, s, fields["tool_def"], r, f).plan_result
     assert plan is not None
-    with pytest.raises(ValueError, match="output precision"):
+    with pytest.raises(ValueError, match="same path as the one before it"):
         GCodeWriter().write(plan, unit_mode="inch")
 
 

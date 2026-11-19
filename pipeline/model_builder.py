@@ -77,7 +77,9 @@ def build_from_fields(
     """
     # Validate required fields
     if not segments:
-        raise ValueError("At least one profile segment is required.")
+        raise ValueError(
+            "This block has no profile segments, so there is no shape to cut. "
+            "Add at least one segment.")
     if stock_dia <= 0:
         raise ValueError(f"Stock diameter must be positive. Got: {stock_dia}")
     if doc_dia <= 0:
@@ -106,9 +108,13 @@ def build_from_fields(
     from math import isfinite
     from models.constants import TOLERANCE
     if stock_back_z is not None and not isfinite(stock_back_z):
-        raise ValueError("Stock back face must be finite.")
+        raise ValueError(f"Stock back face must be a real number. Got: {stock_back_z}")
     if stock_back_z is not None and stock_back_z > operation_z_end + TOLERANCE:
-        raise ValueError("Stock back face must be at or behind the operation Z End.")
+        raise ValueError(
+            f"The stock back face (Z{stock_back_z:+.4f}) is in front of where this "
+            f"operation cuts to (Z{operation_z_end:+.4f}), so the profile would run "
+            "off the end of the material. Set the stock back face to "
+            f"Z{operation_z_end:+.4f} or deeper, or shorten the profile.")
     _check_stock_size(profile, stock_dia, pilot_hole_dia, fin_allowance)
 
     stock = StockDef(

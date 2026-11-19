@@ -1842,8 +1842,12 @@ class ProgramTab(QWidget):
             self._program_file_path = path
             self._program_file_label.setText(os.path.basename(path))
             self._program_file_label.setToolTip(path)
-        except json.JSONDecodeError:
-            QMessageBox.warning(self, "Load Error", f"Not a valid program file:\n{path}")
+        except json.JSONDecodeError as e:
+            QMessageBox.warning(
+                self, "Load Error",
+                f"{os.path.basename(path)} is not readable as a program file.\n\n"
+                f"The file is JSON, but line {e.lineno} column {e.colno} is wrong: "
+                f"{e.msg}.\n\nIf it was hand-edited, that is where to look.")
         except Exception as e:
             QMessageBox.warning(self, "Load Error", f"Failed to load:\n{e}")
 
@@ -1933,13 +1937,20 @@ class ProgramTab(QWidget):
         from gui.components.block_list import BLOCK_TYPE_INFO
         from outputs.graph_adapter import GraphData
         if not isinstance(data, dict):
-            raise ValueError("Conversational program must be a JSON object.")
+            raise ValueError(
+                f"This file holds a JSON {type(data).__name__}, not a saved program "
+                "(which is a JSON object with a 'blocks' list).")
         version = data.get("version", 1)
         if version not in (1, 2):
-            raise ValueError(f"Unsupported conversational program version: {version}")
+            raise ValueError(
+                f"This program file is version {version!r}; this application reads "
+                "versions 1 and 2. It was most likely saved by a newer build.")
         if version == 1:
             if not isinstance(data.get("segments"), list):
-                raise ValueError("This JSON has no conversational profile segments.")
+                raise ValueError(
+                    "This version-1 file has no 'segments' list, so it carries no "
+                    "profile to load. Its top-level keys are: "
+                    + (", ".join(sorted(map(str, data))) or "(none)"))
             legacy_type = data.get("block_type", "ID Profile" if data.get("stock", {}).get("mode") == "id" else "OD Profile")
             type_map = {"OD Profile": "od_profile", "ID Profile": "id_profile",
                         "od_profile": "od_profile", "id_profile": "id_profile"}
@@ -1950,30 +1961,58 @@ class ProgramTab(QWidget):
         else:
             blocks_data = data.get("blocks")
             if not isinstance(blocks_data, list):
-                raise ValueError("Conversational program has no block list.")
+                found = ("nothing" if blocks_data is None
+                         else f"a {type(blocks_data).__name__}")
+                raise ValueError(
+                    f"This version-2 file should hold a list of blocks under 'blocks', "
+                    f"but there is {found} there. Its top-level keys are: "
+                    + (", ".join(sorted(map(str, data))) or "(none)"))
         blocks = []
         ids = set()
         for index, entry in enumerate(blocks_data):
             if not isinstance(entry, dict):
-                raise ValueError("Every conversational block must be an object.")
+                raise ValueError(
+                    f"Block {index + 1} of {len(blocks_data)} is a "
+                    f"{type(entry).__name__}, not a block object.")
             block_id = entry.get("block_id", index + 1)
-            if type(block_id) is not int or block_id < 0 or block_id in ids:
-                raise ValueError("Conversational block IDs must be unique nonnegative integers.")
+            if type(block_id) is not int or block_id < 0:
+                raise ValueError(
+                    f"Block {index + 1} of {len(blocks_data)} has block_id="
+                    f"{block_id!r}; it must be a whole number of 0 or greater.")
+            if block_id in ids:
+                raise ValueError(
+                    f"Block {index + 1} of {len(blocks_data)} reuses block_id="
+                    f"{block_id}, which an earlier block already has.")
             ids.add(block_id)
             block_type = entry.get("block_type", "od_profile")
             if block_type not in BLOCK_TYPE_INFO:
-                raise ValueError(f"Unsupported conversational block type: {block_type}")
+                raise ValueError(
+                    f"Block {index + 1} (id {block_id}) has block_type={block_type!r}, "
+                    "which this version does not know. Known types: "
+                    + ", ".join(sorted(BLOCK_TYPE_INFO)))
             params = entry.get("params", {})
             if not isinstance(params, dict):
-                raise ValueError("Conversational block parameters must be an object.")
+                raise ValueError(
+                    f"Block {index + 1} (id {block_id}) has params as a "
+                    f"{type(params).__name__}; it must be an object of settings.")
             if block_type in ("od_profile", "id_profile"):
                 for key in ("stock", "roughing", "finishing"):
                     if key in params and not isinstance(params[key], dict):
-                        raise ValueError(f"Block {key} must be an object.")
+                        raise ValueError(
+                            f"Block {index + 1} (id {block_id}): '{key}' is a "
+                            f"{type(params[key]).__name__}; it must be an object of "
+                            "settings.")
                 if not isinstance(params.get("segments", []), list):
-                    raise ValueError("Profile segments must be a list.")
-                if params.get("roughing", {}).get("strategy", "staircase") not in ("staircase", "offset_contour"):
-                    raise ValueError("Unsupported saved roughing strategy.")
+                    raise ValueError(
+                        f"Block {index + 1} (id {block_id}): 'segments' is a "
+                        f"{type(params['segments']).__name__}; it must be a list of "
+                        "profile points.")
+                strategy = params.get("roughing", {}).get("strategy", "staircase")
+                if strategy not in ("staircase", "offset_contour"):
+                    raise ValueError(
+                        f"Block {index + 1} (id {block_id}) was saved with roughing "
+                        f"strategy {strategy!r}, which this version cannot run. "
+                        "Supported strategies: staircase, offset_contour.")
             block = ProgramBlock(block_id=block_id, block_type=block_type,
                 tool_number=entry.get("tool_number", 1), enabled=entry.get("enabled", True),
                 label=entry.get("label", ""), visible=entry.get("visible", True))

@@ -31,7 +31,8 @@ from outputs.graph_adapter import convert_from_moves
 from outputs.gcode_parser import parse as parse_gcode
 from hal import get_backend
 from outputs.run_from_line import (
-    RunFromError, ResumePlan, build_resume_program, find_n_line, has_n_numbers)
+    RunFromError, ResumePlan, build_resume_program, describe_missing_n,
+    find_n_line, has_n_numbers)
 from hal.interface import HALBackend, InterpState, TaskMode, TaskState
 
 logger = logging.getLogger(__name__)
@@ -688,7 +689,13 @@ class RunTab(QWidget):
             self._set_running_state()
             logger.info("Cycle start (%s): program started at line %d", source, line + 1)
             return "started"
-        logger.warning("program_run failed")
+        what = "single block" if (self._btn_single.isChecked() and line == 0) else "run"
+        logger.warning("Cycle start (%s): LinuxCNC refused the %s command at line %d "
+                       "(task_mode=%s interp_state=%s)", source, what, line + 1,
+                       self._backend.state.task_mode, self._backend.state.interp_state)
+        self.show_error(
+            f"LinuxCNC did not start the program - it refused the {what} command. "
+            "Check the LinuxCNC error line and /tmp/lcnc_gui.log.")
         return "failed"
 
     def _on_pause_resume(self):
@@ -714,13 +721,15 @@ class RunTab(QWidget):
             if idx is None:
                 self.show_error(f"N{value} is not in this program")
                 QMessageBox.warning(self, "Run From",
-                                    f"Block N{value} was not found in this program.")
+                                    describe_missing_n(self._gcode_text, value))
             return idx
         lines = self._gcode_text.count('\n') + 1
         if value > lines:
             self.show_error(f"Line {value} is past the end ({lines} lines)")
-            QMessageBox.warning(self, "Run From",
-                                f"The program has only {lines} lines.")
+            QMessageBox.warning(
+                self, "Run From",
+                f"Line {value} is past the end of this program - it has "
+                f"{lines} lines.")
             return None
         return value - 1
 
@@ -762,7 +771,10 @@ class RunTab(QWidget):
         if path is None:
             return
         if not self._backend.program_open(path):
-            self.show_error("LinuxCNC refused to open the resume program")
+            self.show_error(
+                f"LinuxCNC did not load the resume program ({os.path.basename(path)}). "
+                "Nothing has been started. See /tmp/lcnc_gui.log for which file it "
+                "has open.")
             return
         self._backend_file = path
         self._resume_plan = plan
@@ -773,7 +785,14 @@ class RunTab(QWidget):
             self._set_running_state()
             logger.info("Run from source line %d via %s", idx + 1, path)
         else:
-            logger.warning("program_run of resume program failed")
+            logger.warning(
+                "Run from line %d: LinuxCNC refused to start %s "
+                "(task_mode=%s interp_state=%s); reopening the source program",
+                idx + 1, path, self._backend.state.task_mode,
+                self._backend.state.interp_state)
+            self.show_error(
+                f"LinuxCNC did not start the resume program for line {idx + 1}. "
+                "Nothing is running and the original program has been reloaded.")
             self._ensure_source_loaded()
 
     def _confirm_resume(self, plan: ResumePlan, state) -> bool:

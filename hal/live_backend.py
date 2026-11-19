@@ -11,6 +11,7 @@ Also creates a userspace HAL component for compound slide muxing.
 
 import logging
 import importlib.util as _ilu
+import os
 import subprocess
 import time
 from typing import Tuple
@@ -381,6 +382,26 @@ class LiveBackend(HALBackend):
     # Mode Control
     # ------------------------------------------------------------------
 
+    # A just-issued program_open leaves the interpreter READING for a few
+    # milliseconds while task reads the file. Aborting in that window throws
+    # the open away (lathe 2026-11-18: Run From ran the SOURCE program from
+    # line 1 because this abort killed the resume file's open, and LinuxCNC
+    # then rejected one of its moves on X's negative limit). Wait for the
+    # interpreter to settle instead, and only abort a stuck MDI command -
+    # which is the only case the abort was ever added for.
+    _INTERP_SETTLE_S = 1.0
+
+    def _wait_interp_idle(self, timeout: float) -> bool:
+        """Bounded wait for an idle interpreter. True if it went idle."""
+        deadline = time.monotonic() + timeout
+        while True:
+            self._stat.poll()
+            if self._stat.interp_state == linuxcnc.INTERP_IDLE:
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.01)
+
     def _ensure_mode(self, mode) -> bool:
         """Switch to mode if not already there. Returns True on success."""
         self._stat.poll()
@@ -389,7 +410,14 @@ class LiveBackend(HALBackend):
         if self._program_busy(self._stat):
             # Never interfere with an AUTO program that still has work queued
             return False
-        if self._stat.interp_state != linuxcnc.INTERP_IDLE:
+        if (self._stat.interp_state != linuxcnc.INTERP_IDLE
+                and not self._wait_interp_idle(self._INTERP_SETTLE_S)):
+            if self._stat.task_mode != linuxcnc.MODE_MDI:
+                logger.warning(
+                    "_ensure_mode(%s): interpreter still busy (interp_state=%s) in "
+                    "task_mode=%s - not switching, not aborting",
+                    mode, self._stat.interp_state, self._stat.task_mode)
+                return False
             # MDI stuck non-idle (e.g. after tool change) — safe to abort
             self._cmd.abort()
             self._cmd.wait_complete()
@@ -678,14 +706,62 @@ class LiveBackend(HALBackend):
                 self._cmd.task_plan_synch()
                 self._cmd.wait_complete()
             self._cmd.program_open(path)
+            # Wait for task to finish the open before anything else is sent.
+            # Without this the interpreter is still READING when program_run
+            # follows one statement later (lathe 2026-11-18, Run From).
+            self._cmd.wait_complete()
+            if not self._opened_file_is(path):
+                logger.error("program_open: LinuxCNC has %r open, not %r",
+                             self._stat.file, path)
+                return False
             return True
         except linuxcnc.error:
             return False
+
+    _OPEN_CONFIRM_S = 1.0
+
+    def _opened_file_is(self, path: str) -> bool:
+        """True once stat.file is the file just opened (bounded wait).
+
+        Confirming the open is what stops a Run-From resume program from
+        silently running some other file: the caller treats False as "the
+        open failed" and never reaches program_run.
+        """
+        want = os.path.realpath(path)
+        deadline = time.monotonic() + self._OPEN_CONFIRM_S
+        while True:
+            self._stat.poll()
+            have = self._stat.file or ""
+            if have and os.path.realpath(have) == want:
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.01)
+
+    def _log_run_state(self, what: str, start_line: int) -> None:
+        """One log line of what LinuxCNC is about to run.
+
+        A wrong open file or a stale work offset is otherwise invisible in the
+        GUI log (lathe 2026-11-18: a Run From that actually ran the source
+        program could only be spotted from LinuxCNC's own line numbers).
+        """
+        try:
+            self._stat.poll()
+            g5x, tool = self._stat.g5x_offset, self._stat.tool_offset
+            codes = set(self._stat.gcodes)
+            logger.info("%s: start_line=%d file=%s tool=%s g5x=(X%.4f Z%.4f) "
+                        "tool_offset=(X%.4f Z%.4f) G7=%s G18=%s",
+                        what, start_line, self._stat.file or "<none>",
+                        self._stat.tool_in_spindle, g5x[0], g5x[2],
+                        tool[0], tool[2], 70 in codes, 180 in codes)
+        except Exception as e:          # never let logging block a cycle start
+            logger.warning("%s: could not log state: %s", what, e)
 
     def program_run(self, start_line: int = 0) -> bool:
         try:
             if not self._ensure_mode(linuxcnc.MODE_AUTO):
                 return False
+            self._log_run_state("program_run", start_line)
             self._cmd.auto(linuxcnc.AUTO_RUN, start_line)
             return True
         except linuxcnc.error:
@@ -709,6 +785,7 @@ class LiveBackend(HALBackend):
         try:
             if not self._ensure_mode(linuxcnc.MODE_AUTO):
                 return False
+            self._log_run_state("program_step", 0)
             self._cmd.auto(linuxcnc.AUTO_STEP)
             return True
         except linuxcnc.error:
