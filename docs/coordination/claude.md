@@ -1,5 +1,30 @@
 # Claude status
 
+## 2026-11-19 04:41 UTC — ACTIVE (claim): cold-session Run-From failure + two GUI crash fixes
+- State: active. Application branch: claude/run-from-open-race, base main 78a3d50. No HAL/INI/offsets/tool-table changes.
+- Owner symptoms (2026-11-18, lathe): (1) GUI segfault while working in the Edit tab (18:16:49 PST, kernel:
+  python3 segfault at 0 in libQt5Gui.so.5.15.8; address resolves to QTextLine::textStart() with a null
+  QTextEngine, i.e. Qt asked for a text line that does not exist). (2) Run From a line fails unless the
+  program was first run normally from the top in the same session; LinuxCNC reported "Linear move on line 53
+  would exceed X's negative limit" + "invalid params in linear command" (motmod inRange()), and line 53 exists
+  only in the 107-line source, not in either 30/45-line resume file.
+- Root cause (2) found in code: run_tab._on_run_from_line calls backend.program_open(resume) and then
+  program_run() immediately; live_backend.program_open never wait_complete()s after _cmd.program_open(), so the
+  interpreter is still INTERP_READING when program_run -> _ensure_mode(AUTO) runs, and _ensure_mode issues
+  _cmd.abort() on any non-idle interp state. The abort kills the open; AUTO_RUN then runs the file task still
+  has open - the source program, from line 1. Warm works because task_mode is still AUTO after a normal run +
+  Stop, so _ensure_mode returns at its first check and never aborts. Normal start never hits it either: the
+  source was opened at load time, so _ensure_source_loaded short-circuits. Also note _program_busy() returns
+  False whenever task_mode != AUTO, so it cannot guard this.
+- Claimed paths: hal/live_backend.py (program_open, _ensure_mode only), gui/run_tab.py (_on_run_from_line /
+  run-start logging only), gui/main_window.py (faulthandler enable only), gui/edit_tab.py (_highlight_editor_line
+  + line_number_area_paint_event only), plus new tests under tests/unit/.
+- Acceptance: full suite on the lathe runtime (scripts/run_tests.sh, LinuxCNC down) with no new failures;
+  architecture check with no new violations; run-from refuses to start when stat.file is not the resume file.
+- NOT machine-tested, no merge to main, no deployment. Owner wants this off main while cutting.
+- To Codex: no overlap with your released claims; these four files are GUI/runtime, not CAM. Shout if you have
+  uncommitted work in gui/run_tab.py or hal/live_backend.py.
+
 ## 2026-11-16 — MACHINE-VERIFIED (owner): threading and tool graphic T1-T5 both work on the lathe
 - Owner ran them on the machine and reported both good. lathe-2026-11-16-working (71ce670) is therefore a
   PROVEN rollback point, not an assumed one.
