@@ -1,6 +1,51 @@
 # Claude status
 
-## 2026-11-19 UTC — ACTIVE (owner-directed): one-pass programs / finish allowance 0
+## 2026-11-19 UTC — REVIEW-READY (claims released): 68b1b3d on claude/zero-finish-allowance
+- One-pass programs. Owner: a finish allowance of 0 must be a valid input; his case is a bore
+  opening .193 -> .194, .001" on the diameter, one cut. Owner chose BOTH ends valid:
+    allowance 0                -> the roughing CONTOUR (cleanup) pass cuts the profile itself,
+                                  at roughing feed. No finish pass.
+    allowance >= whole removal -> the finish pass alone, at finish feed. No roughing, no cleanup.
+- Base cd2f3a3. Single commit 68b1b3d. No HAL/INI/offsets/tool-table changes. NOT machine-tested.
+- Three defects fixed:
+    * allowance >= removal CRASHED (RuntimeError): the material-to-rough boolean leaves an empty
+      face and pipeline._extract_zone_boundary read "no edges" as kernel failure.
+    * allowance 0 cut final size TWICE - three times on an OD, where 1.000 - 5 x .020 puts a
+      roughing level on the profile too - and the approach to that duplicate was flagged a gouge,
+      so the OD returned BLOCKED_BY_ERROR. Which side it hit was floating point; the matching ID
+      bore missed the level, which is why ID "worked" and OD did not.
+    * owner's .194 bore refused at EVERY allowance by comp planning: the .0011" lead across the
+      bore mouth is shorter than the .0019" comp needs before the corner at the wall.
+- Changed: geometry/zone_query.py (new zone_is_empty; contains() now classifies EVERY face of a
+  zone - a boolean-op zone is a compound the classifier rejected outright, so
+  contains("material_to_rough", ...) could not be called at all), pipeline/pipeline.py (new
+  _pass_schedule + _without_contour_duplicates), planners/comp_contour.py (air-lead recognition),
+  new tests/integration/test_one_pass_program.py (20 cases), session note.
+- BEHAVIOUR NOTE for Codex: ZoneQueryAPI.contains() answers differently for a multi-region zone -
+  a point in the second region used to return False. It feeds the comp lead-out via
+  part_contains/stock_contains. The 76-case motion diff below shows no existing program moved,
+  but if you depend on the old single-face behaviour, say so.
+- Verification (lathe runtime, LinuxCNC UP, so engine probes not pytest):
+    * architecture 15 errors / 130 warnings, findings byte-identical to cd2f3a3 (diffed against a
+      git archive of the base; only set-iteration order differs inside two function lists).
+    * NO allowance>0 program changed: 76 cases - staircase and offset_contour x allowance
+      .002/.005/.010/.030 x 1/2/3 finish passes and spring pass, plus stepped_id, stepped_od and
+      arc_od ground-truth fixtures - generated on both trees and compared on emitted MOTION
+      (comments stripped; the header carries a timestamp). Byte-identical, same pass/move counts.
+    * one-pass cases pass end to end: ID and OD, both strategies, allowance 0 and >= removal, and
+      the owner's .194 bore at a .008 nose.
+- VERIFICATION GAP: the pytest suite has NOT been run on this branch. scripts/run_tests.sh refuses
+  while LinuxCNC is up (milltask/rtapi_app/linuxcncsvr all running) and that guard was NOT
+  bypassed - pytest alongside the RT stack has frozen this machine before. The 20 new cases have
+  therefore never executed. Suite must be run with LinuxCNC down before any merge; expect
+  1539 + 20 passing.
+- Claims RELEASED: pipeline/pipeline.py, geometry/zone_query.py, planners/comp_contour.py,
+  planners/cleanup_planner.py, models/params.py, pipeline/model_builder.py, gui/program_tab.py.
+  models/params.py, model_builder.py, cleanup_planner.py and program_tab.py ended up UNCHANGED.
+- State: review-ready. Not merged; main untouched; live checkout still on its own commit with the
+  owner's M tool.tbl intact.
+
+## 2026-11-19 UTC — (superseded by the entry above) ACTIVE: one-pass programs / finish allowance 0
 - Task: the CAM engine must accept a one-pass program. Owner's case: a bore removing .001" dia
   total, one cut, no rough-then-finish. Owner chose BOTH inputs valid:
     * fin_allowance == 0        -> roughing/contour makes the finished surface; NO cleanup, NO finish.
