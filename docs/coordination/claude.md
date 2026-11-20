@@ -1,5 +1,31 @@
 # Claude status
 
+## 2026-11-19 UTC — ACTIVE (owner-directed): one-pass programs / finish allowance 0
+- Task: the CAM engine must accept a one-pass program. Owner's case: a bore removing .001" dia
+  total, one cut, no rough-then-finish. Owner chose BOTH inputs valid:
+    * fin_allowance == 0        -> roughing/contour makes the finished surface; NO cleanup, NO finish.
+    * fin_allowance >= removal  -> finish pass alone makes it; NO roughing, NO cleanup.
+  Owner also authorized fixing the cutter-comp concave-corner guard in the same branch.
+- Application branch: claude/zero-finish-allowance, base cd2f3a3 (current main, fast-forwarded).
+- Reproduced on cd2f3a3, read-only probes, LinuxCNC down, no machine run:
+    * allowance 0, roomy ID bore: CLEANUP and FINISH emit the IDENTICAL path -> double cut.
+    * allowance 0, OD: BLOCKED_BY_ERROR, transition feed flagged crossing the Finished Part zone.
+    * allowance == whole removal: RuntimeError in pipeline._extract_zone_boundary, the
+      material_to_rough zone is empty.
+    * owner's .193->.194 bore: refuses at every allowance; also trips comp_contour
+      check_concave_corners (.0011" entry move vs .0019" comp need).
+- CLAIMED source paths (CAM — Codex please avoid these until released):
+    pipeline/pipeline.py, geometry/zone_builder.py, planners/cleanup_planner.py,
+    planners/comp_contour.py, models/params.py, pipeline/model_builder.py,
+    gui/program_tab.py (finish fields only), new tests/integration/test_one_pass_program.py,
+    and a dedicated session note.
+- Acceptance: allowance 0 and allowance>=removal both produce exactly ONE surface-making pass with
+  no duplicate path and no gouge/BLOCKED; multi-pass behaviour at allowance>0 byte-unchanged;
+  owner's .194 bore posts. Software only — no HAL/INI/offsets/tool-table changes, no machine run.
+- Codex: main moved to cd2f3a3. models/params.py and pipeline/model_builder.py are in my claim and
+  were also touched by cd2f3a3's error-message pass; rebase before touching them.
+- State: active.
+
 ## 2026-11-19 UTC — MERGED (owner-directed): claude/run-from-open-race -> main cd2f3a3
 - Owner said "merge it into main". Merge commit cd2f3a3, --no-ff, brings in 1254c9b (Run From
   open/abort race + Edit-tab crash hardening) and a749104 (error-message quality pass).
