@@ -1,5 +1,35 @@
 # Claude status
 
+## 2026-11-19 UTC — SUITE RUN, REVIEW-READY: 28fb225 on claude/zero-finish-allowance
+- Owner shut LinuxCNC down, so the suite gate opened. FULL SUITE: 1556 passed / 2 failed.
+  Arithmetic: 1539 baseline + 19 new - 2 now-failing = 1556. Architecture still 15 errors /
+  130 warnings, findings identical to cd2f3a3. 76-case allowance>0 motion diff still identical.
+- THE 2 FAILURES ARE PRE-EXISTING, NOT FROM THIS BRANCH:
+    test_arc_gcode_linuxcnc.py::test_linuxcnc_runs_concave_fillet_around_nose_radius[0.03]
+    test_cut_regions.py::test_owner_reference_programs_check_clean[Hemisphere Test.json]
+  Cause: the owner's UNCOMMITTED tool.tbl. T4 went from a CNMG nose O.032 (R.016) to a VNMG
+  nose O.064 (R.032); T4 is the OD turning tool both tests use. rs274 refuses "Tool radius not
+  less than arc radius with comp" on G02 X0.5600 Z-0.4950 I0.0250 (Cleanup move 4) - an R.032
+  nose cannot cut an R.025 concave arc under comp.
+  Proven twice: (1) the emitted G-code for the failing fillet case is BYTE-IDENTICAL between
+  cd2f3a3 and this branch; (2) both tests FAIL on a clean `git archive` of cd2f3a3 as soon as
+  the owner's current tool.tbl is dropped in. Codex: do not chase these as a CAM regression.
+  REAL MACHINING FINDING for the owner, not just a test artefact: with the new VNMG insert on
+  T4, the saved "Hemisphere Test" program and any R.03 concave fillet no longer post under
+  cutter comp. Needs a smaller-nose tool, a larger fillet, or comp off. Owner's call; nothing
+  changed here and tool.tbl was left exactly as the owner has it.
+- Follow-up commit 28fb225 corrects 68b1b3d: ZoneQueryAPI.contains() is back to FIRST-FACE-ONLY.
+  Widening it was only needed for the new duplicate check, and it also feeds the comp lead-out
+  via part_contains/stock_contains - not worth changing a shared primitive with no test asking.
+  The any-region behaviour is now a separate contains_any_region(), used only by the one-pass
+  code. THE BEHAVIOUR NOTE IN MY PREVIOUS ENTRY IS WITHDRAWN: contains() is unchanged from
+  cd2f3a3, so nothing that depends on it moves.
+- Also fixed in 28fb225: the new test helper defaulted stock to O1.5 on an OD, leaving material
+  outside the cut so no allowance could cover the whole removal (1 self-inflicted test failure).
+- tests/integration/test_one_pass_program.py: 19 cases, all passing.
+- State: review-ready, claims released. Not merged; main untouched; live checkout on its own
+  commit with the owner's M tool.tbl intact.
+
 ## 2026-11-19 UTC — REVIEW-READY (claims released): 68b1b3d on claude/zero-finish-allowance
 - One-pass programs. Owner: a finish allowance of 0 must be a valid input; his case is a bore
   opening .193 -> .194, .001" on the diameter, one cut. Owner chose BOTH ends valid:
