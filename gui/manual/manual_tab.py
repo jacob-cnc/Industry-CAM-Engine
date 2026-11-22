@@ -240,15 +240,8 @@ class ManualTab(QWidget):
 
     def _connect_signals(self):
         """Wire section widgets to handlers."""
-        # Jog buttons — always velocity mode (hold to move)
-        self._jog["btn_x_plus"].pressed.connect(lambda: self._jog_start(0, +1.0))
-        self._jog["btn_x_plus"].released.connect(lambda: self._jog_end(0))
-        self._jog["btn_x_minus"].pressed.connect(lambda: self._jog_start(0, -1.0))
-        self._jog["btn_x_minus"].released.connect(lambda: self._jog_end(0))
-        self._jog["btn_z_plus"].pressed.connect(lambda: self._jog_start(1, +1.0))
-        self._jog["btn_z_plus"].released.connect(lambda: self._jog_end(1))
-        self._jog["btn_z_minus"].pressed.connect(lambda: self._jog_start(1, -1.0))
-        self._jog["btn_z_minus"].released.connect(lambda: self._jog_end(1))
+        # No on-screen jog buttons (removed 2026-11-22). GUI velocity jog is
+        # the arrow keys — see keyPressEvent / keyReleaseEvent below.
         self._jog["jog_vel_spin"].valueChanged.connect(self._on_jog_vel_changed)
         self._jog["jog_inc_combo"].currentIndexChanged.connect(self._on_jog_inc_changed)
         self._jog["btn_clear_trail"].clicked.connect(self._graph.clear_trail)
