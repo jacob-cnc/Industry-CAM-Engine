@@ -459,6 +459,14 @@ class ProgramTab(QWidget):
         params_layout.addWidget(self._section_parting)
         self._section_parting.setVisible(False)
 
+        # --- Drilling Parameters section (hidden by default) ---
+        from gui.components.drilling_panel import DrillingPanel
+        self._section_drilling = CollapsibleSection("Drilling Parameters", expanded=True)
+        self._drilling_panel = DrillingPanel()
+        self._section_drilling.add_widget(self._drilling_panel)
+        params_layout.addWidget(self._section_drilling)
+        self._section_drilling.setVisible(False)
+
         sections_layout.addWidget(self._section_parameters)
 
         # --- Profile Segments section (below Parameters; takes the height) ---
@@ -823,6 +831,7 @@ class ProgramTab(QWidget):
         self._threading_panel.side_changed.connect(self._on_thread_side_changed)
         self._grooving_panel.params_changed.connect(self._on_field_changed)
         self._parting_panel.params_changed.connect(self._on_field_changed)
+        self._drilling_panel.params_changed.connect(self._on_field_changed)
 
         # Stock fields
         self._stock_diameter.value_changed.connect(self._on_field_changed)
@@ -909,6 +918,10 @@ class ProgramTab(QWidget):
         self._section_grooving.setVisible(is_grooving)
         self._section_parting.setVisible(False)  # Parting is a separate block type in the list
 
+        # Drilling has no entry in this legacy combo; a combo change is never a
+        # drilling selection, so the drilling section is always hidden here.
+        self._section_drilling.setVisible(False)
+
         self._on_field_changed()
 
     def _on_thread_side_changed(self, internal: bool):
@@ -939,17 +952,21 @@ class ProgramTab(QWidget):
             "grooving_od": 3,
             "grooving_id": 3,
             "parting": 3,
+            "drilling": 0,          # hidden legacy combo has no drilling item
         }
         idx = type_to_index.get(block.block_type, 0)
         # Block the combo signal to avoid recursion
         self._block_type_combo.blockSignals(True)
         self._block_type_combo.setCurrentIndex(idx)
         self._block_type_combo.blockSignals(False)
-        # Trigger the section visibility update (no _on_field_changed to avoid saving again)
-        is_id = idx == 1
-        is_profile = idx in (0, 1)
-        is_threading = idx == 2
-        is_grooving = idx == 3
+        # Section visibility is driven by the BLOCK TYPE, not the 4-item legacy
+        # combo index, so a drilling block (which the combo cannot represent)
+        # shows its own section and hides the others.
+        is_id = block.block_type == "id_profile"
+        is_profile = block.is_profile
+        is_threading = block.is_threading
+        is_grooving = block.is_grooving
+        is_drilling = block.is_drilling
 
         self._pilot_hole_label.setVisible(is_id)
         self._stock_pilot_hole.setVisible(is_id)
@@ -960,6 +977,7 @@ class ProgramTab(QWidget):
         self._section_threading.setVisible(is_threading)
         self._section_grooving.setVisible(is_grooving)
         self._section_parting.setVisible(False)
+        self._section_drilling.setVisible(is_drilling)
 
         # Restore the new block's saved field data
         self._restore_block_data(block)
@@ -991,6 +1009,12 @@ class ProgramTab(QWidget):
                 block.params_data = self._parting_panel.get_values()
             else:
                 block.params_data = self._grooving_panel.get_values()
+        elif block.is_drilling:
+            block.params_data = self._drilling_panel.get_values()
+            # the panel's Tool field is the block's tool (list label, tool change)
+            if block.tool_number != self._drilling_panel.get_tool_number():
+                self._block_list.update_block_tool(
+                    block.block_id, self._drilling_panel.get_tool_number())
 
     def _restore_block_data(self, block):
         """Restore field values from a block's params_data into the UI."""
@@ -1045,6 +1069,8 @@ class ProgramTab(QWidget):
                 self._parting_panel.set_values(data)
             else:
                 self._grooving_panel.set_values(data)
+        elif block.is_drilling:
+            self._drilling_panel.set_values(data)
 
     def _on_block_added(self, block_type: str):
         """Handle a new block being added to the list."""
@@ -1286,6 +1312,11 @@ class ProgramTab(QWidget):
                 elif block.is_grooving:
                     # Grooving/parting block — emit plunge section
                     gcode_lines = self._generate_grooving_block(block, writer, prev_tool_number)
+                    all_gcode_sections.append("\n".join(gcode_lines) + "\n")
+
+                elif block.is_drilling:
+                    # Drilling block — emit explicit peck section
+                    gcode_lines = self._generate_drilling_block(block, writer, prev_tool_number)
                     all_gcode_sections.append("\n".join(gcode_lines) + "\n")
 
                 prev_tool_number = block.tool_number
@@ -1605,6 +1636,61 @@ class ProgramTab(QWidget):
             params, plunge_positions, tool_def, stock_dia=stock_dia,
             unit_mode=unit_state.mode.value,
         ))
+        return lines
+
+    def _generate_drilling_block(self, block, writer, prev_tool_number):
+        """Generate G-code lines for an on-center axial drilling block."""
+        from models.program import DrillingParams
+        from models.stock import StockDef
+        from models.tool import ToolType
+        from planners.drilling_planner import DrillingPlanner
+
+        data = block.params_data
+        if not data:
+            return ["; === DRILLING BLOCK (no parameters set) ==="]
+
+        lines = []
+
+        # Tool change if needed
+        if prev_tool_number is not None and block.tool_number != prev_tool_number:
+            tool_def = self._resolve_tool_for_block(block)
+            rpm = data.get("spindle_rpm", 1200)
+            lines.extend(writer.write_tool_change(tool_def, rpm))
+
+        z_start = data.get("z_start", 0.0)
+        params = DrillingParams(
+            operation=data.get("operation", "drill"),
+            z_start=z_start,
+            depth=data.get("depth", 0.5),
+            depth_to_tip=data.get("depth_to_tip", True),
+            through_hole=data.get("through_hole", False),
+            r_plane=data.get("r_plane", z_start + data.get("clearance", 0.1)),
+            peck_enabled=data.get("peck_enabled", True),
+            peck_increment=data.get("peck_increment", 0.1),
+            full_retract=data.get("full_retract", True),
+            dwell=data.get("dwell", 0.0),
+            feed=data.get("feed", 0.004),
+            spindle_rpm=data.get("spindle_rpm", 1200),
+            tool_number=block.tool_number,
+        )
+
+        tool_def = self._resolve_tool_for_block(block)
+        # Until the Tools tab grows drill types (next phase), warn if the resolved
+        # tool is not a drilling tool — the planner still reads its drill geometry
+        # from nose_radius (= D/2) and tip_angle (= point angle).
+        if tool_def.tool_type != ToolType.DRILLING:
+            self._generate_notes.append(
+                f"T{tool_def.tool_number} for block '{block.display_label}' is not a "
+                f"drilling tool; using its nose radius as the drill radius and tip "
+                f"angle as the drill point. Define it as a drill in the Tools tab.")
+
+        stock = StockDef(
+            diameter=data.get("stock_dia", 1.0), x_start=0.0, z_start=z_start,
+            z_end=z_start - data.get("stock_length", 2.0),
+        )
+        moves = DrillingPlanner().plan(params, tool_def, stock)
+        lines.extend(writer.write_drilling_block(
+            params, moves, tool_def, unit_mode=unit_state.mode.value))
         return lines
 
     # LinuxCNC Fig 2.16 (front-tool lathe): cutting corner toward -X (OD) or +X (ID)

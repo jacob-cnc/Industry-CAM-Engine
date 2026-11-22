@@ -39,15 +39,12 @@ BLOCK_TYPE_INFO = {
 }
 
 # What block types are available in the Add menu.
-# NOTE: "drilling" is intentionally NOT listed yet — the engine (DrillingPlanner /
-# write_drilling_block) and the "drilling" block type exist, but the DrillingPanel
-# and the program-tab generate dispatch land in the next phase. It stays in
-# BLOCK_TYPE_INFO so a hand-authored/loaded program with a drilling block is valid.
 ADDABLE_BLOCK_TYPES = [
     "od_profile", "id_profile",
     "threading_od", "threading_id",
     "grooving_od", "grooving_id",
     "parting",
+    "drilling",
 ]
 
 
