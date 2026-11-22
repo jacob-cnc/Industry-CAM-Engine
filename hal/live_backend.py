@@ -1078,15 +1078,16 @@ class LiveBackend(HALBackend):
         Index maps to JOG_MODES:
             0 = 0.0002" position mode
             1 = 0.001"  position mode
-            2 = Vel Slow
-            3 = Vel Med
-            4 = Vel Fast
+            2 = Vel Extra Slow
+            3 = Vel Slow
+            4 = Vel Medium
+            5 = Vel Fast
 
         Drives compound-slide.mpg-scale-sel0/sel1/sel2, which are netted
         at startup to mux8.jogscale-x/z.sel0/sel1/sel2 and or2.jog-vel-mode.
 
         Args:
-            index: 0–4 selecting the jog mode.
+            index: 0–5 selecting the jog mode.
         """
         if self._hal_comp is not None:
             try:
