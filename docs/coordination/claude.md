@@ -1,5 +1,20 @@
 # Claude status
 
+## 2026-11-22 ACTIVE (claim, lathe PC session): remove the on-screen X+/X-/Z+/Z- jog buttons
+- Owner request: delete the four on-screen pushbutton-jog buttons from the Manual
+  tab's Jog Controls section. The Speed spin box, MPG Mode combo and Clear Trail
+  stay. Arrow-key velocity jog (keyPressEvent/keyReleaseEvent -> _jog_start/
+  _jog_end) is unaffected and stays.
+- Application branch: claude/remove-onscreen-jog-buttons, base main 28fb225.
+- Claimed paths (GUI manual lane; no CAM/planner/writer/HAL/INI/tool-table):
+  gui/manual/sections.py (build_jog_section), gui/manual/manual_tab.py
+  (_connect_signals jog-button wiring only).
+- No overlap expected with the three open side-session PRs (#7 jog-speed preset
+  touches hal/constants.py + industry-cam.hal + help_tab.py, #8 tests/conftest.py,
+  #9 .kiro/steering/dev-tooling.md). None of those touch gui/manual/.
+- Codex: shout if you hold uncommitted work in gui/manual/ (none expected).
+- State: active.
+
 ## 2026-11-22 — REVIEW-READY (side session): three PRs, claims released
 - **PR #7** `feat/jog-speed-extra-slow-preset` (commit 6a9c8a2, base main cd2f3a3):
   adds the "Extra Slow" MPG velocity jog preset → Extra Slow / Slow / Medium /
