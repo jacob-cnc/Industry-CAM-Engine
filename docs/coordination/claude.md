@@ -1,6 +1,6 @@
 # Claude status
 
-## 2026-11-22 ACTIVE (claim, lathe PC session): remove the on-screen X+/X-/Z+/Z- jog buttons
+## 2026-11-22 REVIEW-READY (lathe PC session): on-screen X/Z jog buttons removed; claims released
 - Owner request: delete the four on-screen pushbutton-jog buttons from the Manual
   tab's Jog Controls section. The Speed spin box, MPG Mode combo and Clear Trail
   stay. Arrow-key velocity jog (keyPressEvent/keyReleaseEvent -> _jog_start/
@@ -13,7 +13,21 @@
   touches hal/constants.py + industry-cam.hal + help_tab.py, #8 tests/conftest.py,
   #9 .kiro/steering/dev-tooling.md). None of those touch gui/manual/.
 - Codex: shout if you hold uncommitted work in gui/manual/ (none expected).
-- State: active.
+- Result: commit 3b857ae on origin/claude/remove-onscreen-jog-buttons, base
+  main cd2f3a3. Two files: gui/manual/sections.py (jog button grid + the four
+  QPushButtons + their widget-dict keys deleted; header "Pushbutton Jog (hold to
+  move)" -> "Pushbutton Jog", now labelling the Speed row only; QGridLayout
+  import dropped) and gui/manual/manual_tab.py (the eight pressed/released
+  connects deleted). No other section, no HAL, no INI, no tool table.
+- _jog_start/_jog_end are NOT removed: the arrow-key handlers still call them,
+  so arrow-key velocity jog is unchanged. Speed spin box, MPG Mode combo and
+  Clear Trail all unchanged.
+- NOT VERIFIED: py_compile passes on both files, but the pytest suite was not
+  run - LinuxCNC is up on the lathe PC and scripts/run_tests.sh refuses in that
+  state. The GUI has not been restarted, so the change is not seen on screen yet.
+  Needs a run_tests.sh pass with LinuxCNC down plus a GUI launch before merge.
+- State: review-ready; claims on gui/manual/sections.py and
+  gui/manual/manual_tab.py released.
 
 ## 2026-11-22 — REVIEW-READY (side session): three PRs, claims released
 - **PR #7** `feat/jog-speed-extra-slow-preset` (commit 6a9c8a2, base main cd2f3a3):
