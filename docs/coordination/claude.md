@@ -1061,3 +1061,24 @@ F. Machine-control classification: affects tool offsets -> software-verified onl
   rather than merged separately (its commit would be a duplicate).
 - Suite on the lathe runtime: 1537 passed / 2 known pre-existing failures.
 - NOT merged to main; awaiting owner's merge decision. State: review-ready.
+
+## 2026-11-22 — MERGED TO MAIN (owner-approved): jog-control rework
+- main is now **ff97050** (merge of claude/remove-onscreen-jog-buttons).
+  Rollback tag: **lathe-pre-merge-2026-11-22** (= cd2f3a3).
+  Verified-good tag: **lathe-2026-11-22-working** (= ff97050).
+- Contents (4 commits): on-screen X/Z jog buttons removed; "Extra Slow" preset
+  so velocity modes are Extra Slow/Slow/Medium/Fast; Medium as launch default;
+  Touch-Off and Compound Slide swapped; QSettings test isolation. Plus the
+  pre-existing startup mux8-select bug fix described in the entry above.
+- **PR #7 and PR #8 are SUPERSEDED — close them, do not merge them.** Their
+  commits are in main as cherry-picks a71a4e5 (of 6a9c8a2) and 3075c2d (of
+  095d608). Merging either branch again would duplicate the commit.
+  PR #9 (.kiro/steering/dev-tooling.md, docs-only) is UNAFFECTED and still open.
+- Suite on the lathe runtime with LinuxCNC down, with PR #8 included: 1537
+  passed / 2 failed (the two known nose-radius-vs-arc failures). That was also
+  PR #8's first run on Linux; it is green here.
+- LIVE CHECKOUT IS PULLED: /home/jacob/linuxcnc/configs/industry-cam is on main
+  at ff97050 and the GUI was restarted on it. halcmd confirms
+  mux8.jogscale-x.out 0.000256745 (Medium) after that restart.
+- Owner's uncommitted tool.tbl (T4) left untouched throughout.
+- Claims released. State: idle.
