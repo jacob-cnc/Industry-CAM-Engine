@@ -987,3 +987,29 @@ F. Machine-control classification: affects tool offsets -> software-verified onl
 - 2026-11-10 02:50 UTC Owner-directed RT/OS tuning (machine-local, no CAM/HAL/GUI paths): claim set-cpu-performance.sh. Pin CPU clock 2.4 GHz to stop N150 thermal throttling (83C, 1742 throttles/2 min). Not committed to main yet.
 
 - 2026-11-13 UTC — MERGED (owner-approved): claude/tool-graphic-build T1-T5 -> main 9c255f9 (tag lathe-2026-11-13-merged; rollback lathe-pre-merge-2026-11-13 = f6f29d8). Tree identical to the tested branch (1496 pass). Live checkout NOT pulled. No claims. State: idle.
+
+## 2026-11-22 (lathe PC session) — PR #7 cherry-picked onto the jog-button branch and RUNNING
+- Branch claude/remove-onscreen-jog-buttons is now 3b857ae (button removal) +
+  a71a4e5 (cherry-pick -x of 6a9c8a2, PR #7 "Extra Slow" preset), base cd2f3a3.
+  Pushed. PR #7's own branch is untouched.
+- LinuxCNC restarted twice on the lathe PC; the GUI is up on this branch now.
+  halcmd read-back confirms the new HAL scales LOADED: mux8.jogscale-x.in2
+  3.125e-05, in3 0.0001875, in4 0.000256745 (new Medium), in5 0.000351563 (Fast).
+  Clean GUI startup, LivePinProvider 1117 pins, no tracebacks.
+- Verified PR #7's two open questions on this tree:
+  1. Index 5 IS reachable. live_backend.set_mpg_scale_index is a plain bitwise
+     decomposition of the index into sel0/1/2 with no clamp, so 5 -> sel0=1,
+     sel1=0, sel2=1. or2.jog-vel-mode = sel1 OR sel2 = 1, velocity mode on.
+  2. The flagged JOG_INCREMENTS overflow DOES NOT EXIST on cd2f3a3. No
+     production code indexes JOG_INCREMENTS anywhere in the tree - it is only
+     imported (unused) by tests/unit/test_compound_logic.py and
+     test_compound_integration.py, and hal/constants.py calls it a legacy alias.
+     manual_tab.py's only index lookup is JOG_MODES[self._jog_increment_idx]
+     (lines 65/409/579), which is bounds-matched to JOG_MODES by construction.
+     Whoever wrote that note was likely reading an older copy. No fix needed.
+- STILL NOT VERIFIED: pytest has not run (LinuxCNC is up, run_tests.sh refuses),
+  and NO handwheel check has been done. The in4 value change means the preset at
+  index 4 went from the old Fast scale to the new Medium scale - anyone jogging
+  on this build must confirm Medium sits between Slow and Fast at low travel
+  before production jogging. Arrow-key jog also not exercised.
+- Not merged to main. State: review-ready.
