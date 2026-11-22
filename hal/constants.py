@@ -37,12 +37,14 @@ MAX_JOG_VELOCITY = 2.0        # inches/sec
 #   2 = sel2:0 sel1:1 sel0:0
 #   3 = sel2:0 sel1:1 sel0:1
 #   4 = sel2:1 sel1:0 sel0:0
+#   5 = sel2:1 sel1:0 sel0:1
 JOG_MODES = [
-    (".0002",  False),   # Position: 0.0002" per MPG click
-    (".001",   False),   # Position: 0.001" per MPG click
-    ("Slow",   True),    # Velocity: ~0.1 in/s at moderate spin
-    ("Medium", True),    # Velocity: ~0.3 in/s at moderate spin
-    ("Fast",   True),    # Velocity: ~0.6 in/s (capped by MAX_VEL)
+    (".0002",      False),   # Position: 0.0002" per MPG click
+    (".001",       False),   # Position: 0.001" per MPG click
+    ("Extra Slow", True),    # Velocity: ~0.1 in/s at moderate spin
+    ("Slow",       True),    # Velocity: ~0.3 in/s at moderate spin
+    ("Medium",     True),    # Velocity: ~0.45 in/s (geometric midpoint of Slow and Fast)
+    ("Fast",       True),    # Velocity: ~0.6 in/s (capped by MAX_VEL)
 ]
 DEFAULT_JOG_MODE_INDEX = 1  # 0.001" position mode
 
