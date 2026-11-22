@@ -1113,3 +1113,32 @@ F. Machine-control classification: affects tool offsets -> software-verified onl
   ff97050. No CAM/planner/writer/INI/tool-table.
 - Codex: no overlap expected. Shout if you hold uncommitted work in those.
 - State: active.
+
+## 2026-11-22 REVIEW-READY: red cycle-pause via the GUI (claude/red-button-via-gui)
+- Commit **cca4831**, base main ff97050, pushed. Claims released.
+- 5 files: gui/main_window.py (_poll_pause_button on the existing 20 ms timer,
+  edge-triggered), hal/live_backend.py (cycle-pause IN pin + halcmd net +
+  read_cycle_pause), hal/mock_backend.py (read_cycle_pause),
+  industry-cam.hal (COMMENT ONLY - no rewiring; the GUI just adds a second
+  reader of the existing cycle-pause-btn signal), new
+  tests/unit/test_red_pause_button.py (7 cases).
+- halui.program.pause stays connected. Redundant, not exclusive: first one
+  through wins, the other is a no-op. No GUI attached -> halui alone, as before.
+- Red pauses only; green still resumes in HAL. Holding the button pauses once.
+- **NOT TESTED AT ALL.** LinuxCNC was up (owner machining) so scripts/run_tests.sh
+  refuses, and no machine check was possible. Needs: suite with LinuxCNC down,
+  then a live press during a run, ideally while also spinning an MPG (that is
+  the condition predicted to defeat the halui path).
+- Correction to my earlier entries: halui CANNOT crash. thisQuit() is reachable
+  only from the NML-init failure path at startup or after `done` is set by the
+  SIGINT/SIGTERM handler; there is no runtime error exit. The halui death I
+  reported earlier was therefore a signal, most plausibly collateral from my own
+  forced GUI kills during restarts - NOT a product bug. Do not chase a halui
+  crash; there isn't one.
+- Also logged, NOT fixed: (a) industry-cam.hal addf order puts debounce.0 at
+  position 16, after and2.cycle-paused-go/resume/step at 11-13 which read its
+  outputs - they see a 2 ms stale value; harmless but backwards. (b)
+  hal/live_backend.py:123 hardcodes MPG scale index 1 instead of using
+  DEFAULT_JOG_MODE_INDEX; end state is only correct because ManualTab overrides
+  it afterwards.
+- State: review-ready.
