@@ -110,8 +110,9 @@ class InsertSpec:
     orientation: LinuxCNC Q (1-9); nose_radius: inches; front/back angle: the
     tool table I / J (degrees, tool frame as in geometry/tool_reach.py);
     shape: one of INSERT_SHAPES; ic: inscribed-circle diameter in inches
-    (round: the insert diameter; groove: the visible blade length), 0 = unknown;
-    blade_width: grooving blade width, inches.
+    (round: the insert diameter; groove: the visible blade length; drill: the
+    drill diameter), 0 = unknown; blade_width: grooving blade width, inches;
+    point_angle: drill point included angle, degrees (drill only).
     """
     orientation: int
     nose_radius: float
@@ -120,3 +121,4 @@ class InsertSpec:
     shape: str
     ic: float = 0.0
     blade_width: float = 0.0
+    point_angle: float = 0.0
