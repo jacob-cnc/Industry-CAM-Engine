@@ -263,7 +263,7 @@ net estop-loop         estop-latch.0.ok-out             =>  iocontrol.0.emc-enab
 #           paused in SINGLE BLOCK                  -> next block [HAL, below]
 #           nothing running or queued              -> start at line 1 [GUI]
 #           running                                -> ignored
-#    RED    -> pause / feed hold                    [HAL, GUI-independent]
+#    RED    -> pause / feed hold                    [HAL + GUI, redundant]
 #
 #    Start-from-line-1 is deliberately NOT halui.program.run: LinuxCNC reports
 #    the interpreter IDLE mid-cut once it has read the whole file, so a HAL
@@ -285,6 +285,18 @@ net single-block-mode => not.single-block.in and2.cycle-step.in1
 net not-single-block not.single-block.out => and2.cycle-resume.in1
 net cycle-resume     and2.cycle-resume.out => halui.program.resume
 net cycle-step       and2.cycle-step.out => halui.program.step
+#    Red pause runs through TWO independent paths (2026-11-22). halui is kept,
+#    but it is not trustworthy on its own: halui.cc's emcCommandSend() blocks
+#    until task echoes, polling every 0.1 s for up to 10 s, and takes no HAL
+#    snapshot while blocked. check_hal_changes() samples the pins once per loop
+#    pass, so a press that starts AND ends inside a stall is silently dropped.
+#    The MPG feed/rapid override wiring below drives halui commands all through
+#    a run, which is exactly when an operator reaches for pause. halui also
+#    exits on SIGTERM/SIGINT and then its pins freeze. The GUI therefore adds
+#    compound-slide.cycle-pause as a second reader of this same signal (netted
+#    at GUI startup) and pauses directly via the task channel. Whichever path
+#    arrives first wins; the other is a no-op, as pausing an already-paused
+#    program does nothing. With no GUI attached, halui alone still works.
 net cycle-pause-btn  debounce.0.9.out => halui.program.pause
 
 # ============================================================================

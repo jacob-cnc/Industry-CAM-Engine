@@ -71,13 +71,19 @@ class MainWindow(QMainWindow):
         self._status_timer.start(200)  # 5 Hz
 
         # Green cycle button (TB3 P10). Measured presses are ~150 ms, so poll
-        # at 20 ms. HAL resumes a paused program and red pauses (both in
-        # industry-cam.hal, GUI-independent); the GUI only STARTS a program
-        # when nothing is queued, after its tool-table check.
+        # at 20 ms. HAL resumes a paused program (industry-cam.hal); the GUI
+        # only STARTS a program when nothing is queued, after its tool-table
+        # check. Red pause is driven from BOTH places: halui.program.pause in
+        # HAL and _poll_pause_button here. halui alone proved unreliable — it
+        # stalls inside emcCommandSend() while servicing MPG override commands
+        # and drops presses made during the stall (see
+        # LiveHALBackend.read_cycle_pause).
         self._cycle_btn_prev = False
         self._cycle_btn_busy = False
+        self._pause_btn_prev = False
         self._cycle_btn_timer = QTimer(self)
         self._cycle_btn_timer.timeout.connect(self._poll_cycle_button)
+        self._cycle_btn_timer.timeout.connect(self._poll_pause_button)
         self._cycle_btn_timer.start(20)
 
         logger.info("MainWindow initialized (offline preview mode)")
@@ -337,6 +343,32 @@ class MainWindow(QMainWindow):
             logger.exception("Green button handler failed")
         finally:
             self._cycle_btn_busy = False
+
+    def _poll_pause_button(self):
+        """Rising edge of the red button -> pause a running program.
+
+        A second, halui-independent path for the pause button.
+        industry-cam.hal also wires the same debounced signal to
+        halui.program.pause; whichever gets there first wins and the other is
+        a harmless no-op, since pausing an already-paused program does
+        nothing. Red only ever pauses — green resumes (handled in HAL).
+        """
+        if not hasattr(self._backend, "read_cycle_pause"):
+            return
+        pressed = self._backend.read_cycle_pause()
+        rising = pressed and not self._pause_btn_prev
+        self._pause_btn_prev = pressed
+        if not rising:
+            return
+        try:
+            self._backend.poll()
+            s = self._backend.state
+            if not s.program_busy or s.paused:
+                return                      # nothing running, or already paused
+            self._backend.program_pause()
+            logger.info("Red button: program paused")
+        except Exception:
+            logger.exception("Red button handler failed")
 
     def _on_mode_clicked(self):
         """Ribbon mode chip clicked: return to MANUAL, but never interrupt a

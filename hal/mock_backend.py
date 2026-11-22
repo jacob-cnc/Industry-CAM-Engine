@@ -436,6 +436,10 @@ class MockBackend(HALBackend):
         """Mock: settable from tests via ``_cycle_start``."""
         return bool(getattr(self, "_cycle_start", False))
 
+    def read_cycle_pause(self) -> bool:
+        """Mock: settable from tests via ``_cycle_pause``."""
+        return bool(getattr(self, "_cycle_pause", False))
+
     def set_mpg_scale_index(self, index: int):
         """Set MPG jog mode index (no-op in mock — no HAL mux8 pins)."""
         pass

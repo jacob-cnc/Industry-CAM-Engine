@@ -102,6 +102,10 @@ class LiveBackend(HALBackend):
             self._hal_comp.newpin("spindle-at-speed", hal_module.HAL_BIT, hal_module.HAL_IN)
             # Green cycle button (debounced) — GUI starts programs from it
             self._hal_comp.newpin("cycle-start", hal_module.HAL_BIT, hal_module.HAL_IN)
+            # Red cycle-pause button (debounced). The GUI pauses from it so the
+            # button does not depend on halui being alive and responsive — see
+            # read_cycle_pause() for why halui alone is not enough.
+            self._hal_comp.newpin("cycle-pause", hal_module.HAL_BIT, hal_module.HAL_IN)
             # Single block (Run tab): read by HAL so the green button steps
             # instead of resuming (industry-cam.hal section 10).
             self._hal_comp.newpin("single-block", hal_module.HAL_BIT, hal_module.HAL_OUT)
@@ -138,6 +142,10 @@ class LiveBackend(HALBackend):
             self._halcmd_net(["spindle-vel", "compound-slide.spindle-rps"])
             self._halcmd_net(["spindle-at-speed", "compound-slide.spindle-at-speed"])
             self._halcmd_net(["cycle-go-btn", "compound-slide.cycle-start"])
+            # cycle-pause-btn already exists in industry-cam.hal (debounce.0.9.out
+            # => halui.program.pause). We only ADD a reader; halui stays wired, so
+            # the two paths are redundant rather than exclusive.
+            self._halcmd_net(["cycle-pause-btn", "compound-slide.cycle-pause"])
             self._halcmd_net(["single-block-mode", "compound-slide.single-block"])
             time.sleep(self._SWITCH_SETTLE_S)
             self._hal_comp["jog-inhibit"] = False
@@ -907,6 +915,30 @@ class LiveBackend(HALBackend):
             return (0, 0, 0.0, 0.0)
         c = self._hal_comp
         return (c["mpg-x-in"], c["mpg-z-in"], c["x-jog-scale"], c["z-jog-scale"])
+
+    def read_cycle_pause(self) -> bool:
+        """Debounced red cycle-pause button (TB3 P11).
+
+        Read directly by the GUI rather than relying only on halui. halui is
+        wired to the same signal, but it is not a dependable sole path:
+
+          * halui.cc's emcCommandSend() BLOCKS until task echoes the command,
+            polling every EMC_COMMAND_DELAY (0.1 s) for up to receiveTimeout
+            (10.0 s). While blocked it takes no HAL snapshot.
+          * check_hal_changes() snapshots the pins once per loop pass
+            (copy_hal_data), and check_bit_changed() only fires if the pin
+            reads TRUE *in a snapshot*.
+
+        So a press that begins and ends while halui is stalled is silently
+        dropped. The MPG feed/rapid override wiring drives halui commands
+        continuously during a run, which makes such stalls likely exactly when
+        an operator is most apt to reach for pause. halui also exits on
+        SIGTERM/SIGINT, after which its pins freeze and it reads nothing.
+        """
+        try:
+            return bool(self._hal_comp["cycle-pause"]) if self._hal_comp is not None else False
+        except Exception:
+            return False
 
     def read_cycle_start(self) -> bool:
         """Debounced green cycle-start button (TB3 P10)."""
