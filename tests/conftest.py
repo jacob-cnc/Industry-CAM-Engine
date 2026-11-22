@@ -21,6 +21,7 @@ whole-window test files segfaulted or hung, yet passed alone.
 import os
 import subprocess
 import sys
+import tempfile
 import warnings
 
 import pytest
@@ -95,3 +96,69 @@ def _qt_offscreen_hygiene(monkeypatch, request):
     if seen:
         warnings.warn(f"{request.node.nodeid}: modal dialog(s) auto-answered: "
                       + "; ".join(seen[:3]))
+
+
+# --- QSettings isolation -------------------------------------------------------
+# The GUI persists toggles with QSettings("IndustryCAM", ...), whose native store
+# is the Windows registry (HKCU\Software\IndustryCAM) or ~/.config on Linux. Left
+# alone the suite writes the developer's real settings and leaks state between
+# tests: one test toggling Single Block left single_block=true, so a later RunTab
+# read it back checked and the run-from tests saw program_step() in place of
+# program_run(). Redirect every QSettings to a temp INI instead.
+#
+# Wired here at conftest import - before any test module (and the widgets some
+# build at import time) loads - so not even a construction-time read reaches the
+# real store. The (organization, application) constructor ignores
+# setDefaultFormat (it stays NativeFormat), so the class itself is swapped for a
+# factory that writes an INI file. The path is indirected through _QSETTINGS_INI
+# so _qsettings_per_test can hand each test a fresh, empty store. The swap is
+# never undone: widgets a fixture leaves alive are destroyed at interpreter
+# shutdown and their close/destructor QSettings writes would reach the real store
+# if the class were put back; the process is exiting, so this is harmless.
+_QSETTINGS_INI = {"path": os.path.join(
+    tempfile.mkdtemp(prefix="ic-qsettings-"), "session.ini")}
+
+try:
+    from PyQt5 import QtCore as _qtcore
+except Exception:                           # no Qt in this environment
+    _qtcore = None
+else:
+    _real_qsettings = _qtcore.QSettings
+
+    def _qsettings_factory(*args, **kwargs):
+        return _real_qsettings(_QSETTINGS_INI["path"], _real_qsettings.IniFormat)
+
+    # Callers also reach class-level members through the symbol (e.g.
+    # test_run_controls.py does QSettings.setPath(QSettings.NativeFormat, ...)),
+    # so carry the scope/format enums and static methods onto the factory.
+    for _attr in ("setPath", "setDefaultFormat", "defaultFormat",
+                  "NativeFormat", "IniFormat", "InvalidFormat", "Format",
+                  "UserScope", "SystemScope", "Scope"):
+        try:
+            setattr(_qsettings_factory, _attr, getattr(_real_qsettings, _attr))
+        except AttributeError:
+            pass
+
+    # conftest imports before the test modules and gui packages, so patching the
+    # canonical attribute covers their later `from PyQt5.QtCore import QSettings`;
+    # also patch anything that happened to bind the name before this ran.
+    _qtcore.QSettings = _qsettings_factory
+    for _mod in list(sys.modules.values()):
+        try:
+            if getattr(_mod, "QSettings", None) is _real_qsettings:
+                _mod.QSettings = _qsettings_factory
+        except Exception:
+            pass
+
+
+@pytest.fixture(autouse=True)
+def _qsettings_per_test(tmp_path):
+    """Hand each test a fresh, empty QSettings store (see the module-level note),
+    so GUI-toggle state never leaks between tests."""
+    if _qtcore is None:
+        yield
+        return
+    previous = _QSETTINGS_INI["path"]
+    _QSETTINGS_INI["path"] = str(tmp_path / "qsettings.ini")
+    yield
+    _QSETTINGS_INI["path"] = previous
