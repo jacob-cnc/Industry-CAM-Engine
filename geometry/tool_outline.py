@@ -26,6 +26,7 @@ geometry/).
 from __future__ import annotations
 
 import functools
+import math
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
@@ -172,6 +173,8 @@ def tool_outline(spec: InsertSpec) -> ToolOutline:
         return _groove(spec, q, r, centre, ic, size_known, notes)
     if spec.shape == "R":
         return _round(spec, r, centre, ic, size_known, notes)
+    if spec.shape == "drill":
+        return _drill(spec, r, ic, size_known, notes)
     if spec.front_angle == 0.0 and spec.back_angle == 0.0:
         raise ValueError("edge angles unknown (I0 J0) - set the insert or its angles to draw it")
 
@@ -244,6 +247,37 @@ def _round(spec, r, centre, ic, size_known, notes) -> ToolOutline:
     edges = _ordered_edges(circle)
     outline = _polyline(edges)
     return ToolOutline(outline, centre, rad, [outline], ic, size_known, notes)
+
+
+def _drill(spec, r, ic, size_known, notes) -> ToolOutline:
+    """Twist / centre drill: a cylindrical body of the drill diameter with a
+    conical point, drawn as an (r, z) silhouette about the centreline. Q9: the
+    controlled point is the drill tip at (0, 0); the body extends +Z away from
+    the work and the point narrows to the tip in -Z.
+
+    This is the one schematic silhouette the module draws without the kernel: a
+    drill point is a cone, not an ISO insert, and its tip length needs the point
+    half-angle. The only trig here is that cosmetic tip length; no coordinate is
+    an offset/crossing result (the geometry-kernel rule governs those).
+    """
+    rad = r if r > 0.0 else max(ic / 2.0, 0.03125)
+    point = spec.point_angle if spec.point_angle > 0.0 else 118.0
+    tl = 0.0 if point >= 180.0 else rad / math.tan(math.radians(point / 2.0))
+    body = max(4.0 * rad, 0.5)                         # cosmetic shank length
+    z_shoulder, z_back = tl, tl + body
+    outline = [
+        (0.0, 0.0),
+        (rad, z_shoulder),
+        (rad, z_back),
+        (-rad, z_back),
+        (-rad, z_shoulder),
+        (0.0, 0.0),
+    ]
+    lips = [[(0.0, 0.0), (rad, z_shoulder)], [(-rad, z_shoulder), (0.0, 0.0)]]
+    known = size_known or r > 0.0
+    if not known:
+        notes.append("drill size unknown - drawn at a nominal diameter")
+    return ToolOutline(outline, (0.0, 0.0), 0.0, lips, 2.0 * rad, known, notes)
 
 
 def _groove(spec, q, r, centre, length, size_known, notes) -> ToolOutline:

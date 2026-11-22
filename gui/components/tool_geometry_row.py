@@ -27,7 +27,7 @@ from PyQt5.QtGui import QFont, QMouseEvent
 from gui.colors import COLORS, FONTS
 from gui.components.numeric_field import NumericField, NumericFieldConfig
 from gui.components.orientation_graphic import OrientationGraphicWidget
-from tools.tool_card_data import ToolCardData, TOOL_TYPES, TYPE_ORIENTATIONS, TYPE_INSERTS
+from tools.tool_card_data import ToolCardData, TOOL_TYPES, TYPE_ORIENTATIONS, TYPE_INSERTS, DRILL_TYPES
 from tools.filter_cascade import get_valid_orientations, get_valid_inserts
 from tools.insert_geometry_lookup import get_angles
 
@@ -83,6 +83,14 @@ class ToolGeometryRow(QWidget):
         if insert_code == "Custom" and self._custom_insert_edit.text().strip():
             insert_code = self._custom_insert_edit.text().strip()
 
+        # Drill fields only apply to drilling tool types; keep them 0 otherwise so
+        # a turning/grooving tool never carries spurious drill metadata.
+        is_drill = self._type_combo.currentText() in DRILL_TYPES
+        point_angle = self._point_angle_field.value() if is_drill else 0.0
+        flute_length = self._flute_length_field.value() if is_drill else 0.0
+        max_peck = self._max_peck_field.value() if is_drill else 0.0
+        pitch = self._pitch_field.value() if is_drill else 0.0
+
         return ToolCardData(
             tool_number=self._tool_number_spin.value(),
             tool_type=self._type_combo.currentText(),
@@ -99,6 +107,10 @@ class ToolGeometryRow(QWidget):
             blade_width=self._blade_width_field.value(),
             iso_code=self._iso_edit.text().strip(),
             ic=self._ic_field.value(),
+            point_angle=point_angle,
+            flute_length=flute_length,
+            max_peck=max_peck,
+            pitch=pitch,
         )
 
     def set_data(self, data: ToolCardData) -> None:
@@ -157,6 +169,10 @@ class ToolGeometryRow(QWidget):
             self._blade_width_field.set_value(data.blade_width)
             self._iso_edit.setText(data.iso_code)
             self._ic_field.set_value(data.ic)
+            self._point_angle_field.set_value(data.point_angle)
+            self._flute_length_field.set_value(data.flute_length)
+            self._max_peck_field.set_value(data.max_peck)
+            self._pitch_field.set_value(data.pitch)
 
             # Angles: if both are 0.0 and insert code is in lookup, auto-fill
             # This handles legacy .tbl files that didn't store I/J angles
@@ -175,8 +191,9 @@ class ToolGeometryRow(QWidget):
             # Reset manual edit flag so next insert change triggers auto-fill
             self._manual_angles_edited = False
 
-            # Blade width visibility
+            # Blade width / drill field visibility
             self._update_blade_width_visibility(data.tool_type)
+            self._update_drill_visibility(data.tool_type)
 
             # Wear highlighting
             self._update_wear_highlight()
@@ -438,6 +455,48 @@ class ToolGeometryRow(QWidget):
         self._blade_width_container.setVisible(False)
         main_layout.addWidget(self._blade_width_container, 3, 0, 1, 6)
 
+        # === Row 4: Drill fields (conditional, drill tool types only) ===
+        # For a drill, the "Nose R" field above is the DRILL RADIUS (drill
+        # diameter = 2 x Nose R), and these fields add the point angle and the
+        # drilling-cycle metadata. The planner reads point angle + radius from here.
+        self._drill_container = QWidget()
+        drill_layout = QHBoxLayout(self._drill_container)
+        drill_layout.setContentsMargins(0, 0, 0, 0)
+        drill_layout.setSpacing(8)
+
+        def _drill_field(label_text, cfg, tip=""):
+            lbl = QLabel(label_text)
+            lbl.setStyleSheet(f"color: {COLORS['text_secondary']}; background: transparent;")
+            drill_layout.addWidget(lbl)
+            fld = NumericField(cfg)
+            fld.setFixedWidth(90)
+            if tip:
+                fld.setToolTip(tip)
+            fld.value_changed.connect(self._on_geometry_changed)
+            drill_layout.addWidget(fld)
+            return fld
+
+        self._point_angle_field = _drill_field(
+            "Point∠:", NumericFieldConfig(min_value=0.0, max_value=180.0, decimals=1,
+                                          default_value=118.0, unit_aware=False),
+            "Drill point included angle (e.g. 118 or 135). 0 = flat (no tip length).")
+        self._flute_length_field = _drill_field(
+            "Flute L:", NumericFieldConfig(min_value=0.0, max_value=12.0, decimals=4,
+                                           default_value=0.0),
+            "Usable flute / reach length (reference).")
+        self._max_peck_field = _drill_field(
+            "Max Peck:", NumericFieldConfig(min_value=0.0, max_value=2.0, decimals=4,
+                                            default_value=0.0),
+            "Suggested maximum peck increment (reference).")
+        self._pitch_field = _drill_field(
+            "Tap Pitch:", NumericFieldConfig(min_value=0.0, max_value=0.5, decimals=5,
+                                             default_value=0.0),
+            "Tap thread pitch, inches per thread (tap only).")
+        drill_layout.addStretch()
+
+        self._drill_container.setVisible(False)
+        main_layout.addWidget(self._drill_container, 4, 0, 1, 6)
+
         # === Orientation Graphic (right side, spanning rows 1-3) ===
         self._orientation_graphic = OrientationGraphicWidget()
         main_layout.addWidget(self._orientation_graphic, 1, 6, 3, 1, Qt.AlignRight | Qt.AlignTop)
@@ -507,6 +566,12 @@ class ToolGeometryRow(QWidget):
     def _update_blade_width_visibility(self, tool_type: str) -> None:
         """Show blade width field only for Grooving/Parting tools."""
         self._blade_width_container.setVisible(tool_type == "Grooving/Parting")
+
+    def _update_drill_visibility(self, tool_type: str) -> None:
+        """Show the drill fields (point angle, flute, peck, tap pitch) only for
+        drilling tool types; hide the insert-centric ISO / IC note text there."""
+        is_drill = tool_type in DRILL_TYPES
+        self._drill_container.setVisible(is_drill)
 
     def _set_orientation_options(self, tool_type: str, insert_code: str, preserve: bool = True) -> None:
         """Populate orientation combo based on tool type and insert code.
@@ -617,6 +682,7 @@ class ToolGeometryRow(QWidget):
         option for the new type. Triggers auto-fill on insert code reset.
         """
         self._update_blade_width_visibility(tool_type)
+        self._update_drill_visibility(tool_type)
 
         if self._suppress_signals:
             return

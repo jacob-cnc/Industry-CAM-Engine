@@ -38,6 +38,11 @@ _TYPE_TO_KEY = {
     "Threading External": "threading_external",
     "Threading Internal": "threading_internal",
     "Grooving/Parting": "grooving_parting",
+    "Center Drill": "center_drill",
+    "Spot Drill": "spot_drill",
+    "Twist Drill": "twist_drill",
+    "Reamer": "reamer",
+    "Tap": "tap",
     "Knurling": "knurling",
     "Custom": "custom",
 }
@@ -87,6 +92,11 @@ def serialize_tool(tool: ToolCardData) -> str:
         f"type={type_key}|insert={quote(tool.insert_code, safe=' ')}|blade={blade_str}|"
         + (f"iso={quote(tool.iso_code, safe='')}|" if tool.iso_code else "")
         + (f"ic={tool.ic:.4f}|" if tool.ic > 0 else "")
+        # Drill metadata (D already carries the drill diameter = nose_radius*2).
+        + (f"pointangle={tool.point_angle:.1f}|" if tool.point_angle else "")
+        + (f"flute={tool.flute_length:.4f}|" if tool.flute_length else "")
+        + (f"maxpeck={tool.max_peck:.4f}|" if tool.max_peck else "")
+        + (f"pitch={tool.pitch:.5f}|" if tool.pitch else "")
         + f"desc={quote(tool.description, safe=' ')}"
     )
     _fields = {
@@ -240,6 +250,10 @@ def deserialize_tool(line: str, *, unversioned_x_units: str | None = None) -> To
         blade_width=_safe_float(metadata.get("blade", ""), 0.0),
         iso_code=unquote(metadata.get("iso", "")),
         ic=_safe_float(metadata.get("ic", ""), 0.0),
+        point_angle=_safe_float(metadata.get("pointangle", ""), 0.0),
+        flute_length=_safe_float(metadata.get("flute", ""), 0.0),
+        max_peck=_safe_float(metadata.get("maxpeck", ""), 0.0),
+        pitch=_safe_float(metadata.get("pitch", ""), 0.0),
     )
 
 

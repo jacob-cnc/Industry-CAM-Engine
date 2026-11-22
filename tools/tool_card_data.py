@@ -29,6 +29,10 @@ class ToolCardData:
         front_angle: Front cutting edge angle (degrees)
         back_angle: Back cutting edge angle (degrees)
         blade_width: Grooving blade width (inches), 0.0 for non-grooving
+        For a drilling tool, nose_radius is the DRILL RADIUS (so the .tbl D
+        column = nose_radius*2 = the drill diameter) and point_angle is the
+        drill point included angle. flute_length / max_peck / pitch are drill
+        metadata (0.0 for non-drill tools).
     """
     tool_number: int
     tool_type: str          # "Turning RH", "Turning LH", "Boring Bar", etc.
@@ -45,6 +49,10 @@ class ToolCardData:
     blade_width: float = 0.0
     iso_code: str = ""      # full ISO insert code, e.g. "CNMG432" (optional)
     ic: float = 0.0         # insert inscribed circle / blade length, inches; 0 = from iso_code
+    point_angle: float = 0.0    # drill point included angle (degrees); drill only
+    flute_length: float = 0.0   # drill usable/flute length (inches); drill only
+    max_peck: float = 0.0       # drill max peck increment (inches); drill only
+    pitch: float = 0.0          # tap thread pitch (inches per thread); tap only
 
 
 # ---------------------------------------------------------------------------
@@ -58,9 +66,18 @@ TOOL_TYPES: List[str] = [
     "Threading External",
     "Threading Internal",
     "Grooving/Parting",
+    "Center Drill",
+    "Spot Drill",
+    "Twist Drill",
+    "Reamer",
+    "Tap",
     "Knurling",
     "Custom",
 ]
+
+# On-center axial hole-making tools (spec: drilling-cycles). All are Q9 (CENTER);
+# their nose_radius is the drill radius and point_angle the drill point angle.
+DRILL_TYPES = ("Center Drill", "Spot Drill", "Twist Drill", "Reamer", "Tap")
 
 # Valid LinuxCNC orientations (Q) per tool type, first = default. Per the
 # LinuxCNC 2.9.6 manual Fig 2.16 for a FRONT-TOOL lathe, cutting corner relative
@@ -77,6 +94,11 @@ TYPE_ORIENTATIONS: Dict[str, List[int]] = {
     "Threading External": [6],     # symmetric insert pointing at the centreline
     "Threading Internal": [8],     # symmetric insert pointing at the bore wall
     "Grooving/Parting": [2, 1, 6], # OD blade: chuck-side, tailstock-side corner, centre
+    "Center Drill": [9],           # on-center axial tools are Q9 (CENTER)
+    "Spot Drill": [9],
+    "Twist Drill": [9],
+    "Reamer": [9],
+    "Tap": [9],
     "Knurling": [9],
     "Custom": [1, 2, 3, 4, 5, 6, 7, 8, 9],
 }
@@ -88,6 +110,11 @@ TYPE_INSERTS: Dict[str, List[str]] = {
     "Threading External": ["60° UN/Metric", "55° Whitworth", "ACME", "Custom"],
     "Threading Internal": ["60° UN/Metric", "55° Whitworth", "ACME", "Custom"],
     "Grooving/Parting": ["Grooving", "Custom"],
+    "Center Drill": ["N/A"],
+    "Spot Drill": ["N/A"],
+    "Twist Drill": ["N/A"],
+    "Reamer": ["N/A"],
+    "Tap": ["N/A"],
     "Knurling": ["Custom"],
     "Custom": ["CNMG", "CCMT", "WNMG", "DNMG", "DCMT", "VNMG", "TNMG", "SNMG", "RCMT",
                "60° UN/Metric", "55° Whitworth", "ACME", "Grooving", "Custom"],
@@ -106,6 +133,11 @@ _CARD_TYPE_TO_TOOL_TYPE: Dict[str, ToolType] = {
     "Threading External": ToolType.THREADING,
     "Threading Internal": ToolType.THREADING,
     "Grooving/Parting": ToolType.GROOVING,
+    "Center Drill": ToolType.DRILLING,
+    "Spot Drill": ToolType.DRILLING,
+    "Twist Drill": ToolType.DRILLING,
+    "Reamer": ToolType.DRILLING,
+    "Tap": ToolType.DRILLING,
     "Knurling": ToolType.TURNING,
     "Custom": ToolType.TURNING,
 }
@@ -118,6 +150,11 @@ _CARD_TYPE_TO_DIRECTION: Dict[str, ToolDirection] = {
     "Threading External": ToolDirection.NEUTRAL,
     "Threading Internal": ToolDirection.NEUTRAL,
     "Grooving/Parting": ToolDirection.NEUTRAL,
+    "Center Drill": ToolDirection.NEUTRAL,
+    "Spot Drill": ToolDirection.NEUTRAL,
+    "Twist Drill": ToolDirection.NEUTRAL,
+    "Reamer": ToolDirection.NEUTRAL,
+    "Tap": ToolDirection.NEUTRAL,
     "Knurling": ToolDirection.NEUTRAL,
     "Custom": ToolDirection.NEUTRAL,
 }
@@ -147,10 +184,16 @@ def tool_card_to_tool_def(card: ToolCardData) -> ToolDef:
         - tool_type: string → ToolType enum
         - front/back angles → tip_angle (included angle)
     """
+    # A drill carries its point angle as tip_angle and its radius as nose_radius
+    # (so ToolDef.nose_radius*2 = drill diameter), which the DrillingPlanner reads.
+    if card.tool_type in DRILL_TYPES:
+        tip_angle = card.point_angle
+    else:
+        tip_angle = _tip_angle_from_angles(card.front_angle, card.back_angle)
     return ToolDef(
         tool_number=card.tool_number,
         nose_radius=card.nose_radius,
-        tip_angle=_tip_angle_from_angles(card.front_angle, card.back_angle),
+        tip_angle=tip_angle,
         edge_length=0.0,  # Not tracked in GUI card
         orientation=ToolOrientation(card.orientation),
         direction=_CARD_TYPE_TO_DIRECTION.get(card.tool_type, ToolDirection.NEUTRAL),
@@ -172,6 +215,7 @@ _TOOL_TYPE_TO_CARD_TYPE: Dict[ToolType, str] = {
     ToolType.BORING: "Boring Bar",
     ToolType.THREADING: "Threading External",
     ToolType.GROOVING: "Grooving/Parting",
+    ToolType.DRILLING: "Twist Drill",
 }
 
 
@@ -202,6 +246,9 @@ def tool_def_to_tool_card(tool: ToolDef) -> ToolCardData:
     valid_inserts = TYPE_INSERTS.get(card_type, ["CNMG"])
     default_insert = valid_inserts[0] if valid_inserts else "CNMG"
 
+    # A drill's tip_angle is its point angle; nose_radius is the drill radius.
+    is_drill = tool.tool_type == ToolType.DRILLING
+
     return ToolCardData(
         tool_number=tool.tool_number,
         tool_type=card_type,
@@ -216,6 +263,7 @@ def tool_def_to_tool_card(tool: ToolDef) -> ToolCardData:
         x_wear=tool.x_wear / 2.0,       # diameter → radius
         z_wear=tool.z_wear,
         blade_width=0.0,
+        point_angle=tool.tip_angle if is_drill else 0.0,
     )
 
 
@@ -228,6 +276,15 @@ def insert_spec(card: ToolCardData):
     """
     from models.tool import InsertSpec
     from tools.insert_geometry_lookup import INSERT_SHAPE, parse_iso_code
+    # A drill is drawn as a point + body about the centreline (Q9); nose_radius
+    # is the drill radius, so the drill diameter is 2*nose_radius.
+    if card.tool_type in DRILL_TYPES:
+        return InsertSpec(
+            orientation=card.orientation, nose_radius=card.nose_radius,
+            front_angle=0.0, back_angle=0.0, shape="drill",
+            ic=2.0 * card.nose_radius, blade_width=0.0,
+            point_angle=card.point_angle,
+        )
     iso = parse_iso_code(card.iso_code) if card.iso_code else None
     if card.tool_type == "Grooving/Parting" or card.insert_code == "Grooving":
         shape = "groove"
