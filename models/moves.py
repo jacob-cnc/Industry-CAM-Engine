@@ -26,6 +26,7 @@ class PassType(Enum):
     TRANSITION = "transition"
     THREADING = "threading"
     GROOVING = "grooving"
+    DRILLING = "drilling"
 
 
 @dataclass(frozen=True)

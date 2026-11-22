@@ -14,7 +14,7 @@ from models.results import PlanResult
 from models.moves import ToolMove, MoveType
 from models.profile import SegmentType, CornerBreakType
 from models.tool import ToolDef, ToolDirection
-from models.program import ThreadingParams, GroovingParams
+from models.program import ThreadingParams, GroovingParams, DrillingParams
 from models.results import ThreadPlan
 from models.constants import TOLERANCE, CONTOUR_FEED_IN_DIA
 
@@ -913,6 +913,90 @@ class GCodeWriter:
             lines.append(self._rapid(safe_x, z_pos, "Retract from groove"))
             lines.append("")
 
+        return lines
+
+    # ------------------------------------------------------------------
+    # Drilling block output
+    # ------------------------------------------------------------------
+
+    def write_drilling_block(
+        self, params: DrillingParams, moves: List[ToolMove], tool: ToolDef,
+        unit_mode: str = "inch",
+    ) -> List[str]:
+        """Generate G-code lines for an on-center axial drilling operation.
+
+        ``moves`` is the peck schedule from DrillingPlanner.plan(...) (the writer
+        only emits). Drilling is a hole on the spindle centreline (X0) fed along Z,
+        emitted as explicit G0 / G1 / G4 — never a G8x canned cycle, which in the
+        G18 (XZ) plane would drill along Y. Feed is per-rev under the inherited G95.
+
+        Args:
+            params: Drilling parameters.
+            moves: Ordered ToolMove list (RAPID / FEED / DWELL) at X0.
+            tool: Drilling tool (drill_diameter = 2*nose_radius, point = tip_angle).
+            unit_mode: "inch" or "metric".
+
+        Returns:
+            List of G-code lines (strings).
+        """
+        if unit_mode not in ("inch", "metric"):
+            raise ValueError(
+                f"Invalid unit_mode '{unit_mode}'. Must be 'inch' or 'metric'."
+            )
+        # Match write(): the move helpers below format with self._conv / self._fmt.
+        self._metric = unit_mode == "metric"
+        self._conv = 25.4 if self._metric else 1.0
+        self._fmt = "z.3f" if self._metric else "z.4f"
+        conv, fmt = self._conv, self._fmt
+
+        drill_dia = 2.0 * tool.nose_radius
+        z_final = min((m.z for m in moves), default=params.r_plane)
+        op_label = {
+            "center": "Center drill", "spot": "Spot drill",
+            "drill": "Drill", "ream": "Ream",
+        }.get(params.operation, params.operation)
+
+        lines: List[str] = []
+        lines.append(f"; === DRILLING ({op_label}, on center X0) ===")
+        lines.append(f"; Drill dia {drill_dia * conv:{fmt}}, point {tool.tip_angle:g} deg")
+        ref = "to tip" if (params.depth_to_tip and not params.through_hole) else "to full dia"
+        thru = " (through)" if params.through_hole else ""
+        lines.append(f"; Depth {params.depth * conv:{fmt}} {ref}{thru}, "
+                     f"bottom Z {z_final * conv:{fmt}}")
+        if params.peck_enabled:
+            style = "full retract" if params.full_retract else "chip break"
+            lines.append(f"; Peck {params.peck_increment * conv:{fmt}}, {style}")
+        lines.append(self._optional_stop("before drilling"))
+        lines.append("")
+
+        lines.append(self._line("G7", "Diameter mode"))
+        lines.append(self._line(f"S{params.spindle_rpm:.0f} M3",
+                                f"Drill speed {params.spindle_rpm:.0f} RPM (advisory)"))
+
+        first_rapid_seen = False
+        peck = 0
+        for m in moves:
+            if m.move_type == MoveType.DWELL:
+                comment = f"Dwell {m.feed:.2f}s at bottom"
+            elif m.move_type == MoveType.FEED:
+                peck += 1
+                comment = (f"Peck {peck}: feed to Z{m.z * conv:{fmt}}"
+                           if params.peck_enabled
+                           else f"Drill feed to depth Z{m.z * conv:{fmt}}")
+            else:  # RAPID
+                at_plane = abs(m.z - params.r_plane) < 1e-9
+                if at_plane and not first_rapid_seen:
+                    comment = "Rapid to centreline at clearance plane"
+                    first_rapid_seen = True
+                elif at_plane:
+                    comment = "Retract to clearance plane"
+                else:
+                    comment = "Rapid back into hole above last depth"
+            line = self._emit_move(m, comment)
+            if line:
+                lines.append(line)
+
+        lines.append("")
         return lines
 
     # ------------------------------------------------------------------

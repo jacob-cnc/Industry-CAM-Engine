@@ -117,6 +117,52 @@ class GroovingParams:
             return self.start_diameter - self.groove_depth
 
 
+@dataclass(frozen=True)
+class DrillingParams:
+    """A single on-center axial drilling operation (spec: drilling-cycles).
+
+    This machine has a manual quick-change toolpost with no tailstock, no live
+    tooling, and no C-axis, so drilling is a hole on the spindle centreline (X0)
+    fed along Z — a drill/reamer held in a QCTP holder. G-code is emitted as
+    explicit peck moves (G0/G1/G4), NOT a G8x canned cycle, because a canned
+    cycle in the G18 (XZ) plane drills along Y, not Z.
+
+    The drill geometry (diameter, point angle) is read from the tool at plan
+    time: drill_diameter = 2 * tool.nose_radius and point_angle = tool.tip_angle,
+    matching the .tbl D-column convention (D = drill diameter, nose_radius = D/2).
+
+    Coordinates (inches, Z negative toward the tailstock):
+        z_start:        part face Z (feed begins above it, at r_plane)
+        depth:          commanded hole depth, positive (toward -Z from z_start)
+        depth_to_tip:   True = depth is measured to the drill tip;
+                        False = measured to the full-diameter shoulder
+        through_hole:   True = the full diameter must break through the far face
+                        (relaxes the blind-depth check; tip goes tip_length past)
+        r_plane:        Z clearance above the face where feed begins and pecks
+                        retract to (must be above the hole bottom)
+        peck_enabled:   True = peck; False = single feed to depth
+        peck_increment: per-peck axial feed, positive
+        full_retract:   True = retract to r_plane between pecks (deep-hole/G83
+                        style); False = small chip-break retract (G73 style)
+        dwell:          bottom dwell seconds (0 = none)
+        feed:           drill feed, inch/rev (emitted under the inherited G95)
+        spindle_rpm:    advisory only (manual spindle, no VFD)
+    """
+    operation: str              # "center", "spot", "drill", "ream"
+    z_start: float
+    depth: float
+    depth_to_tip: bool
+    through_hole: bool
+    r_plane: float
+    peck_enabled: bool
+    peck_increment: float
+    full_retract: bool
+    dwell: float
+    feed: float
+    spindle_rpm: float
+    tool_number: int
+
+
 @dataclass
 class ProgramBlock:
     """One operation in the multi-block program.
@@ -126,7 +172,8 @@ class ProgramBlock:
     """
     block_id: int               # Unique ID for UI tracking (auto-assigned)
     block_type: str             # "od_profile", "id_profile", "threading_od",
-                                # "threading_id", "grooving_od", "grooving_id", "parting"
+                                # "threading_id", "grooving_od", "grooving_id",
+                                # "parting", "drilling"
     tool_number: int = 1        # Tool for this block
     enabled: bool = True        # Toggle on/off without deleting
     label: str = ""             # User-editable display name (auto-generated if empty)
@@ -147,6 +194,7 @@ class ProgramBlock:
             "grooving_od": "Grooving OD",
             "grooving_id": "Grooving ID",
             "parting": "Parting",
+            "drilling": "Drilling",
         }
         return type_labels.get(self.block_type, self.block_type)
 
@@ -164,3 +212,8 @@ class ProgramBlock:
     def is_grooving(self) -> bool:
         """True if this is a grooving or parting block."""
         return self.block_type in ("grooving_od", "grooving_id", "parting")
+
+    @property
+    def is_drilling(self) -> bool:
+        """True if this is an on-center axial drilling block."""
+        return self.block_type == "drilling"

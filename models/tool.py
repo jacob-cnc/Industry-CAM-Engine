@@ -41,6 +41,7 @@ class ToolType(Enum):
     BORING = "boring"
     THREADING = "threading"
     GROOVING = "grooving"
+    DRILLING = "drilling"      # on-center axial hole-making (drill / spot / reamer)
 
 
 # LinuxCNC orientation Q -> direction from the nose centre to the imaginary tip,
@@ -99,7 +100,7 @@ class ToolDef:
 
 # Insert body shapes the screen graphic can draw (geometry/tool_outline.py).
 # ISO 1832 / ANSI B212.4 shape letters plus the non-ISO kinds this shop uses.
-INSERT_SHAPES = ("C", "D", "V", "T", "S", "W", "R", "thread", "groove", "custom")
+INSERT_SHAPES = ("C", "D", "V", "T", "S", "W", "R", "thread", "groove", "drill", "custom")
 
 
 @dataclass(frozen=True)
