@@ -46,7 +46,10 @@ JOG_MODES = [
     ("Medium",     True),    # Velocity: ~0.45 in/s (geometric midpoint of Slow and Fast)
     ("Fast",       True),    # Velocity: ~0.6 in/s (capped by MAX_VEL)
 ]
-DEFAULT_JOG_MODE_INDEX = 1  # 0.001" position mode
+DEFAULT_JOG_MODE_INDEX = 4  # "Medium" velocity mode (owner request 2026-11-22)
+# NOTE: this default is a VELOCITY mode. From GUI startup the handwheels jog
+# at a speed proportional to spin rate, not a fixed step per detent. Index 4
+# must stay in step with JOG_MODES above if that list is ever reordered.
 
 # Legacy alias for code that still references JOG_INCREMENTS
 JOG_INCREMENTS = [0.0002, 0.001, 0.01, 0.1]

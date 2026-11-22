@@ -25,10 +25,15 @@ def test_clear_trail_centred_and_inside_section():
     try:
         secs = w._manual_tab.findChildren(CollapsibleSection)
         jog = next(s for s in secs if "Jog" in s._header.text())
-        nxt = next(s for s in secs if "Compound" in s._header.text())
         jog.set_expanded(True)
         _app.processEvents()
         _app.processEvents()
+        # Whichever section sits directly below Jog Controls — do not hard-code
+        # it by name. The Manual tab's section order is owner-configurable (the
+        # Touch-Off / Compound Slide swap on 2026-11-22 moved this neighbour),
+        # and this test is about the Clear Trail gap, not about the order.
+        nxt = min((s for s in secs if _y(s, w) > _y(jog, w)),
+                  key=lambda s: _y(s, w))
         combo = jog._content.findChildren(QComboBox)[0]
         btn = next(b for b in jog._content.findChildren(QPushButton)
                    if b.text() == "Clear Trail")
