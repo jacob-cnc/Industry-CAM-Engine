@@ -1046,3 +1046,18 @@ F. Machine-control classification: affects tool offsets -> software-verified onl
   new Medium scale) AND is now the launch default, so the first wheel movement
   after any GUI start is velocity-mode Medium. Owner must confirm at low travel.
 - State: review-ready.
+
+## 2026-11-22 — MACHINE-VERIFIED by owner: claude/remove-onscreen-jog-buttons 782e6db
+- Supersedes the "STILL NOT DONE: no handwheel check" caveat in the entry above.
+  Owner ran the GUI on the lathe and confirmed look AND feel, i.e. the handwheel
+  check on the velocity presets is DONE and passed.
+- Verified as a whole: on-screen X/Z jog buttons gone; four velocity presets
+  (Extra Slow / Slow / Medium / Fast) with the new Medium at mux8 in4; Medium as
+  the launch default actually reaching HAL; Manual tab order Jog Controls /
+  Touch-Off / Tool / Compound Slide / MDI / Homing.
+- This also constitutes the first machine verification of PR #7's content, which
+  rides in this branch as cherry-pick a71a4e5. PR #7's own branch is unchanged
+  and still open; if this branch merges, PR #7 should be closed as superseded
+  rather than merged separately (its commit would be a duplicate).
+- Suite on the lathe runtime: 1537 passed / 2 known pre-existing failures.
+- NOT merged to main; awaiting owner's merge decision. State: review-ready.
