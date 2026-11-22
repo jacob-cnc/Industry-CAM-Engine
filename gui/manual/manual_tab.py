@@ -86,6 +86,14 @@ class ManualTab(QWidget):
         self._connect_signals()
         self._setup_polling()
 
+        # The combo is set to DEFAULT_JOG_MODE_INDEX inside build_jog_section(),
+        # which runs before _connect_signals(), so its currentIndexChanged fires
+        # with nothing attached and the mux8 select pins are never driven. Push
+        # the default through explicitly or HAL sits at index 0 while the combo
+        # reads something else. This matters now that the default is a velocity
+        # mode: the displayed mode must be the mode the handwheels actually use.
+        self._on_jog_inc_changed(DEFAULT_JOG_MODE_INDEX)
+
         # Track which arrow keys are currently held (for velocity jog)
         self._keys_held: set = set()
         self.setFocusPolicy(Qt.StrongFocus)
@@ -135,10 +143,13 @@ class ManualTab(QWidget):
         mdi_section, self._mdi = build_mdi_section()
         homing_section, self._homing = build_homing_section()
 
+        # Touch-Off and Compound Slide are swapped relative to their build
+        # order (owner request, 2026-11-22): Touch-Off is the common operation
+        # and now sits directly under Jog Controls.
         scroll_layout.addWidget(jog_section)
-        scroll_layout.addWidget(compound_section)
-        scroll_layout.addWidget(tool_section)
         scroll_layout.addWidget(touchoff_section)
+        scroll_layout.addWidget(tool_section)
+        scroll_layout.addWidget(compound_section)
         scroll_layout.addWidget(mdi_section)
         scroll_layout.addWidget(homing_section)
         scroll_layout.addStretch()
@@ -240,15 +251,8 @@ class ManualTab(QWidget):
 
     def _connect_signals(self):
         """Wire section widgets to handlers."""
-        # Jog buttons — always velocity mode (hold to move)
-        self._jog["btn_x_plus"].pressed.connect(lambda: self._jog_start(0, +1.0))
-        self._jog["btn_x_plus"].released.connect(lambda: self._jog_end(0))
-        self._jog["btn_x_minus"].pressed.connect(lambda: self._jog_start(0, -1.0))
-        self._jog["btn_x_minus"].released.connect(lambda: self._jog_end(0))
-        self._jog["btn_z_plus"].pressed.connect(lambda: self._jog_start(1, +1.0))
-        self._jog["btn_z_plus"].released.connect(lambda: self._jog_end(1))
-        self._jog["btn_z_minus"].pressed.connect(lambda: self._jog_start(1, -1.0))
-        self._jog["btn_z_minus"].released.connect(lambda: self._jog_end(1))
+        # No on-screen jog buttons (removed 2026-11-22). GUI velocity jog is
+        # the arrow keys — see keyPressEvent / keyReleaseEvent below.
         self._jog["jog_vel_spin"].valueChanged.connect(self._on_jog_vel_changed)
         self._jog["jog_inc_combo"].currentIndexChanged.connect(self._on_jog_inc_changed)
         self._jog["btn_clear_trail"].clicked.connect(self._graph.clear_trail)

@@ -11,7 +11,7 @@ Separated from the tab orchestrator for:
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout,
+    QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QPushButton, QComboBox, QLineEdit,
     QFrame, QDoubleSpinBox,
 )
@@ -41,55 +41,25 @@ def build_jog_section() -> tuple:
       Pushbuttons (TB3 P6-P9): Velocity jog, speed from analog pot.
       MPG handwheels (7i85S TB2/TB3): Increment jog, step from rotary switch.
 
-    On-screen buttons mirror the pushbuttons (velocity, hold-to-jog).
-    The increment and speed displays reflect hardware knob positions
-    and allow software override when needed.
+    There are no on-screen jog buttons: GUI velocity jog is the arrow keys
+    (see ManualTab.keyPressEvent). The increment and speed displays reflect
+    hardware knob positions and allow software override when needed.
 
     Returns:
         (section, widgets) where widgets is a dict of named widget references.
     """
     section = CollapsibleSection("Jog Controls", expanded=False)
 
-    # --- On-screen jog buttons (velocity mode, mirrors hardware pushbuttons) ---
-    btn_header = QLabel("Pushbutton Jog (hold to move)")
+    # --- Pushbutton speed (mirrors analog pot / future 6-pos knob) ---
+    # The on-screen X±/Z± jog buttons were removed (owner request,
+    # 2026-11-22). Velocity jog from the GUI is the arrow keys
+    # (ManualTab.keyPressEvent); the hardware pushbuttons on TB3 P6-P9 and
+    # the MPG handwheels are unaffected. This Speed value still sets the
+    # velocity both of those use.
+    btn_header = QLabel("Pushbutton Jog")
     btn_header.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 8pt;")
     section.add_widget(btn_header)
 
-    grid = QGridLayout()
-    grid.setSpacing(4)
-
-    btn_style = (
-        f"QPushButton {{ "
-        f"  background: {COLORS['bg_surface']}; "
-        f"  color: {COLORS['text_primary']}; "
-        f"  border: 1px solid {COLORS['border_normal']}; "
-        f"  border-radius: 4px; "
-        f"  font-size: 11pt; font-weight: bold; "
-        f"  min-width: 52px; min-height: 40px; "
-        f"}} "
-        f"QPushButton:pressed {{ background: {COLORS['btn_primary']}; }}"
-    )
-
-    btn_x_plus = QPushButton("X+")
-    btn_x_plus.setStyleSheet(btn_style)
-    btn_x_plus.setAutoRepeat(False)
-    btn_x_minus = QPushButton("X−")
-    btn_x_minus.setStyleSheet(btn_style)
-    btn_x_minus.setAutoRepeat(False)
-    btn_z_plus = QPushButton("Z+")
-    btn_z_plus.setStyleSheet(btn_style)
-    btn_z_plus.setAutoRepeat(False)
-    btn_z_minus = QPushButton("Z−")
-    btn_z_minus.setStyleSheet(btn_style)
-    btn_z_minus.setAutoRepeat(False)
-
-    grid.addWidget(btn_x_minus, 0, 1)
-    grid.addWidget(btn_z_minus, 1, 0)
-    grid.addWidget(btn_z_plus, 1, 2)
-    grid.addWidget(btn_x_plus, 2, 1)
-    section.add_layout(grid)
-
-    # --- Pushbutton speed (mirrors analog pot / future 6-pos knob) ---
     speed_row = QHBoxLayout()
     speed_label = QLabel("Speed:")
     speed_label.setFixedWidth(44)
@@ -152,10 +122,6 @@ def build_jog_section() -> tuple:
     section.content_layout().addSpacing(CLEAR_TRAIL_SPACE_BELOW)
 
     widgets = {
-        "btn_x_plus": btn_x_plus,
-        "btn_x_minus": btn_x_minus,
-        "btn_z_plus": btn_z_plus,
-        "btn_z_minus": btn_z_minus,
         "jog_vel_spin": jog_vel_spin,
         "jog_inc_combo": jog_inc_combo,
         "btn_clear_trail": btn_clear_trail,

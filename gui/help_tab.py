@@ -117,8 +117,9 @@ divide the X span by 2.</p>
 <tr><th>Mode</th><th>Type</th><th>Behavior</th></tr>
 <tr><td>.0002</td><td>Position</td><td>0.0002" per MPG click (finest)</td></tr>
 <tr><td>.001</td><td>Position</td><td>0.001" per MPG click (standard)</td></tr>
-<tr><td>Slow</td><td>Velocity</td><td>~0.1 in/s at moderate spin</td></tr>
-<tr><td>Medium</td><td>Velocity</td><td>~0.3 in/s at moderate spin</td></tr>
+<tr><td>Extra Slow</td><td>Velocity</td><td>~0.1 in/s at moderate spin</td></tr>
+<tr><td>Slow</td><td>Velocity</td><td>~0.3 in/s at moderate spin</td></tr>
+<tr><td>Medium</td><td>Velocity</td><td>~0.45 in/s at moderate spin</td></tr>
 <tr><td>Fast</td><td>Velocity</td><td>~0.6 in/s (capped by MAX_VEL)</td></tr>
 </table>
 <p><b>Position modes:</b> Each MPG click moves a fixed distance. If you spin fast,
