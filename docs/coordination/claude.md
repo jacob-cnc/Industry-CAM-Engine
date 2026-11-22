@@ -1082,3 +1082,34 @@ F. Machine-control classification: affects tool offsets -> software-verified onl
   mux8.jogscale-x.out 0.000256745 (Medium) after that restart.
 - Owner's uncommitted tool.tbl (T4) left untouched throughout.
 - Claims released. State: idle.
+
+## 2026-11-22 ACTIVE (claim): red cycle-pause button via the GUI, not halui
+- Owner-reported fault: red pause button did nothing during a run. Diagnosed on
+  the lathe today. Root findings, from LinuxCNC 2.9.10 source (halui.cc):
+  1. `sendProgramPause()` has NO mode/state guard - it fires on every rising
+     edge. So pause works IFF halui is alive. No "alive but refuses" state.
+  2. halui has NO runtime error exit. `thisQuit()` is reachable only from the
+     NML-init failure path at startup, or after `done` is set by the
+     SIGINT/SIGTERM handler. halui therefore cannot crash - it can only be
+     signalled. The one confirmed death today was most likely collateral from
+     MY forced GUI kills during restarts, not a product bug.
+  3. LIKELY CAUSE of the owner's symptom: `emcCommandSend()` BLOCKS until task
+     echoes, polling every EMC_COMMAND_DELAY (0.1 s) up to receiveTimeout
+     (10.0 s). While blocked halui takes no HAL snapshot, and
+     `check_hal_changes()` snapshots pins once per loop pass
+     (`copy_hal_data`), with `check_bit_changed` needing the pin TRUE in a
+     snapshot. A press that starts AND ends inside a stall is silently lost.
+     The only thing driving halui commands continuously during a run is the MPG
+     feed/rapid override wiring from ff65ea5 - which went live for the first
+     time today, matching the owner's "fine 11/21, broken 11/22".
+- Fix (owner-approved): stop making the red button depend on halui. Mirror the
+  GREEN button, which already bypasses halui via compound-slide.cycle-start.
+  `halui.program.pause` STAYS connected as a redundant second path.
+- Claimed paths: hal/live_backend.py (new `cycle-pause` IN pin, halcmd net,
+  read_cycle_pause), hal/mock_backend.py (read_cycle_pause),
+  gui/main_window.py (rising-edge poller on the existing 20 ms timer),
+  industry-cam.hal (COMMENT ONLY - the signal already exists, the GUI just adds
+  a reader), tests/unit/ new test. Branch claude/red-button-via-gui, base main
+  ff97050. No CAM/planner/writer/INI/tool-table.
+- Codex: no overlap expected. Shout if you hold uncommitted work in those.
+- State: active.
