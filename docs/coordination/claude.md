@@ -1,5 +1,23 @@
 # Claude status
 
+## 2026-11-22 05:10 UTC — ACTIVE (claim): add "Extra Slow" jog-speed preset (side session)
+- Side session spun off main for an owner-requested jog-speed preset change.
+  Application branch: feat/jog-speed-extra-slow-preset, base main cd2f3a3.
+  Software-only; NO machine deployment, NO machine verification (no Python on the
+  Windows authoring box — the change is unexecuted and needs a run on the lathe PC).
+- Task: the velocity MPG jog presets become Extra Slow, Slow, Medium, Fast (were
+  Slow, Medium, Fast). Extra Slow = old Slow value, Slow = old Medium value, new
+  Medium = geometric midpoint of old Medium and old Fast, Fast unchanged. The two
+  position presets (.0002 / .001) and DEFAULT_JOG_MODE_INDEX are untouched.
+- Claimed paths (Claude HAL/manual lane; no overlap with Codex CAM claims):
+  hal/constants.py (JOG_MODES), industry-cam.hal (mux8.jogscale-x/z in4/in5 +
+  comments), postgui.hal (unloaded-stub comments), gui/help_tab.py (MPG Modes
+  table), hal/live_backend.py (set_mpg_scale_index docstring). mux8 select logic
+  is unchanged; index 5 was already reachable (in5 held the Fast fallback value).
+- Codex: no CAM/planner/writer/INI/tool-table files touched. Shout if you hold
+  uncommitted work in any of the above (none expected — this is the jog GUI/HAL).
+- State: active. Will update to review-ready with the PR link when done.
+
 ## 2026-11-19 UTC — SUITE RUN, REVIEW-READY: 28fb225 on claude/zero-finish-allowance
 - Owner shut LinuxCNC down, so the suite gate opened. FULL SUITE: 1556 passed / 2 failed.
   Arithmetic: 1539 baseline + 19 new - 2 now-failing = 1556. Architecture still 15 errors /
