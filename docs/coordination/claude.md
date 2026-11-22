@@ -1,6 +1,6 @@
 # Claude status
 
-## 2026-11-22 — REVIEW-READY (side session): two PRs, claims released
+## 2026-11-22 — REVIEW-READY (side session): three PRs, claims released
 - **PR #7** `feat/jog-speed-extra-slow-preset` (commit 6a9c8a2, base main cd2f3a3):
   adds the "Extra Slow" MPG velocity jog preset → Extra Slow / Slow / Medium /
   Fast. hal/constants.py, industry-cam.hal (mux8 in4/in5), hal/live_backend.py,
@@ -12,6 +12,11 @@
   tests. Fixes 3 Windows run-from failures caused by a leaked single_block=true.
   Claimed path: **tests/conftest.py** only. Codex: no overlap with your CAM test
   files; shout if you hold uncommitted conftest work (none expected).
+- **PR #9** `docs/dev-tooling-real-env` (base main cd2f3a3): rewrites
+  .kiro/steering/dev-tooling.md, which described a fictional Python 3.15 system /
+  3.12 uv venv, to the real Python 3.11.9 .venv (requirements-lathe.txt + PyQt5
+  5.15.9) with the Windows run notes. Docs-only. Claimed path:
+  **.kiro/steering/dev-tooling.md** only.
 - Built a parity test env on the Windows authoring box (was Python-less): Python
   3.11.9 + requirements-lathe.txt versions (incl. cadquery-ocp 7.8.1.1.post1, vtk
   9.3.1, build123d 0.10.0) + PyQt5 5.15.9. Full suite with PR #8: 1400 passed / 1
