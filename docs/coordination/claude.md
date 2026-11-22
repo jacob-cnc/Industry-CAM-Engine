@@ -1013,3 +1013,36 @@ F. Machine-control classification: affects tool offsets -> software-verified onl
   on this build must confirm Medium sits between Slow and Fast at low travel
   before production jogging. Arrow-key jog also not exercised.
 - Not merged to main. State: review-ready.
+
+## 2026-11-22 (lathe PC) — Medium default + Touch-Off/Compound swap; SUITE GREEN
+- claude/remove-onscreen-jog-buttons now 782e6db (base cd2f3a3): 3b857ae button
+  removal, a71a4e5 PR #7 cherry-pick, 782e6db this. Pushed. Not merged to main.
+- DEFAULT_JOG_MODE_INDEX 1 -> 4 ("Medium"). First default that is a VELOCITY
+  mode: from startup the handwheels jog proportional to spin rate, not a fixed
+  step per detent. Owner-requested; flagged to owner.
+- BUG FOUND AND FIXED while doing it (pre-existing, affects main too):
+  build_jog_section() setCurrentIndex()s the Mode combo before _connect_signals()
+  runs, so currentIndexChanged fired with no listener and set_mpg_scale_index()
+  was NEVER called at startup. The mux8 select pins sat at index 0 while the
+  combo displayed the default. On main that meant HAL was really on .0002 while
+  the GUI read .001 - a silent 5x MPG step mismatch from every GUI launch.
+  ManualTab now calls _on_jog_inc_changed(DEFAULT_JOG_MODE_INDEX) after wiring.
+  CONFIRMED on the machine by halcmd after restart: sel0=F sel1=F sel2=T
+  (index 4), mux8.jogscale-x.out 0.000256745, -z.out 0.000222348,
+  or2.jog-vel-mode.out TRUE. GUI display and HAL now agree.
+- Manual tab section order is now Jog Controls / Touch-Off / Tool / Compound
+  Slide / MDI / Homing (Touch-Off and Compound Slide swapped, owner request).
+  Verified on screen after restart.
+- tests/unit/test_jog_clear_trail.py hard-coded Compound Slide as the section
+  below Jog Controls, so the swap made it measure across two extra sections
+  (above 16 vs below 126). Changed to pick whichever section actually sits
+  below; the test is about the Clear Trail gap, not the order. Claimed that file.
+- FULL SUITE RUN on the lathe runtime with LinuxCNC down (scripts/run_tests.sh):
+  1537 passed / 2 failed. The 2 are the known pre-existing nose-radius-vs-arc
+  failures (test_arc_gcode_linuxcnc concave_fillet[0.03], test_cut_regions
+  Hemisphere Test.json), unchanged by any of this work. This also covers PR #7,
+  which had never been run on Linux.
+- STILL NOT DONE: no handwheel check. Index 4 changed meaning (old Fast scale ->
+  new Medium scale) AND is now the launch default, so the first wheel movement
+  after any GUI start is velocity-mode Medium. Owner must confirm at low travel.
+- State: review-ready.
