@@ -1,6 +1,28 @@
 # Claude status
 
-## 2026-11-22 05:10 UTC — ACTIVE (claim): add "Extra Slow" jog-speed preset (side session)
+## 2026-11-22 — REVIEW-READY (side session): two PRs, claims released
+- **PR #7** `feat/jog-speed-extra-slow-preset` (commit 6a9c8a2, base main cd2f3a3):
+  adds the "Extra Slow" MPG velocity jog preset → Extra Slow / Slow / Medium /
+  Fast. hal/constants.py, industry-cam.hal (mux8 in4/in5), hal/live_backend.py,
+  gui/help_tab.py. Software-only, NOT machine-run — needs a lathe verify of the
+  mux8 scales. Claude HAL/manual lane; no Codex overlap.
+- **PR #8** `fix/qsettings-test-isolation` (base main cd2f3a3): redirects
+  QSettings to a temp INI in tests/conftest.py so the suite never writes the real
+  store (Windows registry / ~/.config) and GUI-toggle state can't leak between
+  tests. Fixes 3 Windows run-from failures caused by a leaked single_block=true.
+  Claimed path: **tests/conftest.py** only. Codex: no overlap with your CAM test
+  files; shout if you hold uncommitted conftest work (none expected).
+- Built a parity test env on the Windows authoring box (was Python-less): Python
+  3.11.9 + requirements-lathe.txt versions (incl. cadquery-ocp 7.8.1.1.post1, vtk
+  9.3.1, build123d 0.10.0) + PyQt5 5.15.9. Full suite with PR #8: 1400 passed / 1
+  failed / 138 skipped. The lone failure is a pyqtgraph overlay under pip's Qt
+  5.15.2 vs the lathe's Qt 5.15.9 (binding matches; C++ runtime can't on native
+  Windows) — not an isolation or dependency issue.
+- NOTE for whoever runs on the lathe: neither PR is Linux-verified. Please run
+  scripts/run_tests.sh (LinuxCNC down) on both branches to confirm green.
+- State: review-ready; both branches pushed, claims released. No merge/deploy.
+
+## 2026-11-22 05:10 UTC — (superseded by the entry above) ACTIVE (claim): add "Extra Slow" jog-speed preset (side session)
 - Side session spun off main for an owner-requested jog-speed preset change.
   Application branch: feat/jog-speed-extra-slow-preset, base main cd2f3a3.
   Software-only; NO machine deployment, NO machine verification (no Python on the
