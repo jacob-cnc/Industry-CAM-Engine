@@ -1,7 +1,7 @@
 """Block list widget for multi-operation program management.
 
 Displays an ordered list of machining operation blocks (profile, threading,
-grooving, parting) with controls for add, delete, duplicate, and reorder.
+grooving, parting, drilling) with controls for add, delete, duplicate, and reorder.
 
 Each block shows its type, tool number, and has a visibility toggle for
 the graph display.
@@ -35,9 +35,14 @@ BLOCK_TYPE_INFO = {
     "grooving_od": {"label": "Grooving OD", "color": "#E5A84B"},
     "grooving_id": {"label": "Grooving ID", "color": "#C98A30"},
     "parting": {"label": "Parting", "color": "#E56E72"},
+    "drilling": {"label": "Drilling", "color": "#6FA8C7"},
 }
 
-# What block types are available in the Add menu
+# What block types are available in the Add menu.
+# NOTE: "drilling" is intentionally NOT listed yet — the engine (DrillingPlanner /
+# write_drilling_block) and the "drilling" block type exist, but the DrillingPanel
+# and the program-tab generate dispatch land in the next phase. It stays in
+# BLOCK_TYPE_INFO so a hand-authored/loaded program with a drilling block is valid.
 ADDABLE_BLOCK_TYPES = [
     "od_profile", "id_profile",
     "threading_od", "threading_id",
@@ -329,6 +334,7 @@ class BlockListWidget(QWidget):
             "grooving_od": 4,
             "grooving_id": 4,
             "parting": 5,
+            "drilling": 6,
         }
         return defaults.get(block_type, 1)
 
